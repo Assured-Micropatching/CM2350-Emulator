@@ -1,0 +1,961 @@
+import unittest
+import random
+import queue
+import time
+
+import envi.bits as e_bits
+from .. import CM2350
+from cm2350 import intc_exc
+
+import envi.archs.ppc.const as eapc
+import envi.archs.ppc.regs as eapr
+
+import logging
+logger = logging.getLogger(__name__)
+
+
+SWT_MCR     = 0xfff38000
+SWT_IR      = 0xfff38004
+SWT_TO      = 0xfff38008
+SWT_WN      = 0xfff3800C
+SWT_SR      = 0xfff38010
+SWT_CO      = 0xfff38014
+SWT_SK      = 0xfff38018
+
+SWT_MCR_IDX = 0
+SWT_IR_IDX  = 1
+SWT_TO_IDX  = 2
+SWT_WN_IDX  = 3
+SWT_SR_IDX  = 4
+SWT_CO_IDX  = 5
+SWT_SK_IDX  = 6
+
+# SWT peripheral register non-zero values
+SWT_MCR_DEFAULT       = 0xff00010a  # Default when BAM forces SWT to be disabled
+SWT_MCR_ENABLE_WDOG   = 0xff00010b
+SWT_TO_DEFAULT        = 0x0005fcd0
+SWT_MCR_DEFAULT_BYTES = b'\xff\x00\x01\x0a'
+SWT_TO_DEFAULT_BYTES  = b'\x00\x05\xfc\xd0'
+
+
+class MPC5674_WDT_Test(unittest.TestCase):
+    def get_random_pc(self):
+        start, end, perms, filename = self.emu.getMemoryMap(0)
+        return random.randrange(start, end, 4)
+
+    def setUp(self):
+        import os
+        if os.environ.get('LOG_LEVEL', 'INFO') == 'DEBUG':
+            args = ['-m', 'test', '-c', '-vvv']
+        else:
+            args = ['-m', 'test', '-c']
+        self.ECU = CM2350(args)
+        self.emu = self.ECU.emu
+
+        # Set the INTC[CPR] to 0 to allow all peripheral (external) exception
+        # priorities to happen
+        self.emu.intc.registers.cpr.pri = 0
+        msr_val = self.emu.getRegister(eapr.REG_MSR)
+
+        # Enable all possible Exceptions so if anything happens it will be
+        # detected by the _getPendingExceptions utility
+        msr_val |= eapc.MSR_EE_MASK | eapc.MSR_CE_MASK | eapc.MSR_ME_MASK | eapc.MSR_DE_MASK
+        self.emu.setRegister(eapr.REG_MSR, msr_val)
+
+        # Enable the timebase (normally done by writing a value to HID0)
+        # But for the watchdog tests enable the timebase paused so there is more
+        # control over time
+        self.emu.enableTimebase(start_paused=True)
+
+    def _getPendingExceptions(self):
+        pending_excs = []
+        for intq in self.emu.mcu_intc.intqs[1:]:
+            try:
+                while True:
+                    pending_excs.append(intq.get_nowait())
+            except queue.Empty:
+                pass
+        return pending_excs
+
+    def tearDown(self):
+        # Ensure that there are no unprocessed exceptions
+        pending_excs = self._getPendingExceptions()
+        for exc in pending_excs:
+            print('Unhanded PPC Exception %s' % exc)
+        self.assertEqual(pending_excs, [])
+
+    def test_swt_mcr_defaults(self):
+        self.assertEqual(self.emu.readMemory(SWT_MCR, 4), SWT_MCR_DEFAULT_BYTES)
+        self.assertEqual(self.emu.readMemValue(SWT_MCR, 4), SWT_MCR_DEFAULT)
+        self.assertEqual(self.emu.swt.registers.mcr.map, 0xFF)
+        self.assertEqual(self.emu.swt.registers.mcr.key, 0)
+        self.assertEqual(self.emu.swt.registers.mcr.ria, 1)
+        self.assertEqual(self.emu.swt.registers.mcr.wnd, 0)
+        self.assertEqual(self.emu.swt.registers.mcr.itr, 0)
+        self.assertEqual(self.emu.swt.registers.mcr.hlk, 0)
+        self.assertEqual(self.emu.swt.registers.mcr.slk, 0)
+        self.assertEqual(self.emu.swt.registers.mcr.csl, 1)
+        self.assertEqual(self.emu.swt.registers.mcr.stp, 0)
+        self.assertEqual(self.emu.swt.registers.mcr.frz, 1)
+
+        # The reset default of MCR[WEN] is 1 but BAM may set it to false if the
+        # RCHW does not have the SWT configuration bit set. Because this test is
+        # run with no firmware SWT will never be set so BAM will change MCR[WEN]
+        # to 0.
+        self.assertEqual(self.emu.swt.registers.mcr.wen, 0)
+
+    def test_swt_disable(self):
+        # Default enabled and running
+        self.assertEqual(self.emu.readMemValue(SWT_MCR, 4), SWT_MCR_DEFAULT)
+
+        # SWT disabled by BAM by default
+        self.assertEqual(self.emu.swt.registers.mcr.wen, 0)
+        self.assertEqual(self.emu.swt.watchdog.running(), False)
+
+        # Re-enable the watchdog
+        self.emu.writeMemValue(SWT_MCR, SWT_MCR_ENABLE_WDOG, 4)
+        self.assertEqual(self.emu.readMemValue(SWT_MCR, 4), SWT_MCR_ENABLE_WDOG)
+        self.assertEqual(self.emu.swt.registers.mcr.wen, 1)
+        self.assertEqual(self.emu.swt.watchdog.running(), True)
+
+        # But because the SLK or HLK are not set it can be disabled by changing
+        # MCR[WEN]
+        clear_wen_val = SWT_MCR_ENABLE_WDOG & 0xFFFFFFFE
+        self.emu.writeMemValue(SWT_MCR, clear_wen_val, 4)
+        self.assertEqual(self.emu.readMemValue(SWT_MCR, 4), clear_wen_val)
+
+        self.assertEqual(self.emu.swt.registers.mcr.wen, 0)
+        self.assertEqual(self.emu.swt.watchdog.running(), False)
+
+        # Ensure the rest of the MCR fields were not modified (defaults used
+        # from the test_swt_mcr_defaults() test)
+        #
+        # Some registers have side effects when writing values, changing WEN
+        # from 1 to 0 should have no side effects other than stopping the
+        # watchdog timer.
+        self.assertEqual(self.emu.swt.registers.mcr.map, 0xFF)
+        self.assertEqual(self.emu.swt.registers.mcr.key, 0)
+        self.assertEqual(self.emu.swt.registers.mcr.ria, 1)
+        self.assertEqual(self.emu.swt.registers.mcr.wnd, 0)
+        self.assertEqual(self.emu.swt.registers.mcr.itr, 0)
+        self.assertEqual(self.emu.swt.registers.mcr.hlk, 0)
+        self.assertEqual(self.emu.swt.registers.mcr.slk, 0)
+        self.assertEqual(self.emu.swt.registers.mcr.csl, 1)
+        self.assertEqual(self.emu.swt.registers.mcr.stp, 0)
+        self.assertEqual(self.emu.swt.registers.mcr.frz, 1)
+
+    def test_swt_reenable(self):
+        # SWT disabled by BAM by default
+        self.assertEqual(self.emu.readMemValue(SWT_MCR, 4), SWT_MCR_DEFAULT)
+        self.assertEqual(self.emu.readMemory(SWT_MCR, 4), SWT_MCR_DEFAULT_BYTES)
+        self.assertEqual(self.emu.swt.registers.mcr.wen, 0)
+        self.assertEqual(self.emu.swt.watchdog.running(), False)
+
+        # Enable
+        self.emu.writeMemValue(SWT_MCR, SWT_MCR_ENABLE_WDOG, 4)
+        self.assertEqual(self.emu.readMemValue(SWT_MCR, 4), SWT_MCR_ENABLE_WDOG)
+        self.assertEqual(self.emu.readMemory(SWT_MCR, 4), b'\xff\x00\x01\x0b')
+        self.assertEqual(self.emu.swt.registers.mcr.wen, 1)
+        self.assertEqual(self.emu.swt.watchdog.running(), True)
+
+        # Disable
+        clear_wen_val = SWT_MCR_ENABLE_WDOG & 0xFFFFFFFE
+        self.assertEqual(clear_wen_val, SWT_MCR_DEFAULT)
+        self.emu.writeMemValue(SWT_MCR, clear_wen_val, 4)
+        self.assertEqual(self.emu.readMemValue(SWT_MCR, 4), SWT_MCR_DEFAULT)
+        self.assertEqual(self.emu.readMemory(SWT_MCR, 4), SWT_MCR_DEFAULT_BYTES)
+        self.assertEqual(self.emu.swt.registers.mcr.wen, 0)
+        self.assertEqual(self.emu.swt.watchdog.running(), False)
+
+        # Re-Enable
+        self.emu.writeMemValue(SWT_MCR, SWT_MCR_ENABLE_WDOG, 4)
+        self.assertEqual(self.emu.readMemValue(SWT_MCR, 4), SWT_MCR_ENABLE_WDOG)
+        self.assertEqual(self.emu.readMemory(SWT_MCR, 4), b'\xff\x00\x01\x0b')
+        self.assertEqual(self.emu.swt.registers.mcr.wen, 1)
+        self.assertEqual(self.emu.swt.watchdog.running(), True)
+
+    def test_swt_ir_defaults(self):
+        self.assertEqual(self.emu.readMemory(SWT_IR, 4), b'\x00\x00\x00\x00')
+        self.assertEqual(self.emu.readMemValue(SWT_IR, 4), 0)
+        self.assertEqual(self.emu.swt.registers.ir.tif, 0)
+
+    def test_swt_ir_write_one_to_clear(self):
+        # IR[TIF] should be 0 by default
+        self.assertEqual(self.emu.swt.registers.ir.tif, 0)
+
+        # Manually set the SWT IR[TIF] flag
+        self.emu.swt.registers.ir.vsOverrideValue('tif', 1)
+        self.assertEqual(self.emu.readMemValue(SWT_IR, 4), 1)
+        self.assertEqual(self.emu.swt.registers.ir.tif, 1)
+
+        # Attempt to clear by writing 0, ensure it doesn't work
+        self.emu.writeMemValue(SWT_IR, 0, 4)
+        self.assertEqual(self.emu.readMemValue(SWT_IR, 4), 1)
+        self.assertEqual(self.emu.swt.registers.ir.tif, 1)
+
+        # Now write 1
+        self.emu.writeMemValue(SWT_IR, 1, 4)
+        self.assertEqual(self.emu.readMemValue(SWT_IR, 4), 0)
+        self.assertEqual(self.emu.swt.registers.ir.tif, 0)
+
+    def test_swt_to_defaults(self):
+        self.assertEqual(self.emu.readMemory(SWT_TO, 4), SWT_TO_DEFAULT_BYTES)
+        self.assertEqual(self.emu.readMemValue(SWT_TO, 4), SWT_TO_DEFAULT)
+        self.assertEqual(self.emu.swt.registers.to.wto, SWT_TO_DEFAULT)
+
+        # The SWT is enabled and running by default, ensure that the timeout
+        # period matches the default TO value
+        self.assertEqual(self.emu.swt.watchdog.period, SWT_TO_DEFAULT)
+
+    def test_swt_wn_defaults(self):
+        self.assertEqual(self.emu.readMemory(SWT_WN, 4), b'\x00\x00\x00\x00')
+        self.assertEqual(self.emu.readMemValue(SWT_WN, 4), 0)
+        self.assertEqual(self.emu.swt.registers.wn.wst, 0)
+
+    def test_swt_sr_defaults(self):
+        # SR should always return 0
+        self.assertEqual(self.emu.readMemory(SWT_SR, 4), b'\x00\x00\x00\x00')
+        self.assertEqual(self.emu.readMemValue(SWT_SR, 4), 0)
+
+        # Valid writes to the SR register aren't simple so are tested in the
+        # lock/unlock and watchdog service tests. Valid values to write are
+        # either the unlock sequence (0xC520, 0xD928), the "standard" service
+        # keys (0xA602, 0xB480), or pseudo-random generated keys if SWT MCR[KEY]
+        # is set.
+
+        # The SLK and SK indexes should be 0
+        self.assertEqual(self.emu.swt._slk_idx, 0)
+        self.assertEqual(self.emu.swt._sk_idx, 0)
+
+        # Write an invalid value to the SWT SR register, invalid SR values
+        # should be ignored
+        self.emu.writeMemory(SWT_SR, b'\xA5\xA5\xA5\xA5')
+
+        # SLK and SK indexes should be unchanged
+        self.assertEqual(self.emu.swt._slk_idx, 0)
+        self.assertEqual(self.emu.swt._sk_idx, 0)
+
+    def test_swt_co_defaults(self):
+        # Enable the watchdog
+        self.emu.writeMemValue(SWT_MCR, SWT_MCR_ENABLE_WDOG, 4)
+        self.assertEqual(self.emu.swt.watchdog.running(), True)
+
+        # The SWT CO register should reflect the amount of time left before the
+        # watchdog timer expires. Because the system starts paused it should
+        # have the same value as the TO initialization value
+        self.assertEqual(self.emu.readMemory(SWT_CO, 4), SWT_TO_DEFAULT_BYTES)
+        self.assertEqual(self.emu.readMemValue(SWT_CO, 4), SWT_TO_DEFAULT)
+
+        # There is no "co" attribute in the SWT class so it can't be
+        # read directly.
+
+        # Stop the watchdog timer
+        clear_wen_val = SWT_MCR_ENABLE_WDOG & 0xFFFFFFFE
+        self.emu.writeMemValue(SWT_MCR, clear_wen_val, 4)
+        self.assertEqual(self.emu.swt.watchdog.running(), False)
+
+        # When the watchdog is not running CO should be 0
+        self.assertEqual(self.emu.readMemory(SWT_CO, 4), b'\x00\x00\x00\x00')
+        self.assertEqual(self.emu.readMemValue(SWT_CO, 4), 0)
+
+    def test_swt_invalid_access_error_ria_set_wen_set(self):
+        start = 0xfff3801C  # SWT_SK + 4
+        stop = 0xfff3C000 - 4
+
+        # writing or reading invalid memory addresses should result in
+        # a SYSTEM_RESET if SWT MCR[RIA] is set and MCR[WEN] is set, or a Bus
+        # Error (MCE) if RIA is not set.
+
+        # SWT MCR[RIA] should be enabled by default
+        self.assertEqual(self.emu.swt.registers.mcr.ria, 1)
+
+        # But the watchdog is not enabled by default (disabled by BAM)
+        self.assertEqual(self.emu.swt.registers.mcr.wen, 0)
+
+        # Enable the watchdog now to ensure test that invalid accesses generate
+        # resets
+        self.emu.writeMemValue(SWT_MCR, SWT_MCR_ENABLE_WDOG, 4)
+        self.assertEqual(self.emu.readMemValue(SWT_MCR, 4), SWT_MCR_ENABLE_WDOG)
+        self.assertEqual(self.emu.swt.registers.mcr.wen, 1)
+        self.assertEqual(self.emu.swt.watchdog.running(), True)
+
+        # Test min invalid, max invalid and a few in between
+        test_addrs = [start, stop] + [random.randrange(start, stop, 4) for i in range(3)]
+
+        # Values to write for each test
+        test_vals = [random.getrandbits(32) for i in range(len(test_addrs))]
+
+        for test_addr, test_val in zip(test_addrs, test_vals):
+            # Pretend these reads and writes are happening from a random
+            # instruction
+            test_pc = self.get_random_pc()
+            self.emu.setProgramCounter(test_pc)
+
+            # Read the test address
+            # This should generate a ResetException
+            msg = 'invalid read from 0x%x' % test_addr
+            with self.assertRaises(intc_exc.ResetException, msg=msg) as cm:
+                self.emu.readMemory(test_addr, 4)
+            self.assertEqual(cm.exception.kwargs, {}, msg=msg)
+
+            # Write the test value to the test address
+            msg = 'invalid write of 0x%x to 0x%x' % (test_val, test_addr)
+            with self.assertRaises(intc_exc.ResetException, msg=msg) as cm:
+                self.emu.writeMemValue(test_addr, test_val, 4)
+            self.assertEqual(cm.exception.kwargs, {}, msg=msg)
+
+    def test_swt_invalid_access_error_ria_clear_wen_set(self):
+        # Enable the watchdog
+        mcr_val = SWT_MCR_ENABLE_WDOG
+        self.emu.writeMemValue(SWT_MCR, mcr_val, 4)
+        self.assertEqual(self.emu.swt.registers.mcr.wen, 1)
+        self.assertEqual(self.emu.swt.watchdog.running(), True)
+
+        start = 0xfff3801C  # SWT_SK + 4
+        stop  = 0xfff3C000 - 4
+
+        # writing or reading invalid memory addresses should result in
+        # a ResetException if SWT MCR[RIA] is set, or a Bus Error (MCE) if RIA is
+        # not set.
+
+        # SWT MCR[RIA] should be enabled by default
+        self.assertEqual(self.emu.swt.registers.mcr.ria, 1)
+
+        # But for this test we want RIA to not be set
+        clear_ria_val = mcr_val & 0xFFFFFEFF
+        self.emu.writeMemValue(SWT_MCR, clear_ria_val, 4)
+        self.assertEqual(self.emu.readMemValue(SWT_MCR, 4), clear_ria_val)
+        self.assertEqual(self.emu.swt.registers.mcr.ria, 0)
+
+        # Test min invalid, max invalid and a few in between
+        test_addrs = [start, stop] + [random.randrange(start, stop, 4) for i in range(3)]
+
+        # Values to write for each test
+        test_vals = [random.getrandbits(32) for i in range(len(test_addrs))]
+
+        for test_addr, test_val in zip(test_addrs, test_vals):
+            # Pretend these reads and writes are happening from a random
+            # instruction
+            test_pc = self.get_random_pc()
+            self.emu.setProgramCounter(test_pc)
+
+            # Before the test is run the list of pending exceptions should be
+            # empty
+            self.assertEqual(self._getPendingExceptions(), [])
+
+            # Ensure that reading the test address creates a pending
+            # MceDataReadBusError (the correct specific MCE variation)
+            msg = 'invalid read from 0x%x' % test_addr
+            with self.assertRaises(intc_exc.MceDataReadBusError, msg=msg) as cm:
+                self.emu.readMemory(test_addr, 4)
+
+            args = {
+                'va': test_addr,
+                'pc': test_pc,
+                'data': b'',
+            }
+            self.assertEqual(cm.exception.kwargs, args, msg=msg)
+
+            # Ensure that writing the test address creates a pending
+            # MceDataReadBusError (the correct specific MCE variation)
+            msg = 'invalid write of 0x%x to 0x%x' % (test_val, test_addr)
+            with self.assertRaises(intc_exc.MceWriteBusError, msg=msg) as cm:
+                self.emu.writeMemValue(test_addr, test_val, 4)
+
+            args = {
+                'va': test_addr,
+                'data': e_bits.buildbytes(test_val, 4, self.emu.getEndian()),
+                'pc': test_pc,
+                'written': 0,
+            }
+            self.assertEqual(cm.exception.kwargs, args, msg=msg)
+
+    def test_swt_ro_reg_writes_sysreset(self):
+        # Writes to read-only registers should generate Bus Errors or resets
+        # depending on RIA
+        unlocked_ro_regs = [SWT_CO]
+        locked_ro_regs = [SWT_MCR, SWT_TO, SWT_WN, SWT_CO, SWT_SK]
+
+        # SWT MCR[RIA] is set by default
+        self.assertEqual(self.emu.swt.registers.mcr.ria, 1)
+
+        # But the watchdog is not enabled by default (disabled by BAM)
+        self.assertEqual(self.emu.swt.registers.mcr.wen, 0)
+
+        # Enable the watchdog now to ensure test that invalid accesses generate
+        # resets
+        self.emu.writeMemValue(SWT_MCR, SWT_MCR_ENABLE_WDOG, 4)
+        self.assertEqual(self.emu.readMemValue(SWT_MCR, 4), SWT_MCR_ENABLE_WDOG)
+        self.assertEqual(self.emu.swt.registers.mcr.wen, 1)
+        self.assertEqual(self.emu.swt.watchdog.running(), True)
+
+        # SWT is unlocked by default
+        self.assertEqual(self.emu.swt.registers.mcr.slk, 0)
+        self.assertEqual(self.emu.swt.registers.mcr.hlk, 0)
+        self.assertEqual(self.emu.swt.locked(), False)
+
+        test_vals = [random.getrandbits(32) for i in range(len(unlocked_ro_regs))]
+        for test_addr, test_val in zip(unlocked_ro_regs, test_vals):
+            # Pretend these reads and writes are happening from a random
+            # instruction
+            test_pc = self.get_random_pc()
+            self.emu.setProgramCounter(test_pc)
+
+            # Should be no pending exceptions by default
+            self.assertEqual(self._getPendingExceptions(), [])
+
+            msg = 'invalid write of 0x%x to 0x%x' % (test_val, test_addr)
+            with self.assertRaises(intc_exc.ResetException, msg=msg) as cm:
+                self.emu.writeMemValue(test_addr, test_val, 4)
+            self.assertEqual(cm.exception.kwargs, {}, msg=msg)
+
+        # Lock the SWT and try again
+        lock_swt_val = SWT_MCR_ENABLE_WDOG | 0x00000010
+        self.emu.writeMemValue(SWT_MCR, lock_swt_val, 4)
+        self.assertEqual(self.emu.readMemValue(SWT_MCR, 4), lock_swt_val)
+        self.assertEqual(self.emu.swt.registers.mcr.hlk, 0)
+        self.assertEqual(self.emu.swt.registers.mcr.slk, 1)
+        self.assertEqual(self.emu.swt.locked(), True)
+
+        test_vals = [random.getrandbits(32) for i in range(len(unlocked_ro_regs))]
+        for test_addr, test_val in zip(unlocked_ro_regs, test_vals):
+            # Pretend these reads and writes are happening from a random
+            # instruction
+            test_pc = self.get_random_pc()
+            self.emu.setProgramCounter(test_pc)
+
+            # Should be no pending exceptions by default
+            self.assertEqual(self._getPendingExceptions(), [])
+
+            msg = 'invalid write of 0x%x to 0x%x' % (test_val, test_addr)
+            with self.assertRaises(intc_exc.ResetException, msg=msg) as cm:
+                self.emu.writeMemValue(test_addr, test_val, 4)
+            self.assertEqual(cm.exception.kwargs, {}, msg=msg)
+
+    def test_swt_ro_reg_writes_buserror(self):
+        # Writes to read-only registers should generate Bus Errors or resets
+        # depending on RIA
+        unlocked_ro_regs = [SWT_CO]
+        locked_ro_regs = [SWT_MCR, SWT_TO, SWT_WN, SWT_CO, SWT_SK]
+
+        # SWT MCR[RIA] is set by default
+        self.assertEqual(self.emu.swt.registers.mcr.ria, 1)
+
+        # Clear RIA so we get Bus Errors instead of System Resets
+        clear_ria_val = SWT_MCR_ENABLE_WDOG & 0xFFFFFEFF
+        self.emu.writeMemValue(SWT_MCR, clear_ria_val, 4)
+        self.assertEqual(self.emu.readMemValue(SWT_MCR, 4), clear_ria_val)
+        self.assertEqual(self.emu.swt.registers.mcr.ria, 0)
+
+        # SWT is unlocked by default
+        self.assertEqual(self.emu.swt.registers.mcr.slk, 0)
+        self.assertEqual(self.emu.swt.registers.mcr.hlk, 0)
+        self.assertEqual(self.emu.swt.locked(), False)
+
+        test_vals = [random.getrandbits(32) for i in range(len(unlocked_ro_regs))]
+        for test_addr, test_val in zip(unlocked_ro_regs, test_vals):
+            # Pretend these reads and writes are happening from a random
+            # instruction
+            test_pc = self.get_random_pc()
+            self.emu.setProgramCounter(test_pc)
+
+            # Should be no pending exceptions by default
+            self.assertEqual(self._getPendingExceptions(), [])
+
+            msg = 'invalid write of 0x%x to 0x%x' % (test_val, test_addr)
+            with self.assertRaises(intc_exc.MceWriteBusError, msg=msg) as cm:
+                self.emu.writeMemValue(test_addr, test_val, 4)
+
+            args = {
+                'va': test_addr,
+                'data': e_bits.buildbytes(test_val, 4, self.emu.getEndian()),
+                'pc': test_pc,
+                'written': 0,
+            }
+            self.assertEqual(cm.exception.kwargs, args, msg=msg)
+
+        # Lock the SWT and try again
+        lock_swt_val = clear_ria_val | 0x00000010
+        self.emu.writeMemValue(SWT_MCR, lock_swt_val, 4)
+        self.assertEqual(self.emu.readMemValue(SWT_MCR, 4), lock_swt_val)
+        self.assertEqual(self.emu.swt.registers.mcr.hlk, 0)
+        self.assertEqual(self.emu.swt.registers.mcr.slk, 1)
+        self.assertEqual(self.emu.swt.locked(), True)
+
+        test_vals = [random.getrandbits(32) for i in range(len(unlocked_ro_regs))]
+        for test_addr, test_val in zip(unlocked_ro_regs, test_vals):
+            # Pretend these reads and writes are happening from a random
+            # instruction
+            test_pc = self.get_random_pc()
+            self.emu.setProgramCounter(test_pc)
+
+            # Should be no pending exceptions by default
+            self.assertEqual(self._getPendingExceptions(), [])
+
+            msg = 'invalid write of 0x%x to 0x%x' % (test_val, test_addr)
+            with self.assertRaises(intc_exc.MceWriteBusError, msg=msg) as cm:
+                self.emu.writeMemValue(test_addr, test_val, 4)
+
+            args = {
+                'va': test_addr,
+                'data': e_bits.buildbytes(test_val, 4, self.emu.getEndian()),
+                'pc': test_pc,
+                'written': 0,
+            }
+            self.assertEqual(cm.exception.kwargs, args, msg=msg)
+
+    def test_swt_softlock(self):
+        # Enable the watchdog
+        self.emu.writeMemValue(SWT_MCR, SWT_MCR_ENABLE_WDOG, 4)
+
+        # SWT is unlocked by default
+        self.assertEqual(self.emu.swt.registers.mcr.slk, 0)
+        self.assertEqual(self.emu.swt.registers.mcr.hlk, 0)
+        self.assertEqual(self.emu.swt.locked(), False)
+
+        # Set the SLK flag
+        lock_swt_val = SWT_MCR_ENABLE_WDOG | 0x00000010
+        self.emu.writeMemValue(SWT_MCR, lock_swt_val, 4)
+        self.assertEqual(self.emu.readMemValue(SWT_MCR, 4), lock_swt_val)
+        self.assertEqual(self.emu.swt.registers.mcr.hlk, 0)
+        self.assertEqual(self.emu.swt.registers.mcr.slk, 1)
+        self.assertEqual(self.emu.swt.locked(), True)
+
+        # Before a reset the ECSM MRSR[SWTR] should be 0 and MRSR[POR] should be
+        # set since this was the first boot.
+        self.assertEqual(self.emu.ecsm.registers.mrsr.por, 1)
+        self.assertEqual(self.emu.ecsm.registers.mrsr.dir, 0)
+        self.assertEqual(self.emu.ecsm.registers.mrsr.swtr, 0)
+
+        # Attempt to unlock by writing to MCR and ensure this fails
+        with self.assertRaises(intc_exc.ResetException) as cm:
+            self.emu.writeMemValue(SWT_MCR, SWT_MCR_ENABLE_WDOG, 4)
+        self.assertEqual(cm.exception.kwargs, {})
+
+        # MCR values should be unchanged
+        self.assertEqual(self.emu.readMemValue(SWT_MCR, 4), lock_swt_val)
+        self.assertEqual(self.emu.swt.registers.mcr.hlk, 0)
+        self.assertEqual(self.emu.swt.registers.mcr.slk, 1)
+        self.assertEqual(self.emu.swt.locked(), True)
+
+        # After a non-watchdog reset the ECSM MRSR[SWTR] and MRSR[POR] should be
+        # 0 and MRSR[DIR] should be 1
+        self.emu.reset()
+        self.assertEqual(self.emu.ecsm.registers.mrsr.por, 0)
+        self.assertEqual(self.emu.ecsm.registers.mrsr.dir, 1)
+        self.assertEqual(self.emu.ecsm.registers.mrsr.swtr, 0)
+
+        # restart the system timebase but keep it paused
+        self.emu.enableTimebase(start_paused=True)
+
+        # Since we reset, set the SLK flag again
+        lock_swt_val = SWT_MCR_ENABLE_WDOG | 0x00000010
+        self.emu.writeMemValue(SWT_MCR, lock_swt_val, 4)
+        self.assertEqual(self.emu.readMemValue(SWT_MCR, 4), lock_swt_val)
+        self.assertEqual(self.emu.swt.registers.mcr.hlk, 0)
+        self.assertEqual(self.emu.swt.registers.mcr.slk, 1)
+        self.assertEqual(self.emu.swt.locked(), True)
+
+        # Write some values that are not the first unlock key (0xC520) and
+        # ensure that the SLK sequence does not progress
+        # Use the second SLK value and some other random values.
+        invalid_slk_vals = [0, 0xFFFF, 0xB480, 0xD928] + [random.getrandbits(32) for i in range(10)]
+
+        # If one of the random values happens to match the first unlock key
+        # (0xC520) or the first service key (0xA602) drop them from the list of
+        # tests values
+        invalid_slk_vals = [v for v in invalid_slk_vals if v not in (0xA602, 0xC520)]
+
+        # The SLK and SK indexes should be 0
+        self.assertEqual(self.emu.swt._slk_idx, 0)
+        self.assertEqual(self.emu.swt._sk_idx, 0)
+
+        for test_val in invalid_slk_vals:
+            # Write an invalid value to the SWT SR register, invalid SR values
+            # should be ignored
+            self.emu.writeMemValue(SWT_SR, test_val, 4)
+
+            # SLK and SK indexes should be unchanged
+            self.assertEqual(self.emu.swt._slk_idx, 0)
+            self.assertEqual(self.emu.swt._sk_idx, 0)
+
+        # Write the correct first watchdog SK
+        self.emu.writeMemValue(SWT_SR, 0xA602, 4)
+
+        # SLK is unchanged but SK should now be 1
+        self.assertEqual(self.emu.swt._slk_idx, 0)
+        self.assertEqual(self.emu.swt._sk_idx, 1)
+
+        # Write the first SLK unlock value
+        self.emu.writeMemValue(SWT_SR, 0xC520, 4)
+
+        # SLK and SK should now be 1
+        self.assertEqual(self.emu.swt._slk_idx, 1)
+        self.assertEqual(self.emu.swt._sk_idx, 1)
+
+        # Attempt to unlock by writing to MCR and ensure this fails
+        with self.assertRaises(intc_exc.ResetException) as cm:
+            self.emu.writeMemValue(SWT_MCR, SWT_MCR_ENABLE_WDOG, 4)
+        self.assertEqual(cm.exception.kwargs, {})
+
+        # MCR values should be unchanged
+        self.assertEqual(self.emu.readMemValue(SWT_MCR, 4), lock_swt_val)
+        self.assertEqual(self.emu.swt.registers.mcr.hlk, 0)
+        self.assertEqual(self.emu.swt.registers.mcr.slk, 1)
+        self.assertEqual(self.emu.swt.locked(), True)
+
+        # After a non-watchdog reset the ECSM MRSR[SWTR] and MRSR[POR] should be
+        # 0 and MRSR[DIR] should be 1
+        self.emu.reset()
+        self.assertEqual(self.emu.ecsm.registers.mrsr.por, 0)
+        self.assertEqual(self.emu.ecsm.registers.mrsr.dir, 1)
+        self.assertEqual(self.emu.ecsm.registers.mrsr.swtr, 0)
+
+        # restart the system timebase but keep it paused
+        self.emu.enableTimebase(start_paused=True)
+
+        # Since we reset, set the SLK flag again
+        lock_swt_val = SWT_MCR_ENABLE_WDOG | 0x00000010
+        self.emu.writeMemValue(SWT_MCR, lock_swt_val, 4)
+        self.assertEqual(self.emu.readMemValue(SWT_MCR, 4), lock_swt_val)
+        self.assertEqual(self.emu.swt.registers.mcr.hlk, 0)
+        self.assertEqual(self.emu.swt.registers.mcr.slk, 1)
+        self.assertEqual(self.emu.swt.locked(), True)
+
+        # And write write the unlock sequence
+        self.emu.writeMemValue(SWT_SR, 0xA602, 4)
+        self.emu.writeMemValue(SWT_SR, 0xC520, 4)
+
+        # Write some values that are not the second unlock key (0xD928) and
+        # ensure that the SLK sequence does not progress
+        # Use the first SLK value, first SK value, and some other random values.
+        invalid_slk_vals = [0, 0xFFFF, 0xA602, 0xC520] + [random.getrandbits(32) for i in range(10)]
+
+        # If one of the random values happens to match the second unlock key
+        # (0xD928) or the second service key (0xB480) drop them from the list of
+        # tests values
+        invalid_slk_vals = [v for v in invalid_slk_vals if v not in (0xB480, 0xD928)]
+
+        for test_val in invalid_slk_vals:
+            # Write an invalid value to the SWT SR register, invalid SR values
+            # should be ignored
+            self.emu.writeMemValue(SWT_SR, test_val, 4)
+
+            # SLK and SK indexes should be unchanged
+            self.assertEqual(self.emu.swt._slk_idx, 1)
+            self.assertEqual(self.emu.swt._sk_idx, 1)
+
+        # The watchdog hasn't run yet so there should be the full period left
+        wdt_time = SWT_TO_DEFAULT / self.emu.swt.watchdog.freq
+        self.assertEqual(self.emu.swt.watchdog.time(), wdt_time)
+        self.assertEqual(self.emu.swt.watchdog.ticks(), SWT_TO_DEFAULT)
+
+        # Force the system time forward 0.005 emulated seconds (0.005 /
+        # systime_scaling) so we can tell when the watchdog is restarted (do
+        # this by moving starting sysoffset back 0.005 seconds).  Any more than
+        # this and it will cause the watchdog to expire.
+        self.emu._sysoffset -= 0.005 / self.emu._systime_scaling
+        new_time = wdt_time - 0.005
+
+        # Because of the floating point numbers involved with the addition of
+        # the system time (time.time()) the time remaining calculation is only
+        # accurate to within 6 places
+        self.assertAlmostEqual(self.emu.swt.watchdog.time(), new_time, places=6)
+
+        new_ticks = int(new_time * self.emu.swt.watchdog.freq)
+
+        # Because the new times are intentionally calculated differently than
+        # how the watchdog timeouts are calculated the new tick value may be off
+        # by as much as (0.000001 * frequency)
+        tick_delta = 0.000001 * self.emu.swt.watchdog.freq
+        self.assertAlmostEqual(self.emu.swt.watchdog.ticks(), new_ticks, delta=tick_delta)
+
+        # Write the correct second watchdog SK
+        self.emu.writeMemValue(SWT_SR, 0xB480, 4)
+
+        # SLK is unchanged but SK should now be reset back to 0
+        self.assertEqual(self.emu.swt._slk_idx, 1)
+        self.assertEqual(self.emu.swt._sk_idx, 0)
+
+        # The watchdog should still be running but the duration should be back
+        # to the full period
+        self.assertEqual(self.emu.swt.watchdog.running(), True)
+        self.assertAlmostEqual(self.emu.swt.watchdog.time(), wdt_time)
+        self.assertEqual(self.emu.swt.watchdog.ticks(), SWT_TO_DEFAULT)
+
+        # SWT is still locked
+        self.assertEqual(self.emu.swt.registers.mcr.hlk, 0)
+        self.assertEqual(self.emu.swt.registers.mcr.slk, 1)
+        self.assertEqual(self.emu.swt.locked(), True)
+
+        # Now write the correct second unlock key
+        self.emu.writeMemValue(SWT_SR, 0xD928, 4)
+
+        # SLK and SK should be back at 0
+        self.assertEqual(self.emu.swt._slk_idx, 0)
+        self.assertEqual(self.emu.swt._sk_idx, 0)
+        self.assertEqual(self.emu.swt.registers.mcr.hlk, 0)
+        self.assertEqual(self.emu.swt.registers.mcr.slk, 0)
+        self.assertEqual(self.emu.swt.locked(), False)
+        self.assertEqual(self.emu.swt.registers.mcr.wen, 1)
+        self.assertEqual(self.emu.swt.watchdog.running(), True)
+
+        # We should now be able to disable the watchdog
+        clear_wen_val = SWT_MCR_ENABLE_WDOG & 0xFFFFFFFE
+        self.emu.writeMemValue(SWT_MCR, clear_wen_val, 4)
+        self.assertEqual(self.emu.readMemValue(SWT_MCR, 4), clear_wen_val)
+        self.assertEqual(self.emu.swt.registers.mcr.wen, 0)
+        self.assertEqual(self.emu.swt.watchdog.running(), False)
+
+    def test_swt_hardlock(self):
+        # Enable the watchdog
+        self.emu.writeMemValue(SWT_MCR, SWT_MCR_ENABLE_WDOG, 4)
+
+        # SWT is unlocked by default
+        self.assertEqual(self.emu.swt.registers.mcr.slk, 0)
+        self.assertEqual(self.emu.swt.registers.mcr.hlk, 0)
+        self.assertEqual(self.emu.swt.locked(), False)
+
+        # Set the HLK flag
+        lock_swt_val = SWT_MCR_ENABLE_WDOG | 0x00000020
+        self.emu.writeMemValue(SWT_MCR, lock_swt_val, 4)
+        self.assertEqual(self.emu.readMemValue(SWT_MCR, 4), lock_swt_val)
+        self.assertEqual(self.emu.swt.registers.mcr.hlk, 1)
+        self.assertEqual(self.emu.swt.registers.mcr.slk, 0)
+        self.assertEqual(self.emu.swt.locked(), True)
+
+        # Before a reset the ECSM MRSR[SWTR] should be 0 and MRSR[POR] should be
+        # set since this was the first boot.
+        self.assertEqual(self.emu.ecsm.registers.mrsr.por, 1)
+        self.assertEqual(self.emu.ecsm.registers.mrsr.dir, 0)
+        self.assertEqual(self.emu.ecsm.registers.mrsr.swtr, 0)
+
+        # Attempt to unlock by writing to MCR and ensure this fails
+        # This should generate a ResetException
+        with self.assertRaises(intc_exc.ResetException) as cm:
+            self.emu.writeMemValue(SWT_MCR, SWT_MCR_ENABLE_WDOG, 4)
+        self.assertEqual(cm.exception.kwargs, {})
+
+        # Write the soft unlock sequence and ensure that the HLK flag is
+        # unchanged
+        self.emu.writeMemValue(SWT_SR, 0xC520, 4)
+        self.emu.writeMemValue(SWT_SR, 0xD928, 4)
+
+        self.assertEqual(self.emu.readMemValue(SWT_MCR, 4), lock_swt_val)
+        self.assertEqual(self.emu.swt.registers.mcr.hlk, 1)
+        self.assertEqual(self.emu.swt.registers.mcr.slk, 0)
+        self.assertEqual(self.emu.swt.locked(), True)
+
+        # Watchdog should still be running
+        self.assertEqual(self.emu.swt.registers.mcr.wen, 1)
+        self.assertEqual(self.emu.swt.watchdog.running(), True)
+
+        # Attempt to unlock again by writing to MCR and ensure this fails
+        # This should generate a ResetException
+        with self.assertRaises(intc_exc.ResetException) as cm:
+            self.emu.writeMemValue(SWT_MCR, SWT_MCR_ENABLE_WDOG, 4)
+        self.assertEqual(cm.exception.kwargs, {})
+
+        # The reset reason was not a SWT reset so the ECSM MRSR[SWTR] should be
+        # 0, MRSR[POR] is 0, and the MRSR[DIR] is 1
+        self.emu.reset()
+        self.assertEqual(self.emu.ecsm.registers.mrsr.por, 0)
+        self.assertEqual(self.emu.ecsm.registers.mrsr.dir, 1)
+        self.assertEqual(self.emu.ecsm.registers.mrsr.swtr, 0)
+
+    def test_swt_xtal_freq(self):
+        default_extal = self.emu.vw.config.project.MPC5674.FMPLL.extal
+
+        # Enable the watchdog
+        self.emu.writeMemValue(SWT_MCR, SWT_MCR_ENABLE_WDOG, 4)
+
+        # By default the watchdog frequency should be the external oscillator
+        self.assertEqual(self.emu.swt.watchdog.freq, default_extal)
+        wdt_time = SWT_TO_DEFAULT / default_extal
+        self.assertEqual(self.emu.swt.watchdog.time(), wdt_time)
+        self.assertEqual(self.emu.swt.watchdog.ticks(), SWT_TO_DEFAULT )
+
+        self.assertEqual(self.emu.swt.registers.mcr.csl, 1)
+        self.assertEqual(self.emu.swt.registers.mcr.wen, 1)
+        self.assertEqual(self.emu.swt.watchdog.running(), True)
+
+        # Disable the watchdog
+        mcr_val = SWT_MCR_ENABLE_WDOG & 0xFFFFFFFE
+        self.emu.writeMemValue(SWT_MCR, mcr_val, 4)
+        self.assertEqual(self.emu.readMemValue(SWT_MCR, 4), mcr_val)
+        self.assertEqual(self.emu.swt.registers.mcr.csl, 1)
+        self.assertEqual(self.emu.swt.registers.mcr.wen, 0)
+        self.assertEqual(self.emu.swt.watchdog.running(), False)
+
+        # Change MCR[CSL] to use the peripheral clock instead of the external
+        # oscillator, and re-enable the watchdog
+        mcr_val = SWT_MCR_ENABLE_WDOG & 0xFFFFFFF7
+        self.emu.writeMemValue(SWT_MCR, mcr_val, 4)
+        self.assertEqual(self.emu.readMemValue(SWT_MCR, 4), mcr_val)
+        self.assertEqual(self.emu.swt.registers.mcr.csl, 0)
+        self.assertEqual(self.emu.swt.registers.mcr.wen, 1)
+        self.assertEqual(self.emu.swt.watchdog.running(), True)
+
+        # The watchdog clock should now be using the platform/peripheral clock
+        self.assertEqual(self.emu.swt.watchdog.freq, self.emu.siu.f_periph())
+        wdt_time = SWT_TO_DEFAULT / self.emu.siu.f_periph()
+        self.assertEqual(self.emu.swt.watchdog.time(), wdt_time)
+        self.assertEqual(self.emu.swt.watchdog.ticks(), SWT_TO_DEFAULT)
+
+    def test_swt_expire_reset(self):
+        # Enable the watchdog
+        self.emu.writeMemValue(SWT_MCR, SWT_MCR_ENABLE_WDOG, 4)
+
+        # Because this test attempts to test the accuracy of emulated timeouts
+        # force the system time scaling factor to be 0.01 (100 real milliseconds
+        # to 1 emulated millisecond).
+        self.emu._systime_scaling = 0.01
+
+        # Default value of MCR[ITR] is 0 so the first watchdog expiration will
+        # generate a ResetException
+        self.assertEqual(self.emu.swt.registers.mcr.itr, 0)
+        self.assertEqual(self.emu.swt.registers.mcr.wen, 1)
+        self.assertEqual(self.emu.swt.watchdog.running(), True)
+
+        default_extal = self.emu.vw.config.project.MPC5674.FMPLL.extal
+        wdt_time = SWT_TO_DEFAULT / default_extal
+
+        self.assertEqual(self.emu.systime(), 0.0)
+
+        # The default timeout time is 0.00981 seconds, divide the timeout time
+        # by 0.01 to get the real amount of time to sleep for half of the
+        # watchdog time to elapse for the emulator.
+        sleep_time = (wdt_time * 0.5) / self.emu._systime_scaling
+        self.emu.resume()
+        time.sleep(sleep_time)
+        self.emu.halt()
+
+        # It's unlikely the python timing will be accurate enough so that the
+        # system time is now the sleep_time. but it should be less than the
+        # watchdog time
+        self.assertGreater(self.emu.systime(), wdt_time * 0.5)
+        self.assertLess(self.emu.systime(), wdt_time)
+
+        # The watchdog should not have expired yet
+        self.assertEqual(self.emu.swt.watchdog.running(), True)
+
+        self.assertEqual(self._getPendingExceptions(), [])
+
+        # Before the SWT watchdog generates a reset the ECSM MRSR[SWTR] should
+        # be 0 and MRSR[POR] should be set since this was the first boot.
+        self.assertEqual(self.emu.ecsm.registers.mrsr.por, 1)
+        self.assertEqual(self.emu.ecsm.registers.mrsr.dir, 0)
+        self.assertEqual(self.emu.ecsm.registers.mrsr.swtr, 0)
+
+        # Run for a full WDT time
+        sleep_time = wdt_time / self.emu._systime_scaling
+        self.emu.resume()
+        time.sleep(sleep_time)
+        self.emu.halt()
+
+        # The watchdog timer should have expired by now
+        self.assertGreater(self.emu.systime(), wdt_time)
+
+        self.assertEqual(self.emu.swt.watchdog.running(), False)
+        reset_exc = intc_exc.ResetException()
+        self.assertEqual(self._getPendingExceptions(), [reset_exc])
+
+        # Ensure that the ECSM MRSR[SWTR] flag is set and MRSR[POR] is 0
+        self.emu.reset()
+        self.assertEqual(self.emu.ecsm.registers.mrsr.por, 0)
+        self.assertEqual(self.emu.ecsm.registers.mrsr.dir, 0)
+        self.assertEqual(self.emu.ecsm.registers.mrsr.swtr, 1)
+
+    def test_swt_expire_interrupt(self):
+        # Enable the watchdog
+        self.emu.writeMemValue(SWT_MCR, SWT_MCR_ENABLE_WDOG, 4)
+
+        # Because this test attempts to test the accuracy of emulated timeouts
+        # force the system time scaling factor to be 0.01 (100 real milliseconds
+        # to 1 emulated millisecond).
+        self.emu._systime_scaling = 0.01
+
+        # Change MCR[ITR] so that the first watchdog expiration generates an
+        # interrupt, and the second one generates a reset
+        mcr_val = SWT_MCR_ENABLE_WDOG | 0x00000040
+        self.emu.writeMemValue(SWT_MCR, mcr_val, 4)
+        self.assertEqual(self.emu.readMemValue(SWT_MCR, 4), mcr_val)
+
+        self.assertEqual(self.emu.swt.registers.mcr.itr, 1)
+        self.assertEqual(self.emu.swt.registers.mcr.wen, 1)
+        self.assertEqual(self.emu.swt.watchdog.running(), True)
+
+        default_extal = self.emu.vw.config.project.MPC5674.FMPLL.extal
+        wdt_time = SWT_TO_DEFAULT / default_extal
+
+        now = self.emu.systime()
+        logger.debug('0. [%f] (WDT timeout = %f)', now, wdt_time)
+
+        self.assertEqual(self.emu.systime(), 0.0)
+
+        # resume the system time, wait half of the WDT time and then halt the
+        # system again to stop time from counting
+
+        # The default timeout time is 0.00981 seconds, divide the timeout time
+        # by 0.01 to get the real amount of time to sleep for half of the
+        # watchdog time to elapse for the emulator.
+        sleep_time = (wdt_time * 0.5) / self.emu._systime_scaling
+        self.emu.resume()
+        time.sleep(sleep_time)
+        self.emu.halt()
+
+        # It's unlikely the python timing will be accurate enough so that the
+        # system time is now the sleep_time. but it should be less than the
+        # watchdog time
+        now = self.emu.systime()
+        logger.debug('1. [%f] WDT time remaining = %f', now, self.emu.swt.watchdog.time())
+        self.assertGreater(now, wdt_time * 0.5)
+        self.assertLess(now, wdt_time)
+
+        # The watchdog should not have expired yet
+        self.assertEqual(self.emu.swt.watchdog.running(), True)
+        self.assertEqual(self._getPendingExceptions(), [])
+
+        # Run for a full WDT time
+        sleep_time = wdt_time / self.emu._systime_scaling
+        self.emu.resume()
+        time.sleep(sleep_time)
+        self.emu.halt()
+
+        # The watchdog timer should have expired by now, but only once
+        now = self.emu.systime()
+        logger.debug('2. [%f] WDT time remaining = %f', now, self.emu.swt.watchdog.time())
+        self.assertGreater(now, wdt_time * 1.5)
+        self.assertLess(now, wdt_time * 2)
+
+        self.assertEqual(self.emu.swt.watchdog.running(), True)
+        self.assertEqual(self._getPendingExceptions(),
+                [intc_exc.ExternalException(intc_exc.INTC_SRC.SWT)])
+
+        # Before the SWT watchdog generates a reset the ECSM MRSR[SWTR] should
+        # be 0 and MRSR[POR] should be set since this was the first boot.
+        self.assertEqual(self.emu.ecsm.registers.mrsr.por, 1)
+        self.assertEqual(self.emu.ecsm.registers.mrsr.dir, 0)
+        self.assertEqual(self.emu.ecsm.registers.mrsr.swtr, 0)
+
+        # Wait for another half WDT time for the watchdog to expire again.  The
+        # second expiration should generate a ResetException
+        sleep_time = (wdt_time * 0.5) / self.emu._systime_scaling
+        self.emu.resume()
+        time.sleep(sleep_time)
+        self.emu.halt()
+
+        # Watchdog should have expired twice now
+        now = self.emu.systime()
+        logger.debug('3. [%f] WDT time remaining = %f', now, self.emu.swt.watchdog.time())
+        self.assertGreater(now, wdt_time * 2.0)
+        self.assertLess(now, wdt_time * 2.5)
+        self.assertEqual(self.emu.swt.watchdog.running(), False)
+        reset_exc = intc_exc.ResetException()
+        self.assertEqual(self._getPendingExceptions(), [reset_exc])
+
+        # Ensure that the ECSM MRSR[SWTR] flag is set and MRSR[POR] is 0
+        self.emu.reset()
+        self.assertEqual(self.emu.ecsm.registers.mrsr.por, 0)
+        self.assertEqual(self.emu.ecsm.registers.mrsr.dir, 0)
+        self.assertEqual(self.emu.ecsm.registers.mrsr.swtr, 1)

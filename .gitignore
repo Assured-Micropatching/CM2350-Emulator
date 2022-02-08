@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.swp
+*.swo
+*.py~
+*.un~
+.hg*
+.idea
+coverage_html_report*
+
+*.viv
+/ENV/

@@ -4,7 +4,7 @@ import envi.bits as e_bits
 
 from ..ppc_vstructs import *
 from ..ppc_peripherals import *
-from ..intc_exc import ExternalException, INTC_SRC
+from ..intc_exc import INTC_SRC
 
 import logging
 logger = logging.getLogger(__name__)
@@ -206,14 +206,13 @@ class DSPI_x_SR(PeriphRegister):
         self.popnxtptr = v_const(4)
 
 
+# The RSER register bit fields have the same name as the SR register with a
+# "_RE" suffix, but to make interrupt mask checking easier use the same exact
+# field names as DSPI_x_SR (at least for bits that have an exact match between
+# the registers)
 class DSPI_x_RSER(PeriphRegister):
     def __init__(self):
         super().__init__()
-
-        # The RSER register bit fields have the same name as the SR register
-        # with a "_RE" suffix, but to make interrupt mask checking easier use
-        # the same exact field names as DSPI_x_SR (at least for bits that have
-        # an exact match between the registers)
 
         self.tcf = v_bits(1)
         self._pad0 = v_const(2)
@@ -328,7 +327,9 @@ class DSPI(ExternalIOPeripheral):
         host = self._config.cfginfo['host']
         port = self._config.cfginfo['port']
 
-        super().__init__(emu, devname, host, port, mmio_addr, 0x4000, regsetcls=DSPI_REGISTERS)
+        super().__init__(emu, devname, host, port, mmio_addr, 0x4000,
+                regsetcls=DSPI_REGISTERS,
+                isrstatus='sr', isrflags='rser', isrsources=DSPI_INT_SRCS)
 
         self.mode = None
         self._tx_fifo = None
@@ -340,21 +341,6 @@ class DSPI(ExternalIOPeripheral):
 
         # Update the state of the peripheral based on MCR writes
         self.registers.vsAddParseCallback('mcr', self.mcrUpdate)
-
-    def event(self, name, value):
-        """
-        Takes in a name for an event, updates the status register (SR) field of
-        the matching name, and if the value is "1" queues a corresponding
-        interrupt.
-
-        Setting an event value of 0 has no effect, and setting an event value of
-        1 when the SR field is already 1 has no effect.
-        """
-        if value and self.registers.sr.vsGetField(name) == 0:
-            self.registers.sr.vsOverrideValue(name, int(value))
-
-            if self.registers.rser.vsGetField(name) == 1:
-                self.emu.queueException(ExternalException(DSPI_INT_SRCS[self.devname][name]))
 
     def reset(self, emu):
         """

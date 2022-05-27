@@ -91,7 +91,7 @@ class MPC5674_WDT_Test(unittest.TestCase):
         self.assertEqual(self.emu.swt.registers.mcr.key, 0)
         self.assertEqual(self.emu.swt.registers.mcr.ria, 1)
         self.assertEqual(self.emu.swt.registers.mcr.wnd, 0)
-        self.assertEqual(self.emu.swt.registers.mcr.itr, 0)
+        self.assertEqual(self.emu.swt.registers.mcr.tif, 0)  # ITR
         self.assertEqual(self.emu.swt.registers.mcr.hlk, 0)
         self.assertEqual(self.emu.swt.registers.mcr.slk, 0)
         self.assertEqual(self.emu.swt.registers.mcr.csl, 1)
@@ -137,7 +137,7 @@ class MPC5674_WDT_Test(unittest.TestCase):
         self.assertEqual(self.emu.swt.registers.mcr.key, 0)
         self.assertEqual(self.emu.swt.registers.mcr.ria, 1)
         self.assertEqual(self.emu.swt.registers.mcr.wnd, 0)
-        self.assertEqual(self.emu.swt.registers.mcr.itr, 0)
+        self.assertEqual(self.emu.swt.registers.mcr.tif, 0)  # ITR
         self.assertEqual(self.emu.swt.registers.mcr.hlk, 0)
         self.assertEqual(self.emu.swt.registers.mcr.slk, 0)
         self.assertEqual(self.emu.swt.registers.mcr.csl, 1)
@@ -811,9 +811,10 @@ class MPC5674_WDT_Test(unittest.TestCase):
         # to 1 emulated millisecond).
         self.emu._systime_scaling = 0.01
 
-        # Default value of MCR[ITR] is 0 so the first watchdog expiration will
+        # Default value of MCR[ITR] (TIF) is 0 so the first watchdog expiration
+        # will
         # generate a ResetException
-        self.assertEqual(self.emu.swt.registers.mcr.itr, 0)
+        self.assertEqual(self.emu.swt.registers.mcr.tif, 0)
         self.assertEqual(self.emu.swt.registers.mcr.wen, 1)
         self.assertEqual(self.emu.swt.watchdog.running(), True)
 
@@ -881,7 +882,7 @@ class MPC5674_WDT_Test(unittest.TestCase):
         self.emu.writeMemValue(SWT_MCR, mcr_val, 4)
         self.assertEqual(self.emu.readMemValue(SWT_MCR, 4), mcr_val)
 
-        self.assertEqual(self.emu.swt.registers.mcr.itr, 1)
+        self.assertEqual(self.emu.swt.registers.mcr.tif, 1)
         self.assertEqual(self.emu.swt.registers.mcr.wen, 1)
         self.assertEqual(self.emu.swt.watchdog.running(), True)
 

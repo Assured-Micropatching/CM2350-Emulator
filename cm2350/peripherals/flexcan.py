@@ -6,7 +6,7 @@ import envi.bits as e_bits
 
 from ..ppc_vstructs import *
 from ..ppc_peripherals import *
-from ..intc_exc import ExternalException, INTC_SRC
+from ..intc_exc import INTC_SRC
 
 import logging
 logger = logging.getLogger(__name__)
@@ -204,128 +204,105 @@ FLEXCAN_RXIMR32_OFFSET   = 0x0900
 FLEXCAN_RXIMR_END_OFFSET = 0x0980
 
 
-# Mapping of interrupt types based on the supported CAN peripherals
+# Mapping of interrupt types based on the supported CAN peripherals. At the
+# moment the following CAN bus state interrupts are not emulated by this module:
+#   BUSOFF:  INTC_SRC.CANx_BUS,
+#   TX_WARN: INTC_SRC.CANx_BUS,
+#   RX_WARN: INTC_SRC.CANx_BUS,
+#   ERROR:   INTC_SRC.CANx_ERR,
 FLEXCAN_INT_SRCS = {
-    'FlexCAN_A': {
-        'BUSOFF': INTC_SRC.CANA_BUS,
-        'TX_WARN': INTC_SRC.CANA_BUS,
-        'RX_WARN': INTC_SRC.CANA_BUS,
-        'ERROR': INTC_SRC.CANA_ERR,
+    'FlexCAN_A': (
+        # Mailboxes 0 through 15 have unique interrupt sources
+        INTC_SRC.CANA_MB0,     INTC_SRC.CANA_MB1,     INTC_SRC.CANA_MB2,     INTC_SRC.CANA_MB3,
+        INTC_SRC.CANA_MB4,     INTC_SRC.CANA_MB5,     INTC_SRC.CANA_MB6,     INTC_SRC.CANA_MB7,
+        INTC_SRC.CANA_MB8,     INTC_SRC.CANA_MB9,     INTC_SRC.CANA_MB10,    INTC_SRC.CANA_MB11,
+        INTC_SRC.CANA_MB12,    INTC_SRC.CANA_MB13,    INTC_SRC.CANA_MB14,    INTC_SRC.CANA_MB15,
 
-        'MB': (
-            # Mailboxes 0 through 15 have unique interrupt sources
-            INTC_SRC.CANA_MB0, INTC_SRC.CANA_MB1, INTC_SRC.CANA_MB2, INTC_SRC.CANA_MB3,
-            INTC_SRC.CANA_MB4, INTC_SRC.CANA_MB5, INTC_SRC.CANA_MB6, INTC_SRC.CANA_MB7,
-            INTC_SRC.CANA_MB8, INTC_SRC.CANA_MB9, INTC_SRC.CANA_MB10, INTC_SRC.CANA_MB11,
-            INTC_SRC.CANA_MB12, INTC_SRC.CANA_MB13, INTC_SRC.CANA_MB14, INTC_SRC.CANA_MB15,
+        # Mailboxes 16 through 31 share the same interrupt source
+        INTC_SRC.CANA_MB16_31, INTC_SRC.CANA_MB16_31, INTC_SRC.CANA_MB16_31, INTC_SRC.CANA_MB16_31,
+        INTC_SRC.CANA_MB16_31, INTC_SRC.CANA_MB16_31, INTC_SRC.CANA_MB16_31, INTC_SRC.CANA_MB16_31,
+        INTC_SRC.CANA_MB16_31, INTC_SRC.CANA_MB16_31, INTC_SRC.CANA_MB16_31, INTC_SRC.CANA_MB16_31,
+        INTC_SRC.CANA_MB16_31, INTC_SRC.CANA_MB16_31, INTC_SRC.CANA_MB16_31, INTC_SRC.CANA_MB16_31,
 
-            # Mailboxes 16 through 31 share the same interrupt source
-            INTC_SRC.CANA_MB16_31, INTC_SRC.CANA_MB16_31, INTC_SRC.CANA_MB16_31, INTC_SRC.CANA_MB16_31,
-            INTC_SRC.CANA_MB16_31, INTC_SRC.CANA_MB16_31, INTC_SRC.CANA_MB16_31, INTC_SRC.CANA_MB16_31,
-            INTC_SRC.CANA_MB16_31, INTC_SRC.CANA_MB16_31, INTC_SRC.CANA_MB16_31, INTC_SRC.CANA_MB16_31,
-            INTC_SRC.CANA_MB16_31, INTC_SRC.CANA_MB16_31, INTC_SRC.CANA_MB16_31, INTC_SRC.CANA_MB16_31,
+        # Mailboxes 32 through 63 share the same interrupt source
+        INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63,
+        INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63,
+        INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63,
+        INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63,
+        INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63,
+        INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63,
+        INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63,
+        INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63,
+    ),
+    'FlexCAN_B': (
+        # Mailboxes 0 through 15 have unique interrupt sources
+        INTC_SRC.CANB_MB0,     INTC_SRC.CANB_MB1,     INTC_SRC.CANB_MB2,     INTC_SRC.CANB_MB3,
+        INTC_SRC.CANB_MB4,     INTC_SRC.CANB_MB5,     INTC_SRC.CANB_MB6,     INTC_SRC.CANB_MB7,
+        INTC_SRC.CANB_MB8,     INTC_SRC.CANB_MB9,     INTC_SRC.CANB_MB10,    INTC_SRC.CANB_MB11,
+        INTC_SRC.CANB_MB12,    INTC_SRC.CANB_MB13,    INTC_SRC.CANB_MB14,    INTC_SRC.CANB_MB15,
 
-            # Mailboxes 32 through 63 share the same interrupt source
-            INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63,
-            INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63,
-            INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63,
-            INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63,
-            INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63,
-            INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63,
-            INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63,
-            INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63, INTC_SRC.CANA_MB32_63,
-        ),
-    },
-    'FlexCAN_B': {
-        'BUSOFF': INTC_SRC.CANB_BUS,
-        'TX_WARN': INTC_SRC.CANB_BUS,
-        'RX_WARN': INTC_SRC.CANB_BUS,
-        'ERROR': INTC_SRC.CANB_ERR,
+        # Mailboxes 16 through 31 share the same interrupt source
+        INTC_SRC.CANB_MB16_31, INTC_SRC.CANB_MB16_31, INTC_SRC.CANB_MB16_31, INTC_SRC.CANB_MB16_31,
+        INTC_SRC.CANB_MB16_31, INTC_SRC.CANB_MB16_31, INTC_SRC.CANB_MB16_31, INTC_SRC.CANB_MB16_31,
+        INTC_SRC.CANB_MB16_31, INTC_SRC.CANB_MB16_31, INTC_SRC.CANB_MB16_31, INTC_SRC.CANB_MB16_31,
+        INTC_SRC.CANB_MB16_31, INTC_SRC.CANB_MB16_31, INTC_SRC.CANB_MB16_31, INTC_SRC.CANB_MB16_31,
 
-        'MB': (
-            # Mailboxes 0 through 15 have unique interrupt sources
-            INTC_SRC.CANB_MB0, INTC_SRC.CANB_MB1, INTC_SRC.CANB_MB2, INTC_SRC.CANB_MB3,
-            INTC_SRC.CANB_MB4, INTC_SRC.CANB_MB5, INTC_SRC.CANB_MB6, INTC_SRC.CANB_MB7,
-            INTC_SRC.CANB_MB8, INTC_SRC.CANB_MB9, INTC_SRC.CANB_MB10, INTC_SRC.CANB_MB11,
-            INTC_SRC.CANB_MB12, INTC_SRC.CANB_MB13, INTC_SRC.CANB_MB14, INTC_SRC.CANB_MB15,
+        # Mailboxes 32 through 63 share the same interrupt source
+        INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63,
+        INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63,
+        INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63,
+        INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63,
+        INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63,
+        INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63,
+        INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63,
+        INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63,
+    ),
+    'FlexCAN_C': (
+        # Mailboxes 0 through 15 have unique interrupt sources
+        INTC_SRC.CANC_MB0,     INTC_SRC.CANC_MB1,     INTC_SRC.CANC_MB2,     INTC_SRC.CANC_MB3,
+        INTC_SRC.CANC_MB4,     INTC_SRC.CANC_MB5,     INTC_SRC.CANC_MB6,     INTC_SRC.CANC_MB7,
+        INTC_SRC.CANC_MB8,     INTC_SRC.CANC_MB9,     INTC_SRC.CANC_MB10,    INTC_SRC.CANC_MB11,
+        INTC_SRC.CANC_MB12,    INTC_SRC.CANC_MB13,    INTC_SRC.CANC_MB14,    INTC_SRC.CANC_MB15,
 
-            # Mailboxes 16 through 31 share the same interrupt source
-            INTC_SRC.CANB_MB16_31, INTC_SRC.CANB_MB16_31, INTC_SRC.CANB_MB16_31, INTC_SRC.CANB_MB16_31,
-            INTC_SRC.CANB_MB16_31, INTC_SRC.CANB_MB16_31, INTC_SRC.CANB_MB16_31, INTC_SRC.CANB_MB16_31,
-            INTC_SRC.CANB_MB16_31, INTC_SRC.CANB_MB16_31, INTC_SRC.CANB_MB16_31, INTC_SRC.CANB_MB16_31,
-            INTC_SRC.CANB_MB16_31, INTC_SRC.CANB_MB16_31, INTC_SRC.CANB_MB16_31, INTC_SRC.CANB_MB16_31,
+        # Mailboxes 16 through 31 share the same interrupt source
+        INTC_SRC.CANC_MB16_31, INTC_SRC.CANC_MB16_31, INTC_SRC.CANC_MB16_31, INTC_SRC.CANC_MB16_31,
+        INTC_SRC.CANC_MB16_31, INTC_SRC.CANC_MB16_31, INTC_SRC.CANC_MB16_31, INTC_SRC.CANC_MB16_31,
+        INTC_SRC.CANC_MB16_31, INTC_SRC.CANC_MB16_31, INTC_SRC.CANC_MB16_31, INTC_SRC.CANC_MB16_31,
+        INTC_SRC.CANC_MB16_31, INTC_SRC.CANC_MB16_31, INTC_SRC.CANC_MB16_31, INTC_SRC.CANC_MB16_31,
 
-            # Mailboxes 32 through 63 share the same interrupt source
-            INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63,
-            INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63,
-            INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63,
-            INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63,
-            INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63,
-            INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63,
-            INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63,
-            INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63, INTC_SRC.CANB_MB32_63,
-        ),
-    },
-    'FlexCAN_C': {
-        'BUSOFF': INTC_SRC.CANC_BUS,
-        'TX_WARN': INTC_SRC.CANC_BUS,
-        'RX_WARN': INTC_SRC.CANC_BUS,
-        'ERROR': INTC_SRC.CANC_ERR,
+        # Mailboxes 32 through 63 share the same interrupt source
+        INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63,
+        INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63,
+        INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63,
+        INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63,
+        INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63,
+        INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63,
+        INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63,
+        INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63,
+    ),
+    'FlexCAN_D': (
+        # Mailboxes 0 through 15 have unique interrupt sources
+        INTC_SRC.CAND_MB0,     INTC_SRC.CAND_MB1,     INTC_SRC.CAND_MB2,     INTC_SRC.CAND_MB3,
+        INTC_SRC.CAND_MB4,     INTC_SRC.CAND_MB5,     INTC_SRC.CAND_MB6,     INTC_SRC.CAND_MB7,
+        INTC_SRC.CAND_MB8,     INTC_SRC.CAND_MB9,     INTC_SRC.CAND_MB10,    INTC_SRC.CAND_MB11,
+        INTC_SRC.CAND_MB12,    INTC_SRC.CAND_MB13,    INTC_SRC.CAND_MB14,    INTC_SRC.CAND_MB15,
 
-        'MB': (
-            # Mailboxes 0 through 15 have unique interrupt sources
-            INTC_SRC.CANC_MB0, INTC_SRC.CANC_MB1, INTC_SRC.CANC_MB2, INTC_SRC.CANC_MB3,
-            INTC_SRC.CANC_MB4, INTC_SRC.CANC_MB5, INTC_SRC.CANC_MB6, INTC_SRC.CANC_MB7,
-            INTC_SRC.CANC_MB8, INTC_SRC.CANC_MB9, INTC_SRC.CANC_MB10, INTC_SRC.CANC_MB11,
-            INTC_SRC.CANC_MB12, INTC_SRC.CANC_MB13, INTC_SRC.CANC_MB14, INTC_SRC.CANC_MB15,
+        # Mailboxes 16 through 31 share the same interrupt source
+        INTC_SRC.CAND_MB16_31, INTC_SRC.CAND_MB16_31, INTC_SRC.CAND_MB16_31, INTC_SRC.CAND_MB16_31,
+        INTC_SRC.CAND_MB16_31, INTC_SRC.CAND_MB16_31, INTC_SRC.CAND_MB16_31, INTC_SRC.CAND_MB16_31,
+        INTC_SRC.CAND_MB16_31, INTC_SRC.CAND_MB16_31, INTC_SRC.CAND_MB16_31, INTC_SRC.CAND_MB16_31,
+        INTC_SRC.CAND_MB16_31, INTC_SRC.CAND_MB16_31, INTC_SRC.CAND_MB16_31, INTC_SRC.CAND_MB16_31,
 
-            # Mailboxes 16 through 31 share the same interrupt source
-            INTC_SRC.CANC_MB16_31, INTC_SRC.CANC_MB16_31, INTC_SRC.CANC_MB16_31, INTC_SRC.CANC_MB16_31,
-            INTC_SRC.CANC_MB16_31, INTC_SRC.CANC_MB16_31, INTC_SRC.CANC_MB16_31, INTC_SRC.CANC_MB16_31,
-            INTC_SRC.CANC_MB16_31, INTC_SRC.CANC_MB16_31, INTC_SRC.CANC_MB16_31, INTC_SRC.CANC_MB16_31,
-            INTC_SRC.CANC_MB16_31, INTC_SRC.CANC_MB16_31, INTC_SRC.CANC_MB16_31, INTC_SRC.CANC_MB16_31,
-
-            # Mailboxes 32 through 63 share the same interrupt source
-            INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63,
-            INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63,
-            INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63,
-            INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63,
-            INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63,
-            INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63,
-            INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63,
-            INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63, INTC_SRC.CANC_MB32_63,
-        ),
-    },
-    'FlexCAN_D': {
-        'BUSOFF': INTC_SRC.CAND_BUS,
-        'TX_WARN': INTC_SRC.CAND_BUS,
-        'RX_WARN': INTC_SRC.CAND_BUS,
-        'ERROR': INTC_SRC.CAND_ERR,
-
-        'MB': (
-            # Mailboxes 0 through 15 have unique interrupt sources
-            INTC_SRC.CAND_MB0, INTC_SRC.CAND_MB1, INTC_SRC.CAND_MB2, INTC_SRC.CAND_MB3,
-            INTC_SRC.CAND_MB4, INTC_SRC.CAND_MB5, INTC_SRC.CAND_MB6, INTC_SRC.CAND_MB7,
-            INTC_SRC.CAND_MB8, INTC_SRC.CAND_MB9, INTC_SRC.CAND_MB10, INTC_SRC.CAND_MB11,
-            INTC_SRC.CAND_MB12, INTC_SRC.CAND_MB13, INTC_SRC.CAND_MB14, INTC_SRC.CAND_MB15,
-
-            # Mailboxes 16 through 31 share the same interrupt source
-            INTC_SRC.CAND_MB16_31, INTC_SRC.CAND_MB16_31, INTC_SRC.CAND_MB16_31, INTC_SRC.CAND_MB16_31,
-            INTC_SRC.CAND_MB16_31, INTC_SRC.CAND_MB16_31, INTC_SRC.CAND_MB16_31, INTC_SRC.CAND_MB16_31,
-            INTC_SRC.CAND_MB16_31, INTC_SRC.CAND_MB16_31, INTC_SRC.CAND_MB16_31, INTC_SRC.CAND_MB16_31,
-            INTC_SRC.CAND_MB16_31, INTC_SRC.CAND_MB16_31, INTC_SRC.CAND_MB16_31, INTC_SRC.CAND_MB16_31,
-
-            # Mailboxes 32 through 63 share the same interrupt source
-            INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63,
-            INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63,
-            INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63,
-            INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63,
-            INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63,
-            INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63,
-            INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63,
-            INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63,
-        ),
-    },
+        # Mailboxes 32 through 63 share the same interrupt source
+        INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63,
+        INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63,
+        INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63,
+        INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63,
+        INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63,
+        INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63,
+        INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63,
+        INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63, INTC_SRC.CAND_MB32_63,
+    ),
 }
 
 # Simple MB to IFLAG1/2 bitmask lookup. Mailboxes 0-31 are in IFLAG1, 32-63 are
@@ -611,7 +588,11 @@ class FlexCAN(ExternalIOPeripheral):
         host = self._config.cfginfo['host']
         port = self._config.cfginfo['port']
 
-        super().__init__(emu, devname, host, port, mmio_addr, 0x4000, regsetcls=FLEXCAN_REGISTERS)
+        super().__init__(emu, devname, host, port, mmio_addr, 0x4000,
+                regsetcls=FLEXCAN_REGISTERS,
+                isrstatus=('iflag1', 'iflag2'),
+                isrflags=('imask1', 'imask2'),
+                isrsources=FLEXCAN_INT_SRCS)
 
         # timer register
         self._timer = TimerRegister(16)
@@ -646,13 +627,6 @@ class FlexCAN(ExternalIOPeripheral):
 
         # Handle writes to the mailbox registers
         self.registers.vsAddParseCallback('by_idx_mb', self.mbUpdate)
-
-        # Save the interrupt sources for this peripheral instance
-        self._busoff_int = FLEXCAN_INT_SRCS[devname]['BUSOFF']
-        self._tx_warn_int = FLEXCAN_INT_SRCS[devname]['TX_WARN']
-        self._rx_warn_int = FLEXCAN_INT_SRCS[devname]['RX_WARN']
-        self._error_int = FLEXCAN_INT_SRCS[devname]['ERROR']
-        self._mb_int = FLEXCAN_INT_SRCS[devname]['MB']
 
     def _getPeriphReg(self, offset, size):
         """
@@ -792,10 +766,7 @@ class FlexCAN(ExternalIOPeripheral):
             # perhaps it means if there were 5 messages in the RxFIFO before a
             # new message was queued?
             if len(self._rx_fifo) == FLEXCAN_RxFIFO_MAX_LEN:
-                val = self.registers.iflag1.flag | FLEXCAN_RxFIFO_WARNING_MASK
-                self.registers.iflag1.vsOverrideValue('flag', val)
-                if self.registers.imask1.mask & FLEXCAN_RxFIFO_WARNING_MASK:
-                    self.emu.queueException(ExternalException(self._mb_int[6]))
+                self.event(6, FLEXCAN_RxFIFO_WARNING_MASK)
             return True
 
         else:
@@ -852,10 +823,7 @@ class FlexCAN(ExternalIOPeripheral):
             if last_match == 0 and self.registers.mcr.fen:
                 # If the RxFIFO is enabled and the last match was "MB0" then
                 # signal an RxFIFO Overflow interrupt (MB7)
-                val = self.registers.iflag1.flag | FLEXCAN_RxFIFO_OVERFLOW_MASK
-                self.registers.iflag1.vsOverrideValue('flag', val)
-                if self.registers.imask1.mask & FLEXCAN_RxFIFO_OVERFLOW_MASK:
-                    self.emu.queueException(ExternalException(self._mb_int[7]))
+                self.event(7, FLEXCAN_RxFIFO_OVERFLOW_MASK)
             else:
                 # mark the last matched mailbox as overrun
                 self.setMBCode(last_match, FLEXCAN_CODE_RX_OVERRUN)
@@ -982,38 +950,20 @@ class FlexCAN(ExternalIOPeripheral):
         if mb == 0 and self.registers.mcr.fen:
             # Use the timestamp for when the message was received by the RxFIFO
             msg.into_mb(self.registers.mb, offset=idx, code=0, timestamp=msg.timestamp)
-
-            mask_val = FLEXCAN_RxFIFO_MSG_AVAIL_MASK
-            flag_val = self.registers.iflag1.flag | mask_val
-            self.registers.iflag1.vsOverrideValue('flag', flag_val)
-            mask_reg = self.registers.imask1.mask
-            int_src = self._mb_int[5]
+            self.event(5, FLEXCAN_RxFIFO_MSG_AVAIL_MASK)
 
         elif mb < 32:
             # Set the code to indicate that a message has been received (this
             # isn't done for the RxFIFO received messages)
             msg.into_mb(self.registers.mb, offset=idx, code=FLEXCAN_CODE_RX_FULL, timestamp=self._timer.get())
-
-            mask_val = FLEXCAN_IFLAG1_MASK[mb]
-            flag_val = self.registers.iflag1.flag | mask_val
-            self.registers.iflag1.vsOverrideValue('flag', flag_val)
-            mask_reg = self.registers.imask1.mask
-            int_src = self._mb_int[mb]
+            self.event(mb, FLEXCAN_IFLAG1_MASK[mb])
 
         else:
             # Set the code to indicate that a message has been received (this
             # isn't done for the RxFIFO received messages)
             msg.into_mb(self.registers.mb, offset=idx, code=FLEXCAN_CODE_RX_FULL, timestamp=self._timer.get())
 
-            mask_val = FLEXCAN_IFLAG2_MASK[mb]
-            flag_val = self.registers.iflag2.flag | mask_val
-            self.registers.iflag2.vsOverrideValue('flag', flag_val)
-            mask_reg = self.registers.imask2.mask
-            int_src = self._mb_int[mb]
-
-        # If the mask is set for this mailbox queue an exception
-        if mask_reg & mask_val:
-            self.emu.queueException(ExternalException(int_src))
+            self.event(mb, FLEXCAN_IFLAG2_MASK[mb])
 
     def normalTx(self, mb):
         """
@@ -1093,20 +1043,10 @@ class FlexCAN(ExternalIOPeripheral):
             # Set the interrupt flag for this mailbox
             if mb < 32:
                 mask_val = FLEXCAN_IFLAG1_MASK[mb]
-                flag_val = self.registers.iflag1.flag | mask_val
-                self.registers.iflag1.vsOverrideValue('flag', flag_val)
-                mask_reg = self.registers.imask1.mask
-
             else:
                 mask_val = FLEXCAN_IFLAG2_MASK[mb]
-                flag_val = self.registers.iflag2.flag | mask_val
-                self.registers.iflag2.vsOverrideValue('flag', flag_val)
-                mask_reg = self.registers.imask2.mask
 
-            # If the mask is set for this mailbox queue an exception
-            if mask_reg & mask_val:
-                src = self._mb_int[mb]
-                self.emu.queueException(ExternalException(src))
+            self.event(mb, mask_val)
 
         # If mode is NORMAL or LOOP-BACK, and the MCR[SRX_DIS] bit == 0
         # (self-reception of messages enabled), feed this message
@@ -1148,7 +1088,7 @@ class FlexCAN(ExternalIOPeripheral):
             if mb == 14:
                 return self.registers.rx14mask.mask
             elif mb == 15:
-                return self.registers.rx14mask.mask
+                return self.registers.rx15mask.mask
             else:
                 return self.registers.rxgmask.mask
         else:
@@ -1159,7 +1099,7 @@ class FlexCAN(ExternalIOPeripheral):
             if mb in (6, 14):
                 return self.registers.rx14mask.mask
             elif mb in (7, 15):
-                return self.registers.rx14mask.mask
+                return self.registers.rx15mask.mask
             else:
                 return self.registers.rxgmask.mask
 

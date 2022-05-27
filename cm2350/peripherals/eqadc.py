@@ -6,7 +6,7 @@ import envi.const as e_const
 
 from ..ppc_vstructs import *
 from ..ppc_peripherals import *
-from ..intc_exc import ExternalException, INTC_SRC
+from ..intc_exc import INTC_SRC
 
 import logging
 logger = logging.getLogger(__name__)
@@ -169,42 +169,130 @@ EQADC_CFS_WAIT_FOR_TRIGGER_MODES = (EQADC_MODE.CONTINUOUS_SW_TRIGGER,
 # TORF (Trigger Overrun), RFOF (Result FIFO Overflow), and CFUF (Command FIFO
 # Underflow) for all CBuffers share the same interrupt source.
 EQADC_INT_SRCS = {
-    'eQADC_A': {
-        'ncf':  (INTC_SRC.EQADC_A_FISR0_NCF,  INTC_SRC.EQADC_A_FISR1_NCF,  INTC_SRC.EQADC_A_FISR2_NCF,
-                 INTC_SRC.EQADC_A_FISR3_NCF,  INTC_SRC.EQADC_A_FISR4_NCF,  INTC_SRC.EQADC_A_FISR5_NCF),
-        'torf': (INTC_SRC.EQADC_A_OVERRUN,    INTC_SRC.EQADC_A_OVERRUN,    INTC_SRC.EQADC_A_OVERRUN,
-                 INTC_SRC.EQADC_A_OVERRUN,    INTC_SRC.EQADC_A_OVERRUN,    INTC_SRC.EQADC_A_OVERRUN),
-        'pf':   (INTC_SRC.EQADC_A_FISR0_PF,   INTC_SRC.EQADC_A_FISR1_PF,   INTC_SRC.EQADC_A_FISR2_PF,
-                 INTC_SRC.EQADC_A_FISR3_PF,   INTC_SRC.EQADC_A_FISR4_PF,   INTC_SRC.EQADC_A_FISR5_PF),
-        'eoqf': (INTC_SRC.EQADC_A_FISR0_EOQF, INTC_SRC.EQADC_A_FISR1_EOQF, INTC_SRC.EQADC_A_FISR2_EOQF,
-                 INTC_SRC.EQADC_A_FISR3_EOQF, INTC_SRC.EQADC_A_FISR4_EOQF, INTC_SRC.EQADC_A_FISR5_EOQF),
-        'cfuf': (INTC_SRC.EQADC_A_OVERRUN,    INTC_SRC.EQADC_A_OVERRUN,    INTC_SRC.EQADC_A_OVERRUN,
-                 INTC_SRC.EQADC_A_OVERRUN,    INTC_SRC.EQADC_A_OVERRUN,    INTC_SRC.EQADC_A_OVERRUN),
-        'cfff': (INTC_SRC.EQADC_A_FISR0_CFFF, INTC_SRC.EQADC_A_FISR1_CFFF, INTC_SRC.EQADC_A_FISR2_CFFF,
-                 INTC_SRC.EQADC_A_FISR3_CFFF, INTC_SRC.EQADC_A_FISR4_CFFF, INTC_SRC.EQADC_A_FISR5_CFFF),
-        'rfof': (INTC_SRC.EQADC_A_OVERRUN,    INTC_SRC.EQADC_A_OVERRUN,    INTC_SRC.EQADC_A_OVERRUN,
-                 INTC_SRC.EQADC_A_OVERRUN,    INTC_SRC.EQADC_A_OVERRUN,    INTC_SRC.EQADC_A_OVERRUN),
-        'rfdf': (INTC_SRC.EQADC_A_FISR0_RFDF, INTC_SRC.EQADC_A_FISR1_RFDF, INTC_SRC.EQADC_A_FISR2_RFDF,
-                 INTC_SRC.EQADC_A_FISR3_RFDF, INTC_SRC.EQADC_A_FISR4_RFDF, INTC_SRC.EQADC_A_FISR5_RFDF),
-    },
-    'eQADC_B': {
-        'ncf':  (INTC_SRC.EQADC_B_FISR0_NCF,  INTC_SRC.EQADC_B_FISR1_NCF,  INTC_SRC.EQADC_B_FISR2_NCF,
-                 INTC_SRC.EQADC_B_FISR3_NCF,  INTC_SRC.EQADC_B_FISR4_NCF,  INTC_SRC.EQADC_B_FISR5_NCF),
-        'torf': (INTC_SRC.EQADC_B_OVERRUN,    INTC_SRC.EQADC_B_OVERRUN,    INTC_SRC.EQADC_B_OVERRUN,
-                 INTC_SRC.EQADC_B_OVERRUN,    INTC_SRC.EQADC_B_OVERRUN,    INTC_SRC.EQADC_B_OVERRUN),
-        'pf':   (INTC_SRC.EQADC_B_FISR0_PF,   INTC_SRC.EQADC_B_FISR1_PF,   INTC_SRC.EQADC_B_FISR2_PF,
-                 INTC_SRC.EQADC_B_FISR3_PF,   INTC_SRC.EQADC_B_FISR4_PF,   INTC_SRC.EQADC_B_FISR5_PF),
-        'eoqf': (INTC_SRC.EQADC_B_FISR0_EOQF, INTC_SRC.EQADC_B_FISR1_EOQF, INTC_SRC.EQADC_B_FISR2_EOQF,
-                 INTC_SRC.EQADC_B_FISR3_EOQF, INTC_SRC.EQADC_B_FISR4_EOQF, INTC_SRC.EQADC_B_FISR5_EOQF),
-        'cfuf': (INTC_SRC.EQADC_B_OVERRUN,    INTC_SRC.EQADC_B_OVERRUN,    INTC_SRC.EQADC_B_OVERRUN,
-                 INTC_SRC.EQADC_B_OVERRUN,    INTC_SRC.EQADC_B_OVERRUN,    INTC_SRC.EQADC_B_OVERRUN),
-        'cfff': (INTC_SRC.EQADC_B_FISR0_CFFF, INTC_SRC.EQADC_B_FISR1_CFFF, INTC_SRC.EQADC_B_FISR2_CFFF,
-                 INTC_SRC.EQADC_B_FISR3_CFFF, INTC_SRC.EQADC_B_FISR4_CFFF, INTC_SRC.EQADC_B_FISR5_CFFF),
-        'rfof': (INTC_SRC.EQADC_B_OVERRUN,    INTC_SRC.EQADC_B_OVERRUN,    INTC_SRC.EQADC_B_OVERRUN,
-                 INTC_SRC.EQADC_B_OVERRUN,    INTC_SRC.EQADC_B_OVERRUN,    INTC_SRC.EQADC_B_OVERRUN),
-        'rfdf': (INTC_SRC.EQADC_B_FISR0_RFDF, INTC_SRC.EQADC_B_FISR1_RFDF, INTC_SRC.EQADC_B_FISR2_RFDF,
-                 INTC_SRC.EQADC_B_FISR3_RFDF, INTC_SRC.EQADC_B_FISR4_RFDF, INTC_SRC.EQADC_B_FISR5_RFDF),
-    },
+    'eQADC_A': (
+        {
+            'ncf':  INTC_SRC.EQADC_A_FISR0_NCF,
+            'torf': INTC_SRC.EQADC_A_OVERRUN,
+            'pf':   INTC_SRC.EQADC_A_FISR0_PF,
+            'eoqf': INTC_SRC.EQADC_A_FISR0_EOQF,
+            'cfuf': INTC_SRC.EQADC_A_OVERRUN,
+            'cfff': INTC_SRC.EQADC_A_FISR0_CFFF,
+            'rfof': INTC_SRC.EQADC_A_OVERRUN,
+            'rfdf': INTC_SRC.EQADC_A_FISR0_RFDF,
+        },
+        {
+            'ncf':  INTC_SRC.EQADC_A_FISR1_NCF,
+            'torf': INTC_SRC.EQADC_A_OVERRUN,
+            'pf':   INTC_SRC.EQADC_A_FISR1_PF,
+            'eoqf': INTC_SRC.EQADC_A_FISR1_EOQF,
+            'cfuf': INTC_SRC.EQADC_A_OVERRUN,
+            'cfff': INTC_SRC.EQADC_A_FISR1_CFFF,
+            'rfof': INTC_SRC.EQADC_A_OVERRUN,
+            'rfdf': INTC_SRC.EQADC_A_FISR1_RFDF,
+        },
+        {
+            'ncf':  INTC_SRC.EQADC_A_FISR2_NCF,
+            'torf': INTC_SRC.EQADC_A_OVERRUN,
+            'pf':   INTC_SRC.EQADC_A_FISR2_PF,
+            'eoqf': INTC_SRC.EQADC_A_FISR2_EOQF,
+            'cfuf': INTC_SRC.EQADC_A_OVERRUN,
+            'cfff': INTC_SRC.EQADC_A_FISR2_CFFF,
+            'rfof': INTC_SRC.EQADC_A_OVERRUN,
+            'rfdf': INTC_SRC.EQADC_A_FISR2_RFDF,
+        },
+        {
+            'ncf':  INTC_SRC.EQADC_A_FISR3_NCF,
+            'torf': INTC_SRC.EQADC_A_OVERRUN,
+            'pf':   INTC_SRC.EQADC_A_FISR3_PF,
+            'eoqf': INTC_SRC.EQADC_A_FISR3_EOQF,
+            'cfuf': INTC_SRC.EQADC_A_OVERRUN,
+            'cfff': INTC_SRC.EQADC_A_FISR3_CFFF,
+            'rfof': INTC_SRC.EQADC_A_OVERRUN,
+            'rfdf': INTC_SRC.EQADC_A_FISR3_RFDF,
+        },
+        {
+            'ncf':  INTC_SRC.EQADC_A_FISR4_NCF,
+            'torf': INTC_SRC.EQADC_A_OVERRUN,
+            'pf':   INTC_SRC.EQADC_A_FISR4_PF,
+            'eoqf': INTC_SRC.EQADC_A_FISR4_EOQF,
+            'cfuf': INTC_SRC.EQADC_A_OVERRUN,
+            'cfff': INTC_SRC.EQADC_A_FISR4_CFFF,
+            'rfof': INTC_SRC.EQADC_A_OVERRUN,
+            'rfdf': INTC_SRC.EQADC_A_FISR4_RFDF,
+        },
+        {
+            'ncf':  INTC_SRC.EQADC_A_FISR5_NCF,
+            'torf': INTC_SRC.EQADC_A_OVERRUN,
+            'pf':   INTC_SRC.EQADC_A_FISR5_PF,
+            'eoqf': INTC_SRC.EQADC_A_FISR5_EOQF,
+            'cfuf': INTC_SRC.EQADC_A_OVERRUN,
+            'cfff': INTC_SRC.EQADC_A_FISR5_CFFF,
+            'rfof': INTC_SRC.EQADC_A_OVERRUN,
+            'rfdf': INTC_SRC.EQADC_A_FISR5_RFDF,
+        },
+    ),
+    'eQADC_B': (
+        {
+            'ncf':  INTC_SRC.EQADC_B_FISR0_NCF,
+            'torf': INTC_SRC.EQADC_B_OVERRUN,
+            'pf':   INTC_SRC.EQADC_B_FISR0_PF,
+            'eoqf': INTC_SRC.EQADC_B_FISR0_EOQF,
+            'cfuf': INTC_SRC.EQADC_B_OVERRUN,
+            'cfff': INTC_SRC.EQADC_B_FISR0_CFFF,
+            'rfof': INTC_SRC.EQADC_B_OVERRUN,
+            'rfdf': INTC_SRC.EQADC_B_FISR0_RFDF,
+        },
+        {
+            'ncf':  INTC_SRC.EQADC_B_FISR1_NCF,
+            'torf': INTC_SRC.EQADC_B_OVERRUN,
+            'pf':   INTC_SRC.EQADC_B_FISR1_PF,
+            'eoqf': INTC_SRC.EQADC_B_FISR1_EOQF,
+            'cfuf': INTC_SRC.EQADC_B_OVERRUN,
+            'cfff': INTC_SRC.EQADC_B_FISR1_CFFF,
+            'rfof': INTC_SRC.EQADC_B_OVERRUN,
+            'rfdf': INTC_SRC.EQADC_B_FISR1_RFDF,
+        },
+        {
+            'ncf':  INTC_SRC.EQADC_B_FISR2_NCF,
+            'torf': INTC_SRC.EQADC_B_OVERRUN,
+            'pf':   INTC_SRC.EQADC_B_FISR2_PF,
+            'eoqf': INTC_SRC.EQADC_B_FISR2_EOQF,
+            'cfuf': INTC_SRC.EQADC_B_OVERRUN,
+            'cfff': INTC_SRC.EQADC_B_FISR2_CFFF,
+            'rfof': INTC_SRC.EQADC_B_OVERRUN,
+            'rfdf': INTC_SRC.EQADC_B_FISR2_RFDF,
+        },
+        {
+            'ncf':  INTC_SRC.EQADC_B_FISR3_NCF,
+            'torf': INTC_SRC.EQADC_B_OVERRUN,
+            'pf':   INTC_SRC.EQADC_B_FISR3_PF,
+            'eoqf': INTC_SRC.EQADC_B_FISR3_EOQF,
+            'cfuf': INTC_SRC.EQADC_B_OVERRUN,
+            'cfff': INTC_SRC.EQADC_B_FISR3_CFFF,
+            'rfof': INTC_SRC.EQADC_B_OVERRUN,
+            'rfdf': INTC_SRC.EQADC_B_FISR3_RFDF,
+        },
+        {
+            'ncf':  INTC_SRC.EQADC_B_FISR4_NCF,
+            'torf': INTC_SRC.EQADC_B_OVERRUN,
+            'pf':   INTC_SRC.EQADC_B_FISR4_PF,
+            'eoqf': INTC_SRC.EQADC_B_FISR4_EOQF,
+            'cfuf': INTC_SRC.EQADC_B_OVERRUN,
+            'cfff': INTC_SRC.EQADC_B_FISR4_CFFF,
+            'rfof': INTC_SRC.EQADC_B_OVERRUN,
+            'rfdf': INTC_SRC.EQADC_B_FISR4_RFDF,
+        },
+        {
+            'ncf':  INTC_SRC.EQADC_B_FISR5_NCF,
+            'torf': INTC_SRC.EQADC_B_OVERRUN,
+            'pf':   INTC_SRC.EQADC_B_FISR5_PF,
+            'eoqf': INTC_SRC.EQADC_B_FISR5_EOQF,
+            'cfuf': INTC_SRC.EQADC_B_OVERRUN,
+            'cfff': INTC_SRC.EQADC_B_FISR5_CFFF,
+            'rfof': INTC_SRC.EQADC_B_OVERRUN,
+            'rfdf': INTC_SRC.EQADC_B_FISR5_RFDF,
+        },
+    ),
 }
 
 
@@ -421,6 +509,10 @@ class EQADC_CFCRx(PeriphRegister):
 # register with "f" as a suffix instead of "ie". I'm defining the interrupt flag
 # fields in both registers to use the "f" suffix to make setting and checking
 # for interrupts more consistent.
+#
+# Fields that select between enabled interrupt requests and DMA requests are
+# indicated with the name of the event field with an added "_dirs" suffix.  so
+# CFFS becomes CFFF_DIRS.
 
 class EQADC_IDCRx(PeriphRegister):
     def __init__(self):
@@ -432,7 +524,7 @@ class EQADC_IDCRx(PeriphRegister):
         self.cfuf = v_bits(1)
         self._pad0 = v_const(1)
         self.cfff = v_bits(1)
-        self.cffs = v_bits(1)
+        self.cfff_dirs = v_bits(1)
         self._pad1 = v_const(4)
         self.rfof = v_bits(1)
         self._pad2 = v_const(1)
@@ -543,7 +635,9 @@ class EQADC(ExternalIOPeripheral):
         host = self._config.cfginfo['host']
         port = self._config.cfginfo['port']
 
-        super().__init__(emu, devname, host, port, mmio_addr, 0x4000, regsetcls=EQADC_REGISTERS)
+        super().__init__(emu, devname, host, port, mmio_addr, 0x4000,
+                regsetcls=EQADC_REGISTERS,
+                isrstatus='fisr', isrflags='idcr', isrsources=EQADC_INT_SRCS)
 
         # There are so many peripheral register ranges that need custom handling
         # in this function that we need a fast and easy lookup for the different
@@ -573,7 +667,6 @@ class EQADC(ExternalIOPeripheral):
         # accessed and programmed
         self.adc = (ADC(self, 'ADC0'), ADC(self, 'ADC1'))
 
-        self.registers.vsAddParseCallback('by_idx_idcr', self.idcrUpdate)
         self.registers.vsAddParseCallback('by_idx_cfcr', self.cfcrUpdate)
 
     def reset(self, emu):
@@ -671,30 +764,6 @@ class EQADC(ExternalIOPeripheral):
         # Writes to the RFPR, CFxRw, and RFxRw registers are ignored
         # Return an empty bytes value to indicate that all data has been handled
         return b''
-
-    def event(self, channel, name, value):
-        """
-        Takes in a channel and name for an event, updates the FIFO and Interrupt
-        Status Register (FISRx) field of the matching name, and sets the flag.
-        If the Interrupt and DMA Control Register (IDCRx) has the interrupt
-        enabled then and if the value is "1" queues a corresponding interrupt.
-
-        Setting an event value of 0 has no effect, and setting an event value of
-        1 when the FISRx field is already 1 has no effect.
-        """
-        if value and self.registers.fisr[channel].vsGetField(name) == 0:
-            self.registers.fisr[channel].vsOverrideValue(name, int(value))
-
-            if self.registers.idcr[channel].vsGetField(name) == 1:
-                self.emu.queueException(ExternalException(EQADC_INT_SRCS[self.devname][channel][name]))
-
-    def idcrUpdate(self, thing, idx, size):
-        # DMA transfers are not yet supported so raise an exception if those
-        # bits are set.
-        if self.registers.idcr[idx].cffs:
-            raise NotImplementedError('%s IDCR%d[CFFS] set to 1' % (self.devname, idx))
-        if self.registers.idcr[idx].rfds:
-            raise NotImplementedError('%s IDCR%d[RFDS] set to 1' % (self.devname, idx))
 
     def cfcrUpdate(self, thing, idx, size):
         # If the SSE flag is set update the SSS status indicator in the FISRx

@@ -195,12 +195,11 @@ class EmulationTime:
         self._timer_update = threading.Condition()
         self._stop = threading.Event()
 
-        # Thread to run the timers
-        self._tb_thread = threading.Thread(target=self._tb_run)
+        # Thread to run the timers. This thread should get cleaned up properly
+        # when the EmulationTime object is deleted, but just in case set this as
+        # a daemon thread.
+        self._tb_thread = threading.Thread(target=self._tb_run, daemon=True)
 
-        # This thread should get cleaned up properly when the EmulationTime
-        # object is deleted, but just in case set this as a daemon thread
-        self._tb_thread.setDaemon(True)
         self._tb_thread.start()
 
         # Variables to let us track how long the emulated system has been

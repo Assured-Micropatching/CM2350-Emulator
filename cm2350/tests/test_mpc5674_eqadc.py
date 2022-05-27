@@ -51,7 +51,7 @@ EQADC_IDCR_PF_MASK        = 0x2000
 EQADC_IDCR_EOQF_MASK      = 0x1000
 EQADC_IDCR_CFUF_MASK      = 0x0800
 EQADC_IDCR_CFFF_MASK      = 0x0200
-EQADC_IDCR_CFFS_MASK      = 0x0100
+EQADC_IDCR_CFFF_DIRS_MASK = 0x0100
 EQADC_IDCR_RFOF_MASK      = 0x0008
 EQADC_IDCR_RFDF_MASK      = 0x0002
 EQADC_IDCR_RFDS_MASK      = 0x0001
@@ -280,7 +280,7 @@ class MPC5674_EQADC_Test(unittest.TestCase):
 
                 # These fields are used to enable DMA transfers instead of
                 # relying on software interrupt handlers.
-                ('cffs', 1, EQADC_IDCR_CFFS_MASK),
+                ('cfff_dirs', 1, EQADC_IDCR_CFFF_DIRS_MASK),
                 ('rfds', 1, EQADC_IDCR_RFDS_MASK),
             )
 
@@ -304,7 +304,7 @@ class MPC5674_EQADC_Test(unittest.TestCase):
                 self.assertEqual(self.emu.eqadc[dev].registers.idcr[channel].rfds, 0, msg=msg)
 
                 # DMA transfer flags
-                self.assertEqual(self.emu.eqadc[dev].registers.idcr[channel].cffs, 0, msg=msg)
+                self.assertEqual(self.emu.eqadc[dev].registers.idcr[channel].cfff, 0, msg=msg)
                 self.assertEqual(self.emu.eqadc[dev].registers.idcr[channel].rfds, 0, msg=msg)
 
                 for field, field_val, idcr_val in fields:

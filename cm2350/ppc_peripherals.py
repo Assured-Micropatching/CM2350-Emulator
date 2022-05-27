@@ -11,7 +11,8 @@ import envi.bits as e_bits
 
 from . import mmio
 from .ppc_vstructs import *
-from .intc_exc import AlignmentException, MceWriteBusError, MceDataReadBusError
+from .intc_exc import AlignmentException, MceWriteBusError, \
+        MceDataReadBusError, ExternalException
 
 import logging
 logger = logging.getLogger(__name__)
@@ -60,7 +61,7 @@ class Peripheral:
 
     def init(self, emu):
         """
-        Standard "module" peripheral init function.  This is called only once
+        Standard "module" peripheral init function. This is called only once
         during emulator initialization when the emulator's init_core() function
         is called. Any emulator-dependant initialization should be done in this
         function and not in the constructor.
@@ -80,7 +81,7 @@ class Peripheral:
 
     def reset(self, emu):
         """
-        Standard "module" peripheral reset function.  This is called every time
+        Standard "module" peripheral reset function. This is called every time
         the emulator's reset_core() function is called, and also by default by
         this class's own init() function. This means that each peripheral only
         needs to implement one function to initialize all values to the correct
@@ -96,7 +97,8 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
     A peripheral class that implements read/write functions to connect this
     object as an MMIO device to an emulator.
     """
-    def __init__(self, emu, devname, mapaddr, mapsize, regsetcls=None, **kwargs):
+    def __init__(self, emu, devname, mapaddr, mapsize, regsetcls=None,
+            isrstatus=None, isrflags=None, isrsources=None, **kwargs):
         """
         Constructor for MMIOPeripheral class.
 
@@ -125,10 +127,174 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
         else:
             self.registers = None
 
+        # Initialize the ISR status, flag and source information
+        self._initISRInfo(isrstatus, isrflags, isrsources)
+
+        # Now initialize the event set/clear functions that are appropriate for
+        # the ISR status, flag, and sources provided.
+        self._initISRFunctions()
+
+        # Lastly find any possible DMA request sources for this peripheral
+        self._initDMASources()
+
+    def _initISRInfo(self, isrstatus=None, isrflags=None, isrsources=None):
+        """
+        Initialize the peripheral ISR status, flag and source information
+        """
+        if isrstatus is not None and isrflags is not None and isrsources is not None:
+            if isinstance(isrstatus, (tuple, list)) and \
+                    isinstance(isrflags, (tuple, list)):
+                # This will be a channel-only ISR config, create the ISR status
+                # and flag lists
+                self.isrstatus = []
+                for name in isrstatus:
+                    reg = self.registers.vsGetField(name)
+                    self.isrstatus.extend([reg] * (len(reg) * 8))
+
+                self.isrflags = []
+                for name in isrflags:
+                    reg = self.registers.vsGetField(name)
+                    self.isrflags.extend([reg] * (len(reg) * 8))
+
+            else:
+                # ISR status and flag registers used by the standard event()
+                # function
+                self.isrstatus = self.registers.vsGetField(isrstatus)
+                self.isrflags = self.registers.vsGetField(isrflags)
+
+            # Keep track of the interrupt sources for this peripheral. There may
+            # be different sources for each instance of this type of peripheral
+            # so get the instance-specific ISR sources for this peripheral.
+            if isinstance(isrsources, dict) and self.devname in isrsources:
+                self.isrsources = isrsources[self.devname]
+            else:
+              self.isrsources = isrsources
+
+        elif isrstatus is None and isrflags is None and isrsources is None:
+            self.isrstatus = None
+            self.isrflags = None
+            self.isrsources = None
+
+        else:
+            raise Exception('Inconsistent ISR information provided for peripheral %s' % self.devname)
+
+    def _initISRFunctions(self):
+        """
+        Assign the correct event set/clear functions that correspond to the
+        possible ISR sources for this peripheral
+        """
+        if self.isrstatus is None:
+            # Set a placeholder event function
+            self.event = self._eventDoNothing
+            return
+
+        # Determine if the ISR sources and register types require a channel
+        if isinstance(self.isrstatus, PeriphRegister) and \
+                isinstance(self.isrflags, PeriphRegister) and \
+                isinstance(self.isrsources, dict):
+
+            # Standard case, only field names expected
+            self.event = self._eventRequest
+
+            src_fields = self.isrsources.keys()
+            status_reg = self.isrstatus
+            flag_reg = self.isrflags
+
+        elif isinstance(self.isrstatus, VArray) and \
+                isinstance(self.isrflags, VArray) and \
+                isinstance(self.isrsources, (tuple, list)):
+
+            # Channel case, both channel number and field names expected
+            self.event = self._eventRequestWithChannel
+
+            # Ensure that the sources for each channel are a dictionary and have
+            # the same keys.
+            if any(not isinstance(src, dict) for src in self.isrsources):
+                src_types_str = ', '.join(str(type(src)) for src in self.isrsources)
+                raise Exception('Inconsistent ISR channel source types: %s' % src_types_str)
+
+            src_fields = self.isrsources[0].keys()
+            status_reg = self.isrstatus[0]
+            flag_reg = self.isrflags[0]
+
+            if not all(src.keys() == src_fields and len(src) == len(src_fields) for src in self.isrsources[1:]):
+                src_fields_str = ', '.join(src_fields)
+                raise Exception('Inconsistent ISR channel sources != %s' % src_fields_str)
+
+        elif isinstance(self.isrstatus, list) and \
+                isinstance(self.isrflags, list) and \
+                isinstance(self.isrsources, (tuple, list)):
+
+            # Channel-only case, only a channel number expected but status and
+            # flag values are split across one or more multi-bit wide w1c
+            # registers
+            self.event = self._eventRequestWithOnlyChannel
+
+            if len(self.isrsources) != len(self.isrstatus) or \
+                    len(self.isrsources) != len(self.isrflags):
+                raise Exception('ISR status (%d), flags (%d), and sources (%d) mismatch' %
+                        (len(self.isrstatus), len(self.isrflags), len(self.isrsources)))
+
+            # The final check doesn't apply tho this ISR configuration
+            return
+
+        else:
+            raise Exception('Inconsistent channel requirements for ISR status (%s), flags (%s) and sources (%s)' %
+                    (isinstance(self.isrstatus, VArray),
+                        isinstance(self.isrflags, VArray),
+                        isinstance(self.isrsources, (tuple, list))))
+
+        # Ensure that all ISR sources are in the status and flag registers
+        if not all(f in status_reg._vs_fields and f in flag_reg._vs_fields for f in src_fields):
+            src_fields_str = ', '.join(src_fields)
+            status_fields_str = ', '.join(status_reg._vs_fields)
+            flag_fields_str = ', '.join(flag_reg._vs_fields)
+            raise Exception('ISR status and flag registers missing sources: %s (status: %s, flag: %s)' % \
+                    (src_fields_str, status_fields_str, flag_fields_str))
+
+    def _initDMASources(self):
+        """
+        Identify any ISR events that have associated DMA request events
+        automatically from the ISR flag registers.
+        """
+
+        # Default to an empty DMA events
+        self.dmaevents = {}
+
+        # if the event function is set to _eventDoNothing() then interrupts are
+        # not supported for this peripheral therefore DMA requests are not
+        # supported.  If the event function is set
+        # to_eventRequestWithOnlyChannel() then DMA requests are not supported
+        # in that special configuration.
+        if self.event == self._eventDoNothing or \
+                self.event == self._eventRequestWithOnlyChannel:
+            return
+
+        # loop through the possible interrupt sources and find any field names
+        # in the ISR flag register that a corresponding "_dirs" suffix and if
+        # there is a corresponding DIRS field save the DIRS field name.  The IRQ
+        # sources are the same indicating both interrupt sources and DMA event
+        # requests.
+        if isinstance(self.isrsources, (list, tuple)):
+            src_fields = self.isrsources[0].keys()
+            flag_reg = self.isrflags[0]
+        else:
+            src_fields = self.isrsources.keys()
+            flag_reg = self.isrflags
+
+        for field in src_fields:
+            dirs_field = field + '_dirs'
+            if dirs_field in flag_reg:
+                self.dmaevents[field] = dirs_field
+            else:
+                # Indicate that there is no corresponding DMA event for this
+                # interrupt source
+                self.dmaevents[field] = None
+
     def reset(self, emu):
         """
         Reset the peripheral registers here rather than having them be
-        registered directly as an emu module.  This provides more control
+        registered directly as an emu module. This provides more control
         over when the registers are returned to their initial state.
         """
         if isVstructType(self.registers) and hasattr(self.registers, 'reset'):
@@ -266,6 +432,107 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
             })
             raise exc
 
+    def _eventDoNothing(self, *args, **kwargs):
+        logger.error('[%s] call to unconfigured event function', self.devname)
+
+    def _eventRequest(self, field, value):
+        """
+        Takes a register field name,  and a value to set in the ISR status and
+        mask fields.
+
+        This function cannot be used to clear an interrupt event, that can only
+        be done manually with the vsOverrideValue() function or by writing a 1
+        to the correct status field.
+
+        If the interrupt has not been set previously, and the ISR mask is
+        enabled, then an ExternalException interrupt will be registered. If
+        there is a dma event associated with the supplied field then a DMA event
+        will also be initiated.
+        """
+        if value and self.isrstatus.vsGetField(field) == 0:
+            # Set the ISR status flag
+            self.isrstatus.vsOverrideValue(field, int(value))
+
+            if self.isrflags.vsGetField(field) == 1:
+                if self.isrsources[field] is not None:
+                    # If this field can initiate a DMA event, determine if an
+                    # interrupt request or dma request should be initiated.
+                    if self.dmaevents[field] is None or \
+                            self.isrflags.vsGetField(self.dmaevents[field]) == 0:
+                        # if the DIRS field in the flag register is 0 that indicates
+                        # an interrupt should be initiated
+                        self.emu.queueException(ExternalException(self.isrsources[field]))
+                    else:
+                        self.emu.dmaRequest(self.isrsources[field])
+                else:
+                    logger.warning('[%s] Ignoring %s event because no valid ISR source configured',
+                            self.devname, field)
+
+    def _eventRequestWithChannel(self, channel, field, value):
+        """
+        Takes a register field name, channel, and a value to set in the ISR
+        status and mask fields.
+
+        This function cannot be used to clear an interrupt event, that can only
+        be done manually with the vsOverrideValue() function or by writing a 1
+        to the correct status field.
+
+        If the interrupt has not been set previously, and the ISR mask is
+        enabled, then an ExternalException interrupt will be registered. If
+        there is a dma event associated with the supplied field then a DMA event
+        will also be initiated.
+        """
+        if value and self.isrstatus[channel].vsGetField(field) == 0:
+            # Set the ISR status flag
+            self.isrstatus[channel].vsOverrideValue(field, int(value))
+
+            if self.isrflags[channel].vsGetField(field) == 1:
+                if self.isrsources[field] is not None:
+                    # If this field can initiate a DMA event, determine if an
+                    # interrupt request or dma request should be initiated.
+                    if self.dmaevents[field] is None or \
+                            self.isrflags[channel].vsGetField(self.dmaevents[field]) == 0:
+                        # if the DIRS field in the flag register is 0 that indicates
+                        # an interrupt should be initiated
+                        self.emu.queueException(ExternalException(self.isrsources[channel][field]))
+                    else:
+                        self.emu.dmaRequest(self.isrsources[channel][field])
+                else:
+                    logger.warning('[%s] Ignoring channel %d %s event because no valid ISR source configured',
+                                   self.devname, channel, field)
+
+    def _eventRequestWithOnlyChannel(self, channel, value):
+        """
+        Takes a channel, and a value to set in one of the ISR status and mask
+        registers.  Because this variation of the event() function is used only
+        when there are multiple register Value should be a mask of one or more
+        bits to be set.
+
+        This function cannot be used to clear an interrupt event, that can only
+        be done manually with the vsOverrideValue() function or by writing a 1
+        to the correct status field.
+
+        If the interrupt has not been set previously, and the ISR mask is
+        enabled, then an ExternalException interrupt will be registered. If
+        there is a dma event associated with the supplied field then a DMA event
+        will also be initiated.
+        """
+        name, status = next((n, v) for n, v in self.isrstatus[channel])
+        new_status = value & ~status
+        if new_status != 0:
+            # Set the ISR status flag
+            self.isrstatus[channel].vsOverrideValue(name, value | status)
+
+            flags = next(val for _, val in self.isrflags[channel])
+            if new_status & flags:
+                if self.isrsources[channel] is not None:
+                    # channel-only event configurations don't have corresponding
+                    # DMA request flags
+                    self.emu.queueException(ExternalException(self.isrsources[channel]))
+                else:
+                    logger.warning('[%s] Ignoring channel %d event because no valid ISR source configured',
+                                   self.devname, channel)
+
 
 # Utilities used by the ExternalIOPeripheral class, these are separate to make
 # it easier to re-use them in the test ExternalIOClient test class below.
@@ -310,7 +577,7 @@ def _sendData(sock, data):
 
 def _recvObj(sock):
     """
-    Utility to recreate an object from received data.  The default method
+    Utility to recreate an object from received data. The default method
     used here is to unpickle the data.
     """
     # TODO: Don't use pickle for packing/unpacking message data
@@ -321,7 +588,7 @@ def _recvObj(sock):
 def _sendObj(sock, obj):
     """
     Utility to serialize an object into the data form necessary for
-    transmitting over the network.  The default method used here is
+    transmitting over the network. The default method used here is
     to pickle the object.
     """
     # TODO: Don't use pickle for packing/unpacking message data
@@ -505,10 +772,10 @@ class ExternalIOPeripheral(MMIOPeripheral):
         self.stop()
 
         # (re-)create the socket pair that will be used for the peripheral
-        # functions run in the main thread to send output data to the IO thread
-        # It'd be a lot more convenient to just use a queue for this but if we
-        # did that we couldn't use select() in the IO thread to listen for all
-        # incoming messages
+        # functions run in the main thread to send output data to the IO
+        # thread It'd be a lot more convenient to just use a queue for this
+        # but if we did that we couldn't use select() in the IO thread to
+        # listen for all incoming messages
         self._io_thread_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._io_thread_sock.bind(('', 0))
         self._io_thread_sock.listen(1)
@@ -518,25 +785,25 @@ class ExternalIOPeripheral(MMIOPeripheral):
         self._io_thread_tx_sock.connect(io_addr)
         self._io_thread_rx_sock, _ = self._io_thread_sock.accept()
 
-        # If analysis-only or test mode is enabled don't create sockets and
-        # attempt to do network things
+        # Create the server thread for this peripheral if the server args are
+        # defined.
         if self._server_args is not None:
             # Now (re-)create the IO thread
             args = {
                 'name': '%s-IO' % self.devname,
                 'target': self._io_handler,
 
-                # For some bizzare reason ipython just absolutely will hang up when
-                # exiting unless these are marked as daemon threads. There is some
-                # sort of check happening in check in
+                # For some bizzare reason ipython just absolutely will hang up
+                # when exiting unless these are marked as daemon threads. There
+                # is some sort of check happening in check in
                 # /usr/lib/python3.9/threading.py that is run before the atexit
                 # handler and is halting cleanup. This is some sort of weird
-                # behavior with ipython + SimpleQueue + Threads. However we have no
-                # need to add "task tracking" to this design so we don't want to add
-                # in the extra complexity of using full Queues.
+                # behavior with ipython + SimpleQueue + Threads. However we have
+                # no need to add "task tracking" to this design so we don't want
+                # to add in the extra complexity of using full Queues.
                 #
-                # So to work around this we just set the daemon flag, even though
-                # I don't like it.
+                # So to work around this we just set the daemon flag, even
+                # though I don't like it.
                 'daemon': True,
             }
             self._io_thread = threading.Thread(**args)
@@ -554,7 +821,7 @@ class ExternalIOPeripheral(MMIOPeripheral):
     def getTransmittedObjs(self):
         """
         Utility that is useful during testing to manually read transmitted
-        objects/messages from the inter-thread socket.  This is needed during
+        objects/messages from the inter-thread socket. This is needed during
         testing when the separate IO thread is not running.
         """
         # To get around the weird and various python/OS/socket issues to get
@@ -656,12 +923,12 @@ class TimerRegister:
     get a scaled tick count based on the primary emulator system time.
 
     This is based on the emutimers.EmulationTime class but without a separate
-    thread to track individual timers.  This uses the primary emulator systime
+    thread to track individual timers. This uses the primary emulator systime
     scaling factor.
     """
     def __init__(self, bits=None):
         """
-        Constructor for the TimerRegister class.  If the bits parameter is
+        Constructor for the TimerRegister class. If the bits parameter is
         specified then all timer values will be masked to ensure they are
         always within the allowed bit size.
         """
@@ -680,7 +947,7 @@ class TimerRegister:
 
     def setFreq(self, emu, freq):
         """
-        Set the frequency of this timer.  Uses the emulator's systime_scaling
+        Set the frequency of this timer. Uses the emulator's systime_scaling
         value to ensure that all timers are running with the same relative
         speed.
         """

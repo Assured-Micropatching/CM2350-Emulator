@@ -591,6 +591,9 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator, eape.Ppc32Em
         '''
         self.mcu_intc.queueException(exception)
 
+    def dmaRequest(self, source):
+        logger.info('DMA request for %s (%d)', source.name, source.value)
+
     def parseOpcode(self, va, arch=envi.ARCH_PPC_E32, skipcache=False):
         '''
         Combination of the WorkspaceEmulator and the standard envi.memory

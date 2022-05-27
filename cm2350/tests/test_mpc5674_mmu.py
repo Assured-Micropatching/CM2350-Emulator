@@ -721,8 +721,9 @@ class MPC5674_MMU_Test(unittest.TestCase):
     def test_valid_instr_addr(self):
         # Before clearing the default TLB entries, write the test data to SRAM
 
-        # PPC instruction @ 0x40012340:     li r6,0x214
-        # VLE instruction @ 0x40012340:     e_lha r6,0x214
+        # (immediates < 1024 are printed in decimal)
+        # PPC instruction @ 0x40012340:     li r6,532
+        # VLE instruction @ 0x40012340:     e_lha r6,532
         # VLE instruction @ 0x40012342:     se_mtar r12,r1
         self.emu.writeMemValue(0x40012340, 0x38C00214, 4)
 
@@ -754,12 +755,12 @@ class MPC5674_MMU_Test(unittest.TestCase):
             self.emu.setRegister(eapr.REG_MSR, test_msr)
 
             op = self.emu.parseOpcode(0x10012340)
-            self.assertEqual(str(op), 'li r6,0x214', msg)
+            self.assertEqual(str(op), 'li r6,532', msg)
 
             # When going through the address with VLE enabled different instructions
             # should be found
             op = self.emu.parseOpcode(0x10092340)
-            self.assertEqual(str(op), 'e_lha r6,0x214', msg)
+            self.assertEqual(str(op), 'e_lha r6,532', msg)
             op = self.emu.parseOpcode(0x10092342)
             self.assertEqual(str(op), 'se_mtar r12,r1', msg)
 

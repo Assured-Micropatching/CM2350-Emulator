@@ -6,7 +6,7 @@ import envi.archs.ppc.regs as eapr
 
 from ..ppc_vstructs import *
 from ..ppc_peripherals import *
-from ..intc_exc import ExternalException, INTC_SRC
+from ..intc_exc import INTC_SRC
 from ..ppc_mmu import PpcTlbFlags
 
 import logging
@@ -334,7 +334,9 @@ class ECSM(MMIOPeripheral):
     perform ECC simulation at this time.
     '''
     def __init__(self, emu, mmio_addr):
-        super().__init__(emu, 'ECSM', mmio_addr, 0x4000, regsetcls=ECSM_REGISTERS)
+        super().__init__(emu, 'ECSM', mmio_addr, 0x4000,
+                regsetcls=ECSM_REGISTERS,
+                isrstatus='esr', isrflags='ecr', isrsources=ECSM_INT_SRCS)
 
         # Callback for the EEGR register that can force RAM ECC write errors
         self.registers.vsAddParseCallback('eegr', self.eegrUpdate)
@@ -377,25 +379,6 @@ class ECSM(MMIOPeripheral):
     def swtReset(self):
         # Indicates that a reset is because of a software watchdog timeout
         self._swt_reset = True
-
-    def event(self, name, value):
-        """
-        Takes in a name for an event, updates the status register (ESR) field of
-        the matching name, and if the value is "1" queues a corresponding
-        interrupt if there is a valid interrupt source configured.
-
-        Setting an event value of 0 has no effect, and setting an event value of
-        1 when the ESR field is already 1 has no effect.
-        """
-        if value and self.registers.esr.vsGetField(name) == 0:
-            self.registers.esr.vsOverrideValue(name, int(value))
-
-            if self.registers.ecr.vsGetField(name) == 1:
-                intsrc = ECSM_INT_SRCS[name]
-                if intsrc:
-                    self.emu.queueException(ExternalException(intsrc))
-                else:
-                    logger.warning('Ignoring %s event because no valid INT_SRC configured', name)
 
     def _getAddrAttrs(self, addr, instr):
         flags = 0

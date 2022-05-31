@@ -1,7 +1,9 @@
 # the core of the CM2350 simulator
 import os
-path = os.path.dirname(os.path.abspath(__file__))
 import sys
+import time
+
+path = os.path.dirname(os.path.abspath(__file__))
 internalpath = os.sep.join([os.path.abspath('.'), 'cm2350', 'internal'])
 if internalpath not in sys.path:
     sys.path.insert(0, internalpath)
@@ -86,13 +88,20 @@ class CM2350:
     def __init__(self, args=None):
         # Create the MPC5674 emulator with the default configuration values
         self.emu = MPC5674_Emulator(defconfig=self.defconfig, docconfig=self.docconfig, args=args)
-        self.vw = self.emu.vw
 
         # start off with the external pins
         self.connectGPDI(89, self.emu.vw.config.project.CM2350.p89)
         self.connectGPDI(90, self.emu.vw.config.project.CM2350.p90)
         self.connectGPDI(91, self.emu.vw.config.project.CM2350.p91)
         self.connectGPDI(92, self.emu.vw.config.project.CM2350.p92)
+
+    def __del__(self):
+        self.shutdown()
+
+    def shutdown(self):
+        # Clean up the ECU and Vivisect Workspace cleanly
+        if hasattr(self, 'emu') and self.emu:
+            self.emu.shutdown()
 
     def connectGPDI(self, pinid, val=True):
         self.emu.siu.connectGPIO(pinid, val)

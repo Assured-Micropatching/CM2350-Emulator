@@ -1,14 +1,10 @@
 import os
 import random
-import unittest
-import queue
 
-import envi.archs.ppc.const as eapc
-import envi.archs.ppc.regs as eapr
-
-from .. import mmio, e200z7, CM2350
-from ..peripherals import flash as flashperiph
 import envi.bits as e_bits
+from ..peripherals import flash as flashperiph
+
+from .helpers import MPC5674_Test
 
 import logging
 logger = logging.getLogger(__name__)
@@ -223,45 +219,8 @@ def find_interlock_addr(addr, mcr_addr):
     # Now pick an address
     return random.choice(block)
 
-class MPC5674_Flash_Test(unittest.TestCase):
-    def setUp(self):
-        import os
-        if os.environ.get('LOG_LEVEL', 'INFO') == 'DEBUG':
-            args = ['-m', 'test', '-c', '-vvv']
-        else:
-            args = ['-m', 'test', '-c']
-        self.ECU = CM2350(args)
-        self.emu = self.ECU.emu
 
-        # Set the INTC[CPR] to 0 to allow all peripheral (external) exception
-        # priorities to happen
-        self.emu.intc.registers.cpr.pri = 0
-        msr_val = self.emu.getRegister(eapr.REG_MSR)
-
-        # Enable all possible Exceptions so if anything happens it will be
-        # detected by the _getPendingExceptions utility
-        msr_val |= eapc.MSR_EE_MASK | eapc.MSR_CE_MASK | eapc.MSR_ME_MASK | eapc.MSR_DE_MASK
-        self.emu.setRegister(eapr.REG_MSR, msr_val)
-
-        # Enable the timebase (normally done by writing a value to HID0)
-        self.emu.enableTimebase()
-
-    def _getPendingExceptions(self):
-        pending_excs = []
-        for intq in self.emu.mcu_intc.intqs[1:]:
-            try:
-                while True:
-                    pending_excs.append(intq.get_nowait())
-            except queue.Empty:
-                pass
-        return pending_excs
-
-    def tearDown(self):
-        # Ensure that there are no unprocessed exceptions
-        pending_excs = self._getPendingExceptions()
-        for exc in pending_excs:
-            print('Unhanded PPC Exception %s' % exc)
-        self.assertEqual(pending_excs, [])
+class MPC5674_Flash_Test(MPC5674_Test):
 
     ############################################
     # Confirm default control register states

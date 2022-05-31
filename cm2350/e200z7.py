@@ -283,6 +283,21 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator, eape.Ppc32Em
         self._read_callbacks = {}
         self._write_callbacks = {}
 
+    def __del__(self):
+        self.shutdown()
+
+    def shutdown(self):
+        # Call the emutime shutdown function
+        super().shutdown()
+
+        if self.modules:
+            # Go through each peripheral and if any of them have a server thread
+            # running, stop it now
+            for mname in list(self.modules):
+                if hasattr(self.modules[mname], 'stop'):
+                    self.modules[mname].stop()
+                del self.modules[mname]
+
     def _tbUpdate(self, thing):
         if self.hid0.tben:
             self.enableTimebase()

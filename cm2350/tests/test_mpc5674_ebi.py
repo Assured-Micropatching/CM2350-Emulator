@@ -1,14 +1,6 @@
-import os
-import queue
 import random
-import unittest
 
-import envi.archs.ppc.const as eapc
-import envi.archs.ppc.regs as eapr
-
-from cm2350 import intc_exc
-
-from .. import CM2350
+from .helpers import MPC5674_Test
 
 
 EBI_MCR_ADDR            = 0xC3F84000
@@ -104,45 +96,7 @@ EBI_CONFIG_TESTS = (
 )
 
 
-class MPC5674_EBI_Test(unittest.TestCase):
-    def setUp(self):
-            if os.environ.get('LOG_LEVEL', 'INFO') == 'DEBUG':
-                args = ['-m', 'test', '-c', '-vvv']
-            else:
-                args = ['-m', 'test', '-c']
-
-            self.ECU = CM2350(args)
-            self.emu = self.ECU.emu
-
-            # Set the INTC[CPR] to 0 to allow all peripheral (external) exception
-            # priorities to happen
-            self.emu.intc.registers.cpr.pri = 0
-            msr_val = self.emu.getRegister(eapr.REG_MSR)
-
-            # Enable all possible Exceptions so if anything happens it will be
-            # detected by the _getPendingExceptions utility
-            msr_val |= eapc.MSR_EE_MASK | eapc.MSR_CE_MASK | eapc.MSR_ME_MASK | eapc.MSR_DE_MASK
-            self.emu.setRegister(eapr.REG_MSR, msr_val)
-
-            # Enable the timebase (normally done by writing a value to HID0)
-            self.emu.enableTimebase()
-
-    def _getPendingExceptions(self):
-        pending_excs = []
-        for intq in self.emu.mcu_intc.intqs[1:]:
-            try:
-                while True:
-                    pending_excs.append(intq.get_nowait())
-            except queue.Empty:
-                pass
-        return pending_excs
-
-    def tearDown(self):
-        # Ensure that there are no unprocessed exceptions
-        pending_excs = self._getPendingExceptions()
-        for exc in pending_excs:
-            print('Unhanded PPC Exception %s' % exc)
-        self.assertEqual(pending_excs, [])
+class MPC5674_EBI_Test(MPC5674_Test):
 
     ##################################################
     # Tests

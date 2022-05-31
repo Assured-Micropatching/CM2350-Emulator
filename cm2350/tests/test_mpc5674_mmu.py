@@ -1,18 +1,19 @@
-import unittest
 import random
-import queue
-
-import envi.archs.ppc.const as eapc
-import envi.archs.ppc.regs as eapr
-import envi.archs.ppc.spr as eaps
+import unittest
 
 import envi.bits as e_bits
-
-from .. import e200z7, CM2350
+import envi.archs.ppc.spr as eaps
+import envi.archs.ppc.regs as eapr
+import envi.archs.ppc.const as eapc
 
 # import a few specific constants from the ppc_mmu module that are not exported
 # automatically with *
-from ..ppc_mmu import PpcTlbPageSize, PpcTlbPerm, PpcTlbFlags, PpcTLBEntry, MAS0_TBSEL_SHIFT, MAS0_ESEL_SHIFT, MAS4_TLBSELD_SHIFT, MAS4_TSIZED_SHIFT, MAS4_FLAGSD_SHIFT
+from ..ppc_mmu import PpcTlbPageSize, PpcTlbPerm, PpcTlbFlags, PpcTLBEntry, \
+                      MAS0_TBSEL_SHIFT, MAS0_ESEL_SHIFT, MAS4_TLBSELD_SHIFT, \
+                      MAS4_TSIZED_SHIFT, MAS4_FLAGSD_SHIFT
+
+from .helpers import MPC5674_Test
+
 
 # From "8.5.2 BAM Program Operation" page 296 of MPC5674FRM.pdf
 default_tlb_entries = (
@@ -212,47 +213,11 @@ class PpcTLBEntry_Test(unittest.TestCase):
         self.assertEqual(entry.iprot, 0)
 
 
-class MPC5674_MMU_Test(unittest.TestCase):
-    def setUp(self):
-        import os
-        if os.environ.get('LOG_LEVEL', 'INFO') == 'DEBUG':
-            args = ['-m', 'test', '-c', '-vvv']
-        else:
-            args = ['-m', 'test', '-c']
-        self.ECU = CM2350(args)
-        self.emu = self.ECU.emu
+class MPC5674_MMU_Test(MPC5674_Test):
 
-        # Set the INTC[CPR] to 0 to allow all peripheral (external) exception
-        # priorities to happen
-        self.emu.intc.registers.cpr.pri = 0
-        msr_val = self.emu.getRegister(eapr.REG_MSR)
-
-        # Enable all possible Exceptions so if anything happens it will be
-        # detected by the _getPendingExceptions utility
-        msr_val |= eapc.MSR_EE_MASK | eapc.MSR_CE_MASK | eapc.MSR_ME_MASK | eapc.MSR_DE_MASK
-        self.emu.setRegister(eapr.REG_MSR, msr_val)
-
-        # Enable the timebase (normally done by writing a value to HID0)
-        self.emu.enableTimebase()
-
-    def _getPendingExceptions(self):
-        pending_excs = []
-        for intq in self.emu.mcu_intc.intqs[1:]:
-            try:
-                while True:
-                    pending_excs.append(intq.get_nowait())
-            except queue.Empty:
-                pass
-        return pending_excs
-
-    def tearDown(self):
-        # Ensure that there are no unprocessed exceptions
-        pending_excs = self._getPendingExceptions()
-        for exc in pending_excs:
-            print('Unhanded PPC Exception %s' % exc)
-        self.assertEqual(pending_excs, [])
-
-    ##### UTILITIES #####
+    ##################################################
+    # UTILITIES
+    ##################################################
 
     def get_spr_num(self, reg):
         regname = self.emu.getRegisterName(reg)
@@ -327,7 +292,9 @@ class MPC5674_MMU_Test(unittest.TestCase):
         tlbsync_op = self.emu.archParseOpcode(tlbsync_bytes)
         self.emu.executeOpcode(tlbsync_op)
 
-    ##### TESTS #####
+    ##################################################
+    # TESTS
+    ##################################################
 
     def test_mmu_config(self):
         '''

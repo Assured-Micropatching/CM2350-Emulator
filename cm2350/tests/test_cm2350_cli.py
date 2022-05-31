@@ -534,9 +534,13 @@ class CM2350_CLI(unittest.TestCase):
         #############################
         # Cleanup
 
+        # to gracefully clean up the ECU resources call halt() before deleting
+        # the object
+        ecu.shutdown()
+        del ecu
+
         # Test is completed, remove the configuration directory (unless config
         # == EXISTING_CONFIG)
-        del ecu
         if not exists:
             shutil.rmtree(config)
         elif backup_exists:

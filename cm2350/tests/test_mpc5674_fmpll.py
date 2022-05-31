@@ -1,11 +1,4 @@
-import unittest
-import random
-import queue
-
-import envi.archs.ppc.const as eapc
-import envi.archs.ppc.regs as eapr
-
-from .. import CM2350
+from .helpers import MPC5674_Test
 
 
 FMPLL_SYNSR        = 0xC3F80004
@@ -45,7 +38,7 @@ FMPLL_ESYNCR2_ERFD_MASK     = 0x0000003F
 FMPLL_ESYNCR2_ERFD_SHIFT    = 0
 
 
-class MPC5674_FMPLL_Test(unittest.TestCase):
+class MPC5674_FMPLL_Test(MPC5674_Test):
     # Default to 40MHz external clock
     EXTAL = 40000000
     PLLCFG = 0b101
@@ -89,55 +82,14 @@ class MPC5674_FMPLL_Test(unittest.TestCase):
         26666666.66666666,  # ESYNCR2[ERFD] = 5
     ]
 
-    def get_random_pc(self):
-        start, end, perms, filename = self.emu.getMemoryMap(0)
-        return random.randrange(start, end, 4)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
-    def setUp(self):
-        import os
-        if os.environ.get('LOG_LEVEL', 'INFO') == 'DEBUG':
-            args = ['-m', 'test', '-c', '-vvv']
-        else:
-            args = ['-m', 'test', '-c']
-
-        # set the extal clock to 40MHz
-        args.extend(['-O', 'project.MPC5674.FMPLL.extal=%d' % self.EXTAL])
-
-        # For an extal of 40MHz PLLCFG should be 0b101 (5)
-        args.extend(['-O', 'project.MPC5674.SIU.pllcfg=%d' % self.PLLCFG])
-
-        self.ECU = CM2350(args)
-        self.emu = self.ECU.emu
-
-        # Set the INTC[CPR] to 0 to allow all peripheral (external) exception
-        # priorities to happen
-        self.emu.intc.registers.cpr.pri = 0
-        msr_val = self.emu.getRegister(eapr.REG_MSR)
-
-        # Enable all possible Exceptions so if anything happens it will be
-        # detected by the _getPendingExceptions utility
-        msr_val |= eapc.MSR_EE_MASK | eapc.MSR_CE_MASK | eapc.MSR_ME_MASK | eapc.MSR_DE_MASK
-        self.emu.setRegister(eapr.REG_MSR, msr_val)
-
-        # Enable the timebase (normally done by writing a value to HID0)
-        self.emu.enableTimebase()
-
-    def _getPendingExceptions(self):
-        pending_excs = []
-        for intq in self.emu.mcu_intc.intqs[1:]:
-            try:
-                while True:
-                    pending_excs.append(intq.get_nowait())
-            except queue.Empty:
-                pass
-        return pending_excs
-
-    def tearDown(self):
-        # Ensure that there are no unprocessed exceptions
-        pending_excs = self._getPendingExceptions()
-        for exc in pending_excs:
-            print('Unhanded PPC Exception %s' % exc)
-        self.assertEqual(pending_excs, [])
+        # Add specific EXTAL and PLLCFG startup arguments
+        self.args = MPC5674_Test.args + [
+            '-O', 'project.MPC5674.FMPLL.extal=%d' % self.EXTAL,
+            '-O', 'project.MPC5674.SIU.pllcfg=%d' % self.PLLCFG,
+        ]
 
     def test_fmpll_synsr_defaults(self):
         self.assertEqual(self.emu.readMemory(FMPLL_SYNSR, 4), FMPLL_SYNSR_DEFAULT_BYTES)

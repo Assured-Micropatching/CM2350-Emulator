@@ -196,9 +196,25 @@ class EmulationTime:
         self._stop = threading.Event()
 
         # Thread to run the timers. This thread should get cleaned up properly
-        # when the EmulationTime object is deleted, but just in case set this as
-        # a daemon thread.
-        self._tb_thread = threading.Thread(target=self._tb_run, daemon=True)
+        # when the EmulationTime object is deleted
+        #
+        # For some bizzare reason ipython just absolutely will hang up
+        # when exiting unless these are marked as daemon threads. There
+        # is some sort of check happening in check in
+        # /usr/lib/python3.9/threading.py that is run before the atexit
+        # handler and is halting cleanup. This is some sort of weird
+        # behavior with ipython + SimpleQueue + Threads. However we have
+        # no need to add "task tracking" to this design so we don't want
+        # to add in the extra complexity of using full Queues.
+        #
+        # So to work around this we just set the daemon flag, even
+        # though I don't like it.
+        args = {
+            'name': 'tb',
+            'target': self._tb_run,
+            'daemon': True,
+        }
+        self._tb_thread = threading.Thread(**args)
 
         self._tb_thread.start()
 
@@ -214,6 +230,9 @@ class EmulationTime:
         self.freq = None
 
     def __del__(self):
+        self.haltEmuTimeThread()
+
+    def shutdown(self):
         '''
         Stops the timer management thread and cleanly exits the system.  This
         is done to ensure that when an EmulationTime object is deleted that the
@@ -221,25 +240,29 @@ class EmulationTime:
         especially during testing.
         '''
         # Stop and deallocate all the timers
-        try:
+        if self._tb_thread:
             self._stop.set()
 
             # Stop all of the timers
-            with self._timer_update:
-                for t in self._timers:
-                    t._stop()
+            if self._timers:
+                with self._timer_update:
+                    for t in self._timers:
+                        # This will cause a timer to be "stopped"
+                        t.target = None
 
-                # Signal the timer re-check condition as well which will force the
-                # thread to re-evaluate which timer is next and it will notice it should
-                # halt
-                self._timer_update.notify()
+                    # Signal the timer re-check condition as well which will force the
+                    # thread to re-evaluate which timer is next and it will notice it should
+                    # halt
+                    self._timer_update.notify()
+                self._timers = []
 
             # Wait for the thread to exit
-            self._tb_thread.join()
-        except AttributeError:
-            # Most likely means the emulator object did not fully initialize, so
-            # don't add extra errors here
-            pass
+            self._tb_thread.join(1)
+
+            if self._tb_thread.is_alive():
+                logger.error('Failed to stop system time thread')
+            else:
+                self._tb_thread = None
 
     def enableTimebase(self, start_paused=False):
         '''

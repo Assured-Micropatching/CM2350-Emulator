@@ -1,11 +1,6 @@
-import unittest
-import queue
-
-import envi.archs.ppc.const as eapc
-import envi.archs.ppc.regs as eapr
-
-from .. import CM2350
 from ..ppc_mmu import PpcTlbPageSize, PpcTlbFlags, PpcTlbPerm
+
+from .helpers import MPC5674_Test
 
 
 BAM_RCHW_ADDRS = [
@@ -44,47 +39,7 @@ DEFAULT_VLE_TLB = (
     {'valid': 1, 'iprot': 1, 'tid': 0, 'ts': 0, 'tsiz': PpcTlbPageSize.SIZE_1MB,   'epn': 0xC3F00000, 'flags': PpcTlbFlags.IG,  'rpn': 0xC3F00000, 'user': 0, 'perm': PpcTlbPerm.SU_RWX},
 )
 
-class MPC5674_Flash_BAM(unittest.TestCase):
-    def setUp(self):
-        import os
-        if os.environ.get('LOG_LEVEL', 'INFO') == 'DEBUG':
-            args = ['-m', 'test', '-c', '-vvv']
-        else:
-            args = ['-m', 'test', '-c']
-
-        self.ECU = CM2350(args)
-        self.emu = self.ECU.emu
-
-        # Set the INTC[CPR] to 0 to allow all peripheral (external) exception
-        # priorities to happen
-        self.emu.intc.registers.cpr.pri = 0
-        msr_val = self.emu.getRegister(eapr.REG_MSR)
-
-        # Enable all possible Exceptions so if anything happens it will be
-        # detected by the _getPendingExceptions utility
-        msr_val |= eapc.MSR_EE_MASK | eapc.MSR_CE_MASK | eapc.MSR_ME_MASK | eapc.MSR_DE_MASK
-        self.emu.setRegister(eapr.REG_MSR, msr_val)
-
-        # Enable the timebase (normally done by writing a value to HID0)
-        self.emu.enableTimebase()
-
-    def _getPendingExceptions(self):
-        pending_excs = []
-        for intq in self.emu.mcu_intc.intqs[1:]:
-            try:
-                while True:
-                    pending_excs.append(intq.get_nowait())
-            except queue.Empty:
-                pass
-        return pending_excs
-
-    def tearDown(self):
-        # Ensure that there are no unprocessed exceptions
-        pending_excs = self._getPendingExceptions()
-        for exc in pending_excs:
-            print('Unhanded PPC Exception %s' % exc)
-        self.assertEqual(pending_excs, [])
-
+class MPC5674_Flash_BAM(MPC5674_Test):
     def test_bam_flash_empty(self):
         # Confirm that by default no valid target was found
         self.assertEqual(self.emu.bam.rchw_addr, None)

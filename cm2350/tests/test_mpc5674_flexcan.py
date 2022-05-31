@@ -1,25 +1,19 @@
-import unittest
-import random
-import queue
-import time
+import gc
 import os
+import time
 import random
 import struct
-import gc
-import sys
-
-from .. import CM2350
-from cm2350 import intc_exc
-
-import envi.archs.ppc.const as eapc
-import envi.archs.ppc.regs as eapr
+import unittest
 
 from .. import intc_exc
 from ..peripherals import flexcan
 from ..ppc_peripherals import ExternalIOClient
 
+from .helpers import MPC5674_Test
+
 import logging
 logger = logging.getLogger(__name__)
+
 
 FLEXCAN_DEVICES = (
     ('FlexCAN_A', 0XFFFC0000),
@@ -212,51 +206,7 @@ def read_mb_data(emu, dev, mb):
     return b''.join(emu.readMemory(a, size) for a in range(start, stop, size))
 
 
-class MPC5674_FlexCAN_Test(unittest.TestCase):
-    def get_random_pc(self):
-        start, end, perms, filename = self.emu.getMemoryMap(0)
-        return random.randrange(start, end, 4)
-
-    def setUp(self):
-        # Specify mode "test" and a non-existing directory for the configuration
-        # location to use (so the user's configuration is not used)
-        if os.environ.get('LOG_LEVEL', 'INFO') == 'DEBUG':
-            args = ['-m', 'test', '-c', '-vvv']
-        else:
-            args = ['-m', 'test', '-c']
-        self.ECU = CM2350(args)
-        self.emu = self.ECU.emu
-
-        # Set the INTC[CPR] to 0 to allow all peripheral (external) exception
-        # priorities to happen
-        self.emu.intc.registers.cpr.pri = 0
-        msr_val = self.emu.getRegister(eapr.REG_MSR)
-
-        # Enable all possible Exceptions so if anything happens it will be
-        # detected by the _getPendingExceptions utility
-        msr_val |= eapc.MSR_EE_MASK | eapc.MSR_CE_MASK | eapc.MSR_ME_MASK | eapc.MSR_DE_MASK
-        self.emu.setRegister(eapr.REG_MSR, msr_val)
-
-        # Enable the timebase (normally done by writing a value to HID0)
-        self.emu.enableTimebase()
-
-    def _getPendingExceptions(self):
-        pending_excs = []
-        for intq in self.emu.mcu_intc.intqs[1:]:
-            try:
-                while True:
-                    pending_excs.append(intq.get_nowait())
-            except queue.Empty:
-                pass
-        return pending_excs
-
-    def tearDown(self):
-        # Ensure that there are no unprocessed exceptions
-        pending_excs = self._getPendingExceptions()
-        for exc in pending_excs:
-            print('Unhanded PPC Exception %s' % exc)
-        self.assertEqual(pending_excs, [])
-
+class MPC5674_FlexCAN_Test(MPC5674_Test):
     def set_sysclk_240mhz(self):
         # Default PLL clock based on the PCB params selected for these tests is
         # 60 MHz
@@ -1423,56 +1373,14 @@ class MPC5674_FlexCAN_Test(unittest.TestCase):
         pass
 
 
-class MPC5674_FlexCAN_RealIO(unittest.TestCase):
-    def setUp(self):
-        # This test does not specify the "test" mode so that the normal
-        # peripheral IO can happen
-        #
-        # Specify non-existing directory for the configuration
-        # location to use (so the user's configuration is not used)
-        #
-        # Also explicitly supply the FlexCAN server port numbers here
-        args = [
-            '-c',
-            '-O', 'project.MPC5674.FlexCAN_A.port=10001',
-            '-O', 'project.MPC5674.FlexCAN_B.port=10002',
-            '-O', 'project.MPC5674.FlexCAN_C.port=10003',
-            '-O', 'project.MPC5674.FlexCAN_D.port=10004',
-        ]
-        if os.environ.get('LOG_LEVEL', 'INFO') == 'DEBUG':
-            args.append('-vvv')
-        self.ECU = CM2350(args)
-        self.emu = self.ECU.emu
-
-        # Set the INTC CPR[PRI] to 0 to allow all peripheral (external)
-        # exception priorities to happen
-        self.emu.intc.registers.cpr.pri = 0
-
-        # Enable all possible Exceptions so if anything happens it will be
-        # detected by the _getPendingExceptions utility
-        msr_val = self.emu.getRegister(eapr.REG_MSR)
-        msr_val |= eapc.MSR_EE_MASK | eapc.MSR_CE_MASK | eapc.MSR_ME_MASK | eapc.MSR_DE_MASK
-        self.emu.setRegister(eapr.REG_MSR, msr_val)
-
-        # Enable the timebase (normally done by writing a value to HID0)
-        self.emu.enableTimebase()
-
-    def _getPendingExceptions(self):
-        pending_excs = []
-        for intq in self.emu.mcu_intc.intqs[1:]:
-            try:
-                while True:
-                    pending_excs.append(intq.get_nowait())
-            except queue.Empty:
-                pass
-        return pending_excs
-
-    def tearDown(self):
-        # Ensure that there are no unprocessed exceptions
-        pending_excs = self._getPendingExceptions()
-        for exc in pending_excs:
-            print('Unhanded PPC Exception %s' % exc)
-        self.assertEqual(pending_excs, [])
+class MPC5674_FlexCAN_RealIO(MPC5674_Test):
+    args = [
+        '-c',
+        '-O', 'project.MPC5674.FlexCAN_A.port=10001',
+        '-O', 'project.MPC5674.FlexCAN_B.port=10002',
+        '-O', 'project.MPC5674.FlexCAN_C.port=10003',
+        '-O', 'project.MPC5674.FlexCAN_D.port=10004',
+    ]
 
     def set_sysclk_240mhz(self):
         # Default PLL clock based on the PCB params selected for these tests is

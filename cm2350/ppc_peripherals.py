@@ -691,7 +691,11 @@ class ExternalIOPeripheral(MMIOPeripheral):
 
         # Remove this object from the list of tasks that need cleaned up
         with ExternalIOPeripheral._task_lock:
-            ExternalIOPeripheral._tasks.remove(self)
+            try:
+                ExternalIOPeripheral._tasks.remove(self)
+            except ValueError:
+                # Probably means not fully initialized, ignore the error
+                pass
 
     def stop(self):
         """
@@ -700,11 +704,11 @@ class ExternalIOPeripheral(MMIOPeripheral):
         if self._io_thread is not None:
             # Close the sockets used for communication between the main thread
             # and the IO thread, that should signal the IO thread to exit
-            if self._tx_sock is not None:
-                self._tx_sock.shutdown(socket.SHUT_RDWR)
-                self._tx_sock.close()
+            if self._io_thread_tx_sock is not None:
+                self._io_thread_tx_sock.shutdown(socket.SHUT_RDWR)
+                self._io_thread_tx_sock.close()
 
-            self._io_thread.join()
+            self._io_thread.join(1)
 
             # Now close the thread end of the socket
             self._io_thread_rx_sock.shutdown(socket.SHUT_RDWR)
@@ -712,9 +716,9 @@ class ExternalIOPeripheral(MMIOPeripheral):
 
             # If the thread has not exited, something has gone wrong
             if self._io_thread.is_alive():
-                # clear the io_thread here so when this class is deallocated
-                # that we don't try to stop the thread again
-                raise Exception('Failed to stop %s IO thread' % (self.devname))
+                logger.error('Failed to stop %s IO thread', self.devname)
+            else:
+                self._io_thread = None
 
         # These should all be closed, but just to avoid weird errors during
         # shutdown ensure they are closed now
@@ -725,26 +729,19 @@ class ExternalIOPeripheral(MMIOPeripheral):
                 pass
             self._io_thread_sock = None
 
-        if self._io_thread_tx_sock  is not None:
+        if self._io_thread_tx_sock is not None:
             try:
                 self._io_thread_tx_sock.close()
             except OSError:
                 pass
             self._io_thread_tx_sock = None
 
-        if self._io_thread_rx_sock  is not None:
+        if self._io_thread_rx_sock is not None:
             try:
                 self._io_thread_rx_sock.close()
             except OSError:
                 pass
             self._io_thread_rx_sock = None
-
-        if self._io_thread is not None:
-            try:
-                self._io_thread.close()
-            except OSError:
-                pass
-            self._io_thread = None
 
     def init(self, emu):
         """

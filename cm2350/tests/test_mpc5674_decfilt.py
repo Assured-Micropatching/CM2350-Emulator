@@ -1,14 +1,4 @@
-import os
-import queue
-import random
-import struct
-import unittest
-
-from cm2350 import CM2350, intc_exc
-from cm2350.peripherals import decfilt
-
-import envi.archs.ppc.regs as eapr
-import envi.archs.ppc.const as eapc
+from .helpers import MPC5674_Test
 
 
 DECFILT_DEVICES = (
@@ -45,46 +35,7 @@ DECFILT_MCR_DEFAULT       = 0x00008000
 DECFILT_MCR_DEFAULT_BYTES = b'\x00\x00\x80\x00'
 
 
-class MPC5674_DECFILT_Test(unittest.TestCase):
-    def setUp(self):
-        # Specify mode "test" and a non-existing directory for the configuration
-        # location to use (so the user's configuration is not used)
-        if os.environ.get('LOG_LEVEL', 'INFO') == 'DEBUG':
-            args = ['-m', 'test', '-c', '-vvv']
-        else:
-            args = ['-m', 'test', '-c']
-        self.ECU = CM2350(args)
-        self.emu = self.ECU.emu
-
-        # Set the INTC[CPR] to 0 to allow all peripheral (external) exception
-        # priorities to happen
-        self.emu.intc.registers.cpr.pri = 0
-        msr_val = self.emu.getRegister(eapr.REG_MSR)
-
-        # Enable all possible Exceptions so if anything happens it will be
-        # detected by the _getPendingExceptions utility
-        msr_val |= eapc.MSR_EE_MASK | eapc.MSR_CE_MASK | eapc.MSR_ME_MASK | eapc.MSR_DE_MASK
-        self.emu.setRegister(eapr.REG_MSR, msr_val)
-
-        # Enable the timebase (normally done by writing a value to HID0)
-        self.emu.enableTimebase()
-
-    def _getPendingExceptions(self):
-        pending_excs = []
-        for intq in self.emu.mcu_intc.intqs[1:]:
-            try:
-                while True:
-                    pending_excs.append(intq.get_nowait())
-            except queue.Empty:
-                pass
-        return pending_excs
-
-    def tearDown(self):
-        # Ensure that there are no unprocessed exceptions
-        pending_excs = self._getPendingExceptions()
-        for exc in pending_excs:
-            print('Unhanded PPC Exception %s' % exc)
-        self.assertEqual(pending_excs, [])
+class MPC5674_DECFILT_Test(MPC5674_Test):
 
     ##################################################
     # Simple Register Tests

@@ -1,14 +1,11 @@
-import unittest
-import random
-import queue
 import time
+import random
 
 import envi.bits as e_bits
-from .. import CM2350
+
 from cm2350 import intc_exc
 
-import envi.archs.ppc.const as eapc
-import envi.archs.ppc.regs as eapr
+from .helpers import MPC5674_Test
 
 import logging
 logger = logging.getLogger(__name__)
@@ -38,51 +35,10 @@ SWT_MCR_DEFAULT_BYTES = b'\xff\x00\x01\x0a'
 SWT_TO_DEFAULT_BYTES  = b'\x00\x05\xfc\xd0'
 
 
-class MPC5674_WDT_Test(unittest.TestCase):
-    def get_random_pc(self):
-        start, end, perms, filename = self.emu.getMemoryMap(0)
-        return random.randrange(start, end, 4)
-
-    def setUp(self):
-        import os
-        if os.environ.get('LOG_LEVEL', 'INFO') == 'DEBUG':
-            args = ['-m', 'test', '-c', '-vvv']
-        else:
-            args = ['-m', 'test', '-c']
-        self.ECU = CM2350(args)
-        self.emu = self.ECU.emu
-
-        # Set the INTC[CPR] to 0 to allow all peripheral (external) exception
-        # priorities to happen
-        self.emu.intc.registers.cpr.pri = 0
-        msr_val = self.emu.getRegister(eapr.REG_MSR)
-
-        # Enable all possible Exceptions so if anything happens it will be
-        # detected by the _getPendingExceptions utility
-        msr_val |= eapc.MSR_EE_MASK | eapc.MSR_CE_MASK | eapc.MSR_ME_MASK | eapc.MSR_DE_MASK
-        self.emu.setRegister(eapr.REG_MSR, msr_val)
-
-        # Enable the timebase (normally done by writing a value to HID0)
-        # But for the watchdog tests enable the timebase paused so there is more
-        # control over time
-        self.emu.enableTimebase(start_paused=True)
-
-    def _getPendingExceptions(self):
-        pending_excs = []
-        for intq in self.emu.mcu_intc.intqs[1:]:
-            try:
-                while True:
-                    pending_excs.append(intq.get_nowait())
-            except queue.Empty:
-                pass
-        return pending_excs
-
-    def tearDown(self):
-        # Ensure that there are no unprocessed exceptions
-        pending_excs = self._getPendingExceptions()
-        for exc in pending_excs:
-            print('Unhanded PPC Exception %s' % exc)
-        self.assertEqual(pending_excs, [])
+class MPC5674_WDT_Test(MPC5674_Test):
+    # for the watchdog tests enable the timebase paused so there is more control
+    # over time, but we don't need the full "accurate_timing"
+    _start_timebase_paused = True
 
     def test_swt_mcr_defaults(self):
         self.assertEqual(self.emu.readMemory(SWT_MCR, 4), SWT_MCR_DEFAULT_BYTES)

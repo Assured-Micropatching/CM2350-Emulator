@@ -1,5 +1,7 @@
 import threading
 
+import envi.bits as e_bits
+
 from ..ppc_vstructs import *
 from ..ppc_peripherals import *
 from ..intc_exc import MceDataReadBusError, MceWriteBusError, ResetException, INTC_SRC
@@ -119,8 +121,6 @@ class SWT(MMIOPeripheral):
         super().__init__(emu, 'SWT', mmio_addr, 0x4000,
                 regsetcls=SWT_REGISTERS,
                 isrstatus='ir', isrflags='mcr', isrsources=SWT_INT_SRCS)
-
-        self._config = emu.vw.config.project.MPC5674.FMPLL
 
         self.registers.vsAddParseCallback('sr', self.processServiceKey)
         self.registers.vsAddParseCallback('mcr', self.updateWatchdog)
@@ -291,7 +291,7 @@ class SWT(MMIOPeripheral):
             csl = self.registers.mcr.csl
 
         if csl:
-            freq = self._config.extal
+            freq = self.emu.fmpll.extal
         else:
             freq = self.emu.siu.f_periph()
 

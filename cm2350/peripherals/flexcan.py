@@ -579,16 +579,7 @@ class FlexCAN(ExternalIOPeripheral):
         FlexCAN constructor.  Each processor has multiple FlexCAN peripherals
         so the devname parameter must be unique.
         """
-        self._config = emu.vw.config.project.MPC5674.getSubConfig(devname)
-
-        # Get the host IP and port to use from the configuration, use the
-        # cfginfo/dict method to read these because the host defaults to "None",
-        # in which case we want to actually read None, not get an EnviConfig
-        # error.
-        host = self._config.cfginfo['host']
-        port = self._config.cfginfo['port']
-
-        super().__init__(emu, devname, host, port, mmio_addr, 0x4000,
+        super().__init__(emu, devname, mmio_addr, 0x4000,
                 regsetcls=FLEXCAN_REGISTERS,
                 isrstatus=('iflag1', 'iflag2'),
                 isrflags=('imask1', 'imask2'),

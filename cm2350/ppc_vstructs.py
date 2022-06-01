@@ -8,6 +8,27 @@ import envi.bits as e_bits
 
 from .intc_exc import AlignmentException, MceWriteBusError, MceDataReadBusError
 
+__all__ = [
+    # standard VStruct types
+    'VStruct',
+    'VArray',
+    'isVstructType',
+    'v_bits',
+    'VBitField',
+
+    # New VStruct types
+    'v_defaultbits',
+    'v_const',
+    'v_w1c',
+    'v_bytearray',
+    'PlaceholderRegister',
+    'PeriphRegister',
+    'ReadOnlyRegister',
+    'WriteOnlyRegister',
+    'PeripheralRegisterSet',
+    'BitFieldSPR',
+]
+
 
 class v_defaultbits(v_bits):
     """

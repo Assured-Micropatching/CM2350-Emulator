@@ -290,7 +290,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator, eape.Ppc32Em
         # Call the emutime shutdown function
         super().shutdown()
 
-        if self.modules:
+        if hasattr(self, 'modules') and self.modules:
             # Go through each peripheral and if any of them have a server thread
             # running, stop it now
             for mname in list(self.modules):

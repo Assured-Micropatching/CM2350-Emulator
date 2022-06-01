@@ -417,20 +417,25 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
     def __init__(self, defconfig=None, docconfig=None, args=None):
         # Before initializing the VivProject, add any MPC5674-specific options
         exename = os.path.basename(sys.modules['__main__'].__file__)
-        parser = argparse.ArgumentParser(prog=exename, add_help=False)
-        ppc_parser = parser.add_argument_group('PowerPC Emulator Options')
-        ppc_parser.add_argument('-I', '--init-flash', action='store_true',
+        parser = argparse.ArgumentParser(prog=exename)
+        parser.add_argument('-I', '--init-flash', action='store_true',
                             help='Copy binary flash image to configuration directory (-c)')
-        ppc_parser.add_argument('flash_image', nargs='?',
+        parser.add_argument('flash_image', nargs='?',
                             help='Binary flash image to load in the emulator')
 
         # Open up the workspace and read the project configuration
-        project.VivProject.__init__(self, defconfig, docconfig, args, parser)
-        e200z7.PPC_e200z7.__init__(self, self.vw)
+        project.VivProject.__init__(self)
+        vw, args = self.open_project_config(defconfig, docconfig, args, parser)
+
+        del parser
+
+        # the self.vw attribute will get created when the e200z7 class calls the
+        # workspace emulator initializer.
+        e200z7.PPC_e200z7.__init__(self, vw)
 
         # Now that the standard options have been parsed process anything
         # leftover
-        self._process_args()
+        self._process_args(args)
 
         # The backup file is assumed to be located in the "project directory"
         self.flash = FLASH(self)
@@ -458,8 +463,11 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
 
         self.fmpll = FMPLL(self, 0xC3F80000)
         self.ebi = EBI(self, 0xC3F84000)
+
+        # Now the FLASH configuration regions
         self.flash.setAddr(self, FlashDevice.FLASH_A_CONFIG, 0xC3F88000)
         self.flash.setAddr(self, FlashDevice.FLASH_B_CONFIG, 0xC3F8C000)
+
         self.siu = SIU(self, 0xC3F90000)
         #self.mios = EMIOS(self, 0xC3FA0000)
         #self.pmc = PMC(self, 0xC3FBC000)
@@ -528,6 +536,8 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         # Complete initialization of the e200z7 core
         self.init_core()
 
+        return
+
         # TODO: Initialize stack memory base address, taints, etc.
 
         if hasattr(self, 'vw') and self.vw is not None:
@@ -592,7 +602,7 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
                     raise envi.SegmentationViolation('Bad Memory Access: 0x%x', va) from exc
             self.vw.getByteDef = types.MethodType(_getByteDef, self.vw)
 
-    def _process_args(self):
+    def _process_args(self, args):
         """
         Indicate that the supplied file can be used as an initial flash image if
         - The file is large enough to contain the main and shadow flash A & B
@@ -604,8 +614,6 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         2. Update the workspace configuration to indicate if main flash and
            shadow flash data, or only main flash will be loaded from the file
         """
-        args = self.vw.getTransMeta('ProjectCliArgs')
-
         # Track if this is a new configuration directory or not (needed by
         # init_flash)
         if args.config_dir != False and not os.path.isdir(self.vw.vivhome):
@@ -616,12 +624,17 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         else:
             new_config = False
 
+        # Use the EnviConfig.cfginfo attribute directly so we can overwrite the
+        # running configuration values for a specific run of the emulator. Such
+        # as a overwriting a valid 'fwFilename' path temporarily when the
+        # "--init-flash" argument is provided but no "flash_image" is provided
+        # (indicating an empty firmware should be initialized).
         cfg = self.vw.config.project.MPC5674.FLASH.cfginfo
         orig_flash_file = cfg['fwFilename']
         cfg_flash_file = self.get_project_path(DEFAULT_FLASH_FILENAME)
 
         mode = self.vw.getTransMeta("ProjectMode")
-        updated_config = getFlashOffsets(args.flash_image, cfg)
+        updated_config = getFlashOffsets(args.flash_image)
 
         if args.config_dir != False and args.init_flash:
             # Update the configuration in the workspace with the values
@@ -709,7 +722,7 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         load firmware into the emulator
         '''
         # Get the FLASH configuration info as a dict
-        cfg = self.vw.config.project.MPC5674.FLASH.cfginfo
+        cfg = self.vw.config.project.MPC5674.FLASH
 
         # Assume that the filenames are files in the project directory
 
@@ -784,7 +797,6 @@ class int_test:
             if not item.startswith('test_'):
                 continue
             results = getattr(self, item)(count=count)
-            print("%-30s: %r" % (item, results))
 
 
     def test_static(self, count=10000000):

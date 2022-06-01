@@ -1,4 +1,5 @@
 import time
+import weakref
 import threading
 import socket
 import errno
@@ -59,6 +60,20 @@ class Peripheral:
         # this module to interface with it
         self.emu = None
 
+        self._config = None
+
+        # If there is a configuration entry for this peripheral name, save it
+        # for easy access
+        for project in emu.vw.config.project.getSubConfigNames():
+            project_subcfg = emu.vw.config.project.getSubConfig(project)
+            if self._config is None:
+                devcfg = project_subcfg.getSubConfig(devname, add=False)
+                if devcfg is not None:
+                    self._config = weakref.proxy(devcfg)
+            else:
+                print(emu.vw.config.project.reprConfigPaths())
+                raise Exception('ERROR: duplicate project config entries for peripheral %s' % devname)
+
     def init(self, emu):
         """
         Standard "module" peripheral init function. This is called only once
@@ -74,7 +89,7 @@ class Peripheral:
         logger.debug('init: %s module', self.devname)
 
         # Now save the emulator, it should be ready to be used where needed
-        self.emu = emu
+        self.emu = weakref.proxy(emu)
 
         # Perform the standard peripheral reset actions
         self.reset(emu)
@@ -626,7 +641,7 @@ class ExternalIOPeripheral(MMIOPeripheral):
     # object so the peripheral port/type/style/whatever is defined in the
     # config, and the correct configuration values and defaults could be defined
     # in the peripheral class itself.
-    def __init__(self, emu, devname, host, port, mmio_addr, mmio_size, **kwargs):
+    def __init__(self, emu, devname, mmio_addr, mmio_size, **kwargs):
         """
         Constructor for ExternalIOPeripheral class.
 
@@ -634,10 +649,6 @@ class ExternalIOPeripheral(MMIOPeripheral):
             emu:      Emulator to register this peripheral with
             devname:  Name of this device, used as a unique string when
                       registering the peripheral object as an emulator "module"
-            host:     Host address to use for the TCP server socket that is
-                      created
-            port:     Host port to use for the TCP server socket that is
-                      created
             mapaddr:  Memory map base address to use in the emu.addMMIO()
                       function call
             mapsize:  Memory map size to use in the emu.addMMIO() function call
@@ -646,6 +657,10 @@ class ExternalIOPeripheral(MMIOPeripheral):
                       custom permissions or an mmio_bytes function.
         """
         super().__init__(emu, devname, mmio_addr, mmio_size, **kwargs)
+
+        # Get the server configuration from the peripheral config
+        host = self._config['host']
+        port = self._config['port']
 
         # Check if the IO thread should be created or not
         if emu.vw.getTransMeta('ProjectMode') != 'test' and port is not None:

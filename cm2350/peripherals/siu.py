@@ -96,12 +96,6 @@ class SIU_ORER(PeriphRegister):
 class SIU_IREER(PeriphRegister):
     def __init__(self):
         super().__init__()
-        self._pad0 = v_const(16)
-        self.ore = v_bits(16)
-
-class SIU_IREER(PeriphRegister):
-    def __init__(self):
-        super().__init__()
         self.iree_nmi8 = v_bits(1)
         self._pad0 = v_const(15)
         self.iree = v_bits(16)
@@ -474,10 +468,12 @@ class SIU_REGISTERS(PeripheralRegisterSet):
         self.idfr    = (0x0030, SIU_IDFR())
         self.ifir    = (0x0034, SIU_IFIR())
 
+
         # PCR (Pin Control Registers)
         # PCR registers must be initialized using the PCR_DEFAULT values because
         # not all PCR fields can be modified for all pins.
         self.pcr     = (0x0040, VArray([SIU_PCRn() if c is None else SIU_PCRn(**c) for c in self._pcr_defaults]))
+
         # Legacy GPDO
         self.gpdo    = (0x0600, VArray([SIU_GPDOn() for i in range(NUM_GPDIO_PINS)]))
 
@@ -591,10 +587,13 @@ class SIU(MMIOPeripheral):
     def __init__(self, emu, mmio_addr):
         super().__init__(emu, 'SIU', mmio_addr, 0x4000)
 
-        self._config = emu.vw.config.project.MPC5674.SIU
+        # Create attributes for boot parameter settings (PLLCFG, etc.)
+        self.pllcfg = self._config.pllcfg
+        self.bootcfg = self._config.bootcfg
+        self.wkpcfg = self._config.wkpcfg
 
         # Create the register set now
-        self.registers = SIU_REGISTERS(wkpcfg=self._config.wkpcfg, bootcfg=self._config.bootcfg)
+        self.registers = SIU_REGISTERS(wkpcfg=self.wkpcfg, bootcfg=self.bootcfg)
 
         # GPIO 75-82 are available to be used as GPIO pins only when the NDI
         # peripheral is configured to operate in Reduced-Port (or Disabled-Port)
@@ -635,12 +634,12 @@ class SIU(MMIOPeripheral):
         #   GPIO212 = BOOTCFG1
         #   GPIO213 = WPKCFG
         #
-        self.connectGPIO(208, (self._config.pllcfg >> 2) & 1)
-        self.connectGPIO(209, (self._config.pllcfg >> 1) & 1)
-        self.connectGPIO(210, self._config.pllcfg & 1)
-        self.connectGPIO(211, (self._config.bootcfg >> 1) & 1)
-        self.connectGPIO(212, self._config.bootcfg & 1)
-        self.connectGPIO(213, self._config.wkpcfg)
+        self.connectGPIO(208, (self.pllcfg >> 2) & 1)
+        self.connectGPIO(209, (self.pllcfg >> 1) & 1)
+        self.connectGPIO(210, self.pllcfg & 1)
+        self.connectGPIO(211, (self.bootcfg >> 1) & 1)
+        self.connectGPIO(212, self.bootcfg & 1)
+        self.connectGPIO(213, self.wkpcfg)
 
         # The SIU peripheral generates the following output clocks based on the
         # FMPLL output:

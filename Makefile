@@ -11,7 +11,7 @@ $(VENV):
 	. $(VENV)/bin/activate && pip install -r requirements.txt
 
 tests: $(VENV)
-	. $(VENV)/bin/activate && python3 -m unittest --buffer --verbose
+	. $(VENV)/bin/activate && python -m unittest --buffer --verbose
 
 clean:
 ifneq ($(wildcard VENV),)

@@ -4,9 +4,8 @@ import hashlib
 import os.path
 
 import envi
-import envi.memory as e_mem
 import envi.bits as e_bits
-import envi.config as e_config
+import envi.memory as e_mem
 
 from .. import mmio, e200z7
 from ..ppc_vstructs import *
@@ -118,7 +117,7 @@ FLASH_DEVICE_MMIO_SIZE = {
 
 
 # Utility
-def getFlashOffsets(filename, default_config):
+def getFlashOffsets(filename):
     """
     Determine if a supplied file is the right size to contain either just main
     flash or all of flash.

@@ -240,7 +240,7 @@ class EmulationTime:
         especially during testing.
         '''
         # Stop and deallocate all the timers
-        if self._tb_thread:
+        if hasattr(self, '_tb_thread') and self._tb_thread:
             self._stop.set()
 
             # Stop all of the timers

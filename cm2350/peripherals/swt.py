@@ -4,7 +4,7 @@ import envi.bits as e_bits
 
 from ..ppc_vstructs import *
 from ..ppc_peripherals import *
-from ..intc_exc import MceDataReadBusError, MceWriteBusError, ResetException, INTC_SRC
+from ..intc_exc import MceDataReadBusError, MceWriteBusError, ResetException, INTC_EVENT
 
 import logging
 logger = logging.getLogger(__name__)
@@ -107,8 +107,8 @@ class SWT_REGISTERS(PeripheralRegisterSet):
 
 
 # Only one possible type of interrupt event for the SWT peripheral
-SWT_INT_SRCS = {
-    'tif': INTC_SRC.SWT,
+SWT_INT_EVENTS = {
+    'tif': INTC_EVENT.SWT,
 }
 
 
@@ -120,7 +120,7 @@ class SWT(MMIOPeripheral):
         # need to hook a MMIO mmiodev at 0xfff38000 of size 0x4000
         super().__init__(emu, 'SWT', mmio_addr, 0x4000,
                 regsetcls=SWT_REGISTERS,
-                isrstatus='ir', isrflags='mcr', isrsources=SWT_INT_SRCS)
+                isrstatus='ir', isrflags='mcr', isrevents=SWT_INT_EVENTS)
 
         self.registers.vsAddParseCallback('sr', self.processServiceKey)
         self.registers.vsAddParseCallback('mcr', self.updateWatchdog)
@@ -276,9 +276,8 @@ class SWT(MMIOPeripheral):
             else:
                 self.emu.queueException(ResetException())
 
-                # Update the ECSM event reason (if ECSM is registered)
-                if 'ECSM' in self.emu.modules:
-                    self.emu.ecsm.swtReset()
+                # Update the ECSM event reason
+                self.emu.ecsm.swtReset()
 
     def restartWatchdog(self):
         # Reset the watchdog service key sequence back to the beginning

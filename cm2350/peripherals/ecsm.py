@@ -6,7 +6,7 @@ import envi.archs.ppc.regs as eapr
 
 from ..ppc_vstructs import *
 from ..ppc_peripherals import *
-from ..intc_exc import INTC_SRC
+from ..intc_exc import INTC_EVENT
 from ..ppc_mmu import PpcTlbFlags
 
 import logging
@@ -304,11 +304,11 @@ ECSM_EERBIT_VALUES = {
 # According to "Table 9-8. Interrupt Request Sources" in MPC5674FRM.pdf the
 # 1-bit errors do not trigger interrupts even if set?  The non-correctable
 # errors use the same interrupt source
-ECSM_INT_SRCS = {
-    'r1br': None,
-    'f1br': None,
-    'rncr': INTC_SRC.ECSM,
-    'fncr': INTC_SRC.ECSM,
+ECSM_INT_EVENTS = {
+    'r1br': INTC_EVENT.ECSM_ESR_R1BE,
+    'f1br': INTC_EVENT.ECSM_ESR_F1BE,
+    'rncr': INTC_EVENT.ECSM_ESR_RNCE,
+    'fncr': INTC_EVENT.ECSM_ESR_FNCE,
 }
 
 # FEAT/REAT[SIZE] values, based on size of write/read data that caused the error
@@ -336,7 +336,7 @@ class ECSM(MMIOPeripheral):
     def __init__(self, emu, mmio_addr):
         super().__init__(emu, 'ECSM', mmio_addr, 0x4000,
                 regsetcls=ECSM_REGISTERS,
-                isrstatus='esr', isrflags='ecr', isrsources=ECSM_INT_SRCS)
+                isrstatus='esr', isrflags='ecr', isrevents=ECSM_INT_EVENTS)
 
         # Callback for the EEGR register that can force RAM ECC write errors
         self.registers.vsAddParseCallback('eegr', self.eegrUpdate)

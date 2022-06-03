@@ -4,7 +4,7 @@ import envi.bits as e_bits
 
 from ..ppc_vstructs import *
 from ..ppc_peripherals import *
-from ..intc_exc import INTC_SRC
+from ..intc_exc import INTC_EVENT
 
 import logging
 logger = logging.getLogger(__name__)
@@ -99,40 +99,38 @@ DSPI_MODE_CSI_UNSUPPORTED = (DSPI_MODE.CSI_CNTRLR, DSPI_MODE.CSI_PERIPH)
 
 # Mapping of interrupt types based on the supporting DSPI peripherals and the
 # corresponding SR flag field names
-# The "OVERRUN" interrupt source is used for both the Rx overflow and Tx
-# underflow conditions
-DSPI_INT_SRCS = {
+DSPI_INT_EVENTS = {
     'DSPI_A': {
-        'eoqf': INTC_SRC.DSPI_A_TX_EOQ,
-        'tfff': INTC_SRC.DSPI_A_TX_FILL,
-        'tcf':  INTC_SRC.DSPI_A_TX_CMPLT,
-        'tfuf': INTC_SRC.DSPI_A_OVERRUN,
-        'rfdf': INTC_SRC.DSPI_A_RX_DRAIN,
-        'rfof': INTC_SRC.DSPI_A_OVERRUN,
+        'eoqf': INTC_EVENT.DSPI_A_TX_EOQ,
+        'tfff': INTC_EVENT.DSPI_A_TX_FILL,
+        'tcf':  INTC_EVENT.DSPI_A_TX_CMPLT,
+        'tfuf': INTC_EVENT.DSPI_A_TFUF,
+        'rfdf': INTC_EVENT.DSPI_A_RX_DRAIN,
+        'rfof': INTC_EVENT.DSPI_A_RFOF,
     },
     'DSPI_B': {
-        'eoqf': INTC_SRC.DSPI_B_TX_EOQ,
-        'tfff': INTC_SRC.DSPI_B_TX_FILL,
-        'tcf':  INTC_SRC.DSPI_B_TX_CMPLT,
-        'tfuf': INTC_SRC.DSPI_B_OVERRUN,
-        'rfdf': INTC_SRC.DSPI_B_RX_DRAIN,
-        'rfof': INTC_SRC.DSPI_B_OVERRUN,
+        'eoqf': INTC_EVENT.DSPI_B_TX_EOQ,
+        'tfff': INTC_EVENT.DSPI_B_TX_FILL,
+        'tcf':  INTC_EVENT.DSPI_B_TX_CMPLT,
+        'tfuf': INTC_EVENT.DSPI_B_TFUF,
+        'rfdf': INTC_EVENT.DSPI_B_RX_DRAIN,
+        'rfof': INTC_EVENT.DSPI_B_RFOF,
     },
     'DSPI_C': {
-        'eoqf': INTC_SRC.DSPI_C_TX_EOQ,
-        'tfff': INTC_SRC.DSPI_C_TX_FILL,
-        'tcf':  INTC_SRC.DSPI_C_TX_CMPLT,
-        'tfuf': INTC_SRC.DSPI_C_OVERRUN,
-        'rfdf': INTC_SRC.DSPI_C_RX_DRAIN,
-        'rfof': INTC_SRC.DSPI_C_OVERRUN,
+        'eoqf': INTC_EVENT.DSPI_C_TX_EOQ,
+        'tfff': INTC_EVENT.DSPI_C_TX_FILL,
+        'tcf':  INTC_EVENT.DSPI_C_TX_CMPLT,
+        'tfuf': INTC_EVENT.DSPI_C_TFUF,
+        'rfdf': INTC_EVENT.DSPI_C_RX_DRAIN,
+        'rfof': INTC_EVENT.DSPI_C_RFOF,
     },
     'DSPI_D': {
-        'eoqf': INTC_SRC.DSPI_D_TX_EOQ,
-        'tfff': INTC_SRC.DSPI_D_TX_FILL,
-        'tcf':  INTC_SRC.DSPI_D_TX_CMPLT,
-        'tfuf': INTC_SRC.DSPI_D_OVERRUN,
-        'rfdf': INTC_SRC.DSPI_D_RX_DRAIN,
-        'rfof': INTC_SRC.DSPI_D_OVERRUN,
+        'eoqf': INTC_EVENT.DSPI_D_TX_EOQ,
+        'tfff': INTC_EVENT.DSPI_D_TX_FILL,
+        'tcf':  INTC_EVENT.DSPI_D_TX_CMPLT,
+        'tfuf': INTC_EVENT.DSPI_D_TFUF,
+        'rfdf': INTC_EVENT.DSPI_D_RX_DRAIN,
+        'rfof': INTC_EVENT.DSPI_D_RFOF,
     },
 }
 
@@ -320,7 +318,7 @@ class DSPI(ExternalIOPeripheral):
         """
         super().__init__(emu, devname, mmio_addr, 0x4000,
                 regsetcls=DSPI_REGISTERS,
-                isrstatus='sr', isrflags='rser', isrsources=DSPI_INT_SRCS)
+                isrstatus='sr', isrflags='rser', isrevents=DSPI_INT_EVENTS)
 
         self.mode = None
         self._tx_fifo = None

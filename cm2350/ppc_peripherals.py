@@ -12,6 +12,7 @@ import envi.bits as e_bits
 
 from . import mmio
 from .ppc_vstructs import *
+from .intc_src import INTC_EVENT_MAP
 from .intc_exc import AlignmentException, MceWriteBusError, \
         MceDataReadBusError, ExternalException
 
@@ -113,7 +114,7 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
     object as an MMIO device to an emulator.
     """
     def __init__(self, emu, devname, mapaddr, mapsize, regsetcls=None,
-            isrstatus=None, isrflags=None, isrsources=None, **kwargs):
+            isrstatus=None, isrflags=None, isrevents=None, **kwargs):
         """
         Constructor for MMIOPeripheral class.
 
@@ -143,20 +144,20 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
             self.registers = None
 
         # Initialize the ISR status, flag and source information
-        self._initISRInfo(isrstatus, isrflags, isrsources)
+        self._initISRInfo(isrstatus, isrflags, isrevents)
 
         # Now initialize the event set/clear functions that are appropriate for
-        # the ISR status, flag, and sources provided.
+        # the ISR status, flag, and events provided.
         self._initISRFunctions()
 
-        # Lastly find any possible DMA request sources for this peripheral
+        # Lastly find any possible DMA request events for this peripheral
         self._initDMASources()
 
-    def _initISRInfo(self, isrstatus=None, isrflags=None, isrsources=None):
+    def _initISRInfo(self, isrstatus=None, isrflags=None, isrevents=None):
         """
         Initialize the peripheral ISR status, flag and source information
         """
-        if isrstatus is not None and isrflags is not None and isrsources is not None:
+        if isrstatus is not None and isrflags is not None and isrevents is not None:
             if isinstance(isrstatus, (tuple, list)) and \
                     isinstance(isrflags, (tuple, list)):
                 # This will be a channel-only ISR config, create the ISR status
@@ -177,18 +178,18 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
                 self.isrstatus = self.registers.vsGetField(isrstatus)
                 self.isrflags = self.registers.vsGetField(isrflags)
 
-            # Keep track of the interrupt sources for this peripheral. There may
-            # be different sources for each instance of this type of peripheral
-            # so get the instance-specific ISR sources for this peripheral.
-            if isinstance(isrsources, dict) and self.devname in isrsources:
-                self.isrsources = isrsources[self.devname]
+            # Keep track of the interrupt events for this peripheral. There may
+            # be different events for each instance of this type of peripheral
+            # so get the instance-specific ISR events for this peripheral.
+            if isinstance(isrevents, dict) and self.devname in isrevents:
+                self.isrevents = isrevents[self.devname]
             else:
-              self.isrsources = isrsources
+              self.isrevents = isrevents
 
-        elif isrstatus is None and isrflags is None and isrsources is None:
+        elif isrstatus is None and isrflags is None and isrevents is None:
             self.isrstatus = None
             self.isrflags = None
-            self.isrsources = None
+            self.isrevents = None
 
         else:
             raise Exception('Inconsistent ISR information provided for peripheral %s' % self.devname)
@@ -196,68 +197,68 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
     def _initISRFunctions(self):
         """
         Assign the correct event set/clear functions that correspond to the
-        possible ISR sources for this peripheral
+        possible ISR events for this peripheral
         """
         if self.isrstatus is None:
             # Set a placeholder event function
             self.event = self._eventDoNothing
             return
 
-        # Determine if the ISR sources and register types require a channel
+        # Determine if the ISR events and register types require a channel
         if isinstance(self.isrstatus, PeriphRegister) and \
                 isinstance(self.isrflags, PeriphRegister) and \
-                isinstance(self.isrsources, dict):
+                isinstance(self.isrevents, dict):
 
             # Standard case, only field names expected
             self.event = self._eventRequest
 
-            src_fields = self.isrsources.keys()
+            src_fields = self.isrevents.keys()
             status_reg = self.isrstatus
             flag_reg = self.isrflags
 
         elif isinstance(self.isrstatus, VArray) and \
                 isinstance(self.isrflags, VArray) and \
-                isinstance(self.isrsources, (tuple, list)):
+                isinstance(self.isrevents, (tuple, list)):
 
             # Channel case, both channel number and field names expected
             self.event = self._eventRequestWithChannel
 
-            # Ensure that the sources for each channel are a dictionary and have
+            # Ensure that the events for each channel are a dictionary and have
             # the same keys.
-            if any(not isinstance(src, dict) for src in self.isrsources):
-                src_types_str = ', '.join(str(type(src)) for src in self.isrsources)
+            if any(not isinstance(src, dict) for src in self.isrevents):
+                src_types_str = ', '.join(str(type(src)) for src in self.isrevents)
                 raise Exception('Inconsistent ISR channel source types: %s' % src_types_str)
 
-            src_fields = self.isrsources[0].keys()
+            src_fields = self.isrevents[0].keys()
             status_reg = self.isrstatus[0]
             flag_reg = self.isrflags[0]
 
-            if not all(src.keys() == src_fields and len(src) == len(src_fields) for src in self.isrsources[1:]):
+            if not all(src.keys() == src_fields and len(src) == len(src_fields) for src in self.isrevents[1:]):
                 src_fields_str = ', '.join(src_fields)
-                raise Exception('Inconsistent ISR channel sources != %s' % src_fields_str)
+                raise Exception('Inconsistent ISR channel events != %s' % src_fields_str)
 
         elif isinstance(self.isrstatus, list) and \
                 isinstance(self.isrflags, list) and \
-                isinstance(self.isrsources, (tuple, list)):
+                isinstance(self.isrevents, (tuple, list)):
 
             # Channel-only case, only a channel number expected but status and
             # flag values are split across one or more multi-bit wide w1c
             # registers
             self.event = self._eventRequestWithOnlyChannel
 
-            if len(self.isrsources) != len(self.isrstatus) or \
-                    len(self.isrsources) != len(self.isrflags):
-                raise Exception('ISR status (%d), flags (%d), and sources (%d) mismatch' %
-                        (len(self.isrstatus), len(self.isrflags), len(self.isrsources)))
+            if len(self.isrevents) != len(self.isrstatus) or \
+                    len(self.isrevents) != len(self.isrflags):
+                raise Exception('ISR status (%d), flags (%d), and events (%d) mismatch' %
+                        (len(self.isrstatus), len(self.isrflags), len(self.isrevents)))
 
             # The final check doesn't apply tho this ISR configuration
             return
 
         else:
-            raise Exception('Inconsistent channel requirements for ISR status (%s), flags (%s) and sources (%s)' %
+            raise Exception('Inconsistent channel requirements for ISR status (%s), flags (%s) and events (%s)' %
                     (isinstance(self.isrstatus, VArray),
                         isinstance(self.isrflags, VArray),
-                        isinstance(self.isrsources, (tuple, list))))
+                        isinstance(self.isrevents, (tuple, list))))
 
         # Ensure that all ISR sources are in the status and flag registers
         if not all(f in status_reg._vs_fields and f in flag_reg._vs_fields for f in src_fields):
@@ -285,16 +286,15 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
                 self.event == self._eventRequestWithOnlyChannel:
             return
 
-        # loop through the possible interrupt sources and find any field names
+        # loop through the possible interrupt events and find any field names
         # in the ISR flag register that a corresponding "_dirs" suffix and if
         # there is a corresponding DIRS field save the DIRS field name.  The IRQ
-        # sources are the same indicating both interrupt sources and DMA event
-        # requests.
-        if isinstance(self.isrsources, (list, tuple)):
-            src_fields = self.isrsources[0].keys()
+        # events are the same indicating both interrupt events and DMA requests.
+        if isinstance(self.isrevents, (list, tuple)):
+            src_fields = self.isrevents[0].keys()
             flag_reg = self.isrflags[0]
         else:
-            src_fields = self.isrsources.keys()
+            src_fields = self.isrevents.keys()
             flag_reg = self.isrflags
 
         for field in src_fields:
@@ -469,19 +469,20 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
             self.isrstatus.vsOverrideValue(field, int(value))
 
             if self.isrflags.vsGetField(field) == 1:
-                if self.isrsources[field] is not None:
-                    # If this field can initiate a DMA event, determine if an
-                    # interrupt request or dma request should be initiated.
-                    if self.dmaevents[field] is None or \
-                            self.isrflags.vsGetField(self.dmaevents[field]) == 0:
-                        # if the DIRS field in the flag register is 0 that indicates
-                        # an interrupt should be initiated
-                        self.emu.queueException(ExternalException(self.isrsources[field]))
-                    else:
-                        self.emu.dmaRequest(self.isrsources[field])
+                event = self.isrevents[field]
+                intc_src, dma_req = INTC_EVENT_MAP.get(event, (None, None))
+                dma_field = self.dmaevents[field]
+
+                if dma_req is not None and dma_field is not None and \
+                        self.isrflags.vsGetField(dma_field) == 1:
+                    self.emu.dmaRequest(dma_req)
+
+                elif intc_src is not None:
+                    self.emu.queueException(ExternalException(intc_src))
+
                 else:
-                    logger.warning('[%s] Ignoring %s event because no valid ISR source configured',
-                            self.devname, field)
+                    logger.warning('[%s] Ignoring %s event because no valid ISR source or DMA request configured',
+                                   self.devname, field)
 
     def _eventRequestWithChannel(self, channel, field, value):
         """
@@ -502,18 +503,19 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
             self.isrstatus[channel].vsOverrideValue(field, int(value))
 
             if self.isrflags[channel].vsGetField(field) == 1:
-                if self.isrsources[field] is not None:
-                    # If this field can initiate a DMA event, determine if an
-                    # interrupt request or dma request should be initiated.
-                    if self.dmaevents[field] is None or \
-                            self.isrflags[channel].vsGetField(self.dmaevents[field]) == 0:
-                        # if the DIRS field in the flag register is 0 that indicates
-                        # an interrupt should be initiated
-                        self.emu.queueException(ExternalException(self.isrsources[channel][field]))
-                    else:
-                        self.emu.dmaRequest(self.isrsources[channel][field])
+                event = self.isrevents[channel][field]
+                intc_src, dma_req = INTC_EVENT_MAP.get(event, (None, None))
+                dma_field = self.dmaevents[field]
+
+                if dma_req is not None and dma_field is not None and \
+                        self.isrflags[channel].vsGetField(dma_field) == 1:
+                    self.emu.dmaRequest(dma_req)
+
+                elif intc_src is not None:
+                    self.emu.queueException(ExternalException(intc_src))
+
                 else:
-                    logger.warning('[%s] Ignoring channel %d %s event because no valid ISR source configured',
+                    logger.warning('[%s] Ignoring channel %d %s event because no valid ISR source or DMA request configured',
                                    self.devname, channel, field)
 
     def _eventRequestWithOnlyChannel(self, channel, value):
@@ -540,10 +542,13 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
 
             flags = next(val for _, val in self.isrflags[channel])
             if new_status & flags:
-                if self.isrsources[channel] is not None:
+                event = self.isrevents[channel]
+                intc_src, _ = INTC_EVENT_MAP.get(event, (None, None))
+
+                if intc_src is not None:
                     # channel-only event configurations don't have corresponding
                     # DMA request flags
-                    self.emu.queueException(ExternalException(self.isrsources[channel]))
+                    self.emu.queueException(ExternalException(intc_src))
                 else:
                     logger.warning('[%s] Ignoring channel %d event because no valid ISR source configured',
                                    self.devname, channel)
@@ -696,13 +701,19 @@ class ExternalIOPeripheral(MMIOPeripheral):
 
         # Close the client connections
         for sock in self._clients:
-            sock.shutdown(socket.SHUT_RDWR)
-            sock.close()
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+                sock.close()
+            except OSError:
+                pass
 
         # Now close the server socket
         if self._server is not None:
-            self._server.shutdown(socket.SHUT_RDWR)
-            self._server.close()
+            try:
+                self._server.shutdown(socket.SHUT_RDWR)
+                self._server.close()
+            except OSError:
+                pass
 
         # Remove this object from the list of tasks that need cleaned up
         with ExternalIOPeripheral._task_lock:

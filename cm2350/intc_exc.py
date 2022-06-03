@@ -3,15 +3,16 @@ from envi.archs.ppc.const import *
 from vtrace.platforms import signals
 
 from .intc_const import *
-from .intc_src import INTC_SRC
+from .intc_src import INTC_SRC, INTC_EVENT
 
 import logging
 logger = logging.getLogger(__name__)
 
 
 __all__ = [
-    # Allow INTC_SRC to be imported from this module
+    # Allow INTC_SRC and INTC_EVENT to be imported from this module
     'INTC_SRC',
+    'INTC_EVENT',
 
     # And all of the INTCException-derived exception types
     'StandardPrioException',

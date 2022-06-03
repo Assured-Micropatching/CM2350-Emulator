@@ -607,7 +607,10 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator, eape.Ppc32Em
         self.mcu_intc.queueException(exception)
 
     def dmaRequest(self, source):
-        logger.info('DMA request for %s (%d)', source.name, source.value)
+        logger.debug('DMA request for %s (%d)', source.name, source.value)
+
+        # Identify which DMA device this request should go to
+        EDMA_SRC_TO_CHAN
 
     def parseOpcode(self, va, arch=envi.ARCH_PPC_E32, skipcache=False):
         '''

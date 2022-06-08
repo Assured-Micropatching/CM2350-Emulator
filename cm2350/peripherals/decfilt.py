@@ -49,7 +49,7 @@ class DECFILT_x_MCR(PeriphRegister):
         self.ftype = v_bits(2)
         self._pad2 = v_const(1)
         self.scal = v_bits(2)
-        self.idis = v_defaultbits(1, 1)
+        self.idis = v_bits(1, 1)
         self.sat = v_bits(1)
         self.io_sel = v_bits(2)
         self.dec_rate = v_bits(4)
@@ -240,8 +240,8 @@ class DECFILT_x_COUNT(PeriphRegister):
         self.count = v_const(32)
 
 class DECFILT_REGISTERS(PeripheralRegisterSet):
-    def __init__(self, emu=None):
-        super().__init__(emu)
+    def __init__(self):
+        super().__init__()
 
         self.mcr     = (DECFILT_MCR_OFFSET,     DECFILT_x_MCR())
         self.msr     = (DECFILT_MSR_OFFSET,     DECFILT_x_MSR())

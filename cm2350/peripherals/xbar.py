@@ -23,15 +23,15 @@ class XBAR_MPRn(PeriphRegister):
     def __init__(self):
         super().__init__()
         self._pad0  = v_const(5, 0b01010)
-        self.mstr6  = v_defaultbits(3, 0b100)
+        self.mstr6  = v_bits(3, 0b100)
         self._pad1  = v_const(1)
-        self.mstr5  = v_defaultbits(3, 0b011)
+        self.mstr5  = v_bits(3, 0b011)
         self._pad2  = v_const(1)
-        self.mstr4  = v_defaultbits(3, 0b010)
+        self.mstr4  = v_bits(3, 0b010)
         self._pad3  = v_const(9)
-        self.mstr1  = v_defaultbits(3, 0b001)
+        self.mstr1  = v_bits(3, 0b001)
         self._pad4  = v_const(1)
-        self.mstr0  = v_defaultbits(3, 0b000)
+        self.mstr0  = v_bits(3, 0b000)
 
 class XBAR_SGPCRn(PeriphRegister):
     def __init__(self):
@@ -46,8 +46,8 @@ class XBAR_SGPCRn(PeriphRegister):
 
 
 class XBAR_REGISTERS(PeripheralRegisterSet):
-    def __init__(self, emu=None):
-        super().__init__(emu)
+    def __init__(self):
+        super().__init__()
 
         self.mpr0   = (XBAR_MPR0_OFFSET,   XBAR_MPRn())
         self.sgpcr0 = (XBAR_SGPCR0_OFFSET, XBAR_SGPCRn())

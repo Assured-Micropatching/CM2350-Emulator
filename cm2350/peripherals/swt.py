@@ -47,24 +47,24 @@ SWT_LOCKABLE_OFFSETS = (
 class SWT_MCR(PeriphRegister):
     def __init__(self):
         super().__init__()
-        self.map = v_defaultbits(8, 0xFF)
+        self.map = v_bits(8, 0xFF)
         self._pad = v_const(14)
         self.key = v_bits(1)
-        self.ria = v_defaultbits(1, 1)
+        self.ria = v_bits(1, 1)
         self.wnd = v_bits(1)
         self.tif = v_bits(1)
         self.hlk = v_bits(1)
         self.slk = v_bits(1)
-        self.csl = v_defaultbits(1, 1)
+        self.csl = v_bits(1, 1)
         self.stp = v_bits(1)
-        self.frz = v_defaultbits(1, 1)
-        self.wen = v_defaultbits(1, 1)
+        self.frz = v_bits(1, 1)
+        self.wen = v_bits(1, 1)
 
 
 class SWT_TO(PeriphRegister):
     def __init__(self):
         super().__init__()
-        self.wto = v_defaultbits(32, 0x0005fcd0)
+        self.wto = v_bits(32, 0x0005fcd0)
 
 
 class SWT_IR(PeriphRegister):
@@ -95,8 +95,8 @@ class SWT_SK(PeriphRegister):
 
 
 class SWT_REGISTERS(PeripheralRegisterSet):
-    def __init__(self, emu=None):
-        super().__init__(emu)
+    def __init__(self):
+        super().__init__()
 
         self.mcr       = (SWT_MCR_OFFSET, SWT_MCR())
         self.ir        = (SWT_IR_OFFSET, SWT_IR())

@@ -58,8 +58,8 @@ class EBI_BMCR(PeriphRegister):
     def __init__(self):
         super().__init__()
         self._pad0 = v_const(16)
-        self.bmt = v_defaultbits(8, 0xFF)
-        self.bme = v_defaultbits(1, 1)
+        self.bmt = v_bits(8, 0xFF)
+        self.bme = v_bits(1, 1)
         self._pad1 = v_const(7)
 
 
@@ -77,7 +77,7 @@ class EBI_CAL_BRx(PeriphRegister):
         self.tbdip = v_bits(1)
         self._pad2 = v_const(1)
         self.seta = v_bits(1)
-        self.bi = v_defaultbits(1, 1)
+        self.bi = v_bits(1, 1)
         self.vi = v_bits(1)
 
 
@@ -94,8 +94,8 @@ class EBI_CAL_ORx(PeriphRegister):
 
 
 class EBI_REGISTERS(PeripheralRegisterSet):
-    def __init__(self, emu=None):
-        super().__init__(emu)
+    def __init__(self):
+        super().__init__()
 
         self.mcr  = (EBI_MCR_OFFSET,     EBI_MCR())
         self.tesr = (EBI_TESR_OFFSET,    EBI_TESR())

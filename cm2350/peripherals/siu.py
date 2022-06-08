@@ -23,6 +23,7 @@ class SIU_MIDR(ReadOnlyRegister):
         self.masknum_major =  v_const(4)
         self.masknum_minor = v_const(4)
 
+
 class SIU_RSR(PeriphRegister):
     # TODO: SYSTEM_RESET reasons should eventually be linked to the e200z7
     # setException API.
@@ -49,6 +50,7 @@ class SIU_RSR(PeriphRegister):
         self.bootcfg = v_const(2, bootcfg)
         self.rgf = v_w1c(1)
 
+
 class SIU_SRCR(PeriphRegister):  # System Reset Control Register...
     # TODO: might need to hook this one with some special logic
     def __init__(self):
@@ -57,6 +59,7 @@ class SIU_SRCR(PeriphRegister):  # System Reset Control Register...
         self.ser = v_bits(1)
         self._pad0 = v_const(30)
 
+
 class SIU_EISR(PeriphRegister):  # External Interrupt Status Register
     # TODO: bit 0 should be linked to the NMI exception handling
     def __init__(self):
@@ -64,6 +67,7 @@ class SIU_EISR(PeriphRegister):  # External Interrupt Status Register
         self.nmi = v_w1c(1)
         self._pad0 = v_const(15)
         self.eif = v_w1c(16)
+
 
 class SIU_DIRER(PeriphRegister):     # DMA/Interrupt Request Enable Register
     # TODO: bit 0 & 8 should be linked to the NMI exception handling
@@ -75,11 +79,13 @@ class SIU_DIRER(PeriphRegister):     # DMA/Interrupt Request Enable Register
         self._pad1 = v_const(7)
         self.eire = v_bits(16)
 
+
 class SIU_DIRSR(PeriphRegister):
     def __init__(self):
         super().__init__()
         self._pad0 = v_const(28)
         self.dirs = v_bits(4)
+
 
 class SIU_OSR(PeriphRegister):
     def __init__(self):
@@ -87,11 +93,13 @@ class SIU_OSR(PeriphRegister):
         self._pad0 = v_const(16)
         self.ovf = v_bits(16)
 
+
 class SIU_ORER(PeriphRegister):
     def __init__(self):
         super().__init__()
         self._pad0 = v_const(16)
         self.ore = v_bits(16)
+
 
 class SIU_IREER(PeriphRegister):
     def __init__(self):
@@ -100,6 +108,7 @@ class SIU_IREER(PeriphRegister):
         self._pad0 = v_const(15)
         self.iree = v_bits(16)
 
+
 class SIU_IFEER(PeriphRegister):
     def __init__(self):
         super().__init__()
@@ -107,11 +116,13 @@ class SIU_IFEER(PeriphRegister):
         self._pad0 = v_const(15)
         self.ifee = v_bits(16)
 
+
 class SIU_IDFR(PeriphRegister):
     def __init__(self):
         super().__init__()
         self._pad0 = v_const(28)
         self.dfl = v_bits(4)
+
 
 class SIU_IFIR(PeriphRegister):
     def __init__(self):
@@ -119,6 +130,7 @@ class SIU_IFIR(PeriphRegister):
         self.ifi_nmi = v_bits(1)
         self._pad0 = v_const(15)
         self.ifi = v_bits(16)
+
 
 class SIU_PCRn(PeriphRegister):
     def __init__(self, pa=None, obe=None, ibe=None, dsc=None, ode=None, hys=None, src=None, wpe=None, wps=None):
@@ -134,47 +146,48 @@ class SIU_PCRn(PeriphRegister):
         if pa is None:
             self.pa = v_const(3)
         else:
-            self.pa = v_defaultbits(3, pa)
+            self.pa = v_bits(3, pa)
 
         if obe is None:
             self.obe = v_const(1)
         else:
-            self.obe = v_defaultbits(1, obe)
+            self.obe = v_bits(1, obe)
 
         if ibe is None:
             self.ibe = v_const(1)
         else:
-            self.ibe = v_defaultbits(1, ibe)
+            self.ibe = v_bits(1, ibe)
 
         if dsc is None:
             self.dsc = v_const(2)
         else:
-            self.dsc = v_defaultbits(2, dsc)
+            self.dsc = v_bits(2, dsc)
 
         if ode is None:
             self.ode = v_const(1)
         else:
-            self.ode = v_defaultbits(1, ode)
+            self.ode = v_bits(1, ode)
 
         if hys is None:
             self.hys = v_const(1)
         else:
-            self.hys = v_defaultbits(1, hys)
+            self.hys = v_bits(1, hys)
 
         if src is None:
             self.src = v_const(2)
         else:
-            self.src = v_defaultbits(2, src)
+            self.src = v_bits(2, src)
 
         if wpe is None:
             self.wpe = v_const(1)
         else:
-            self.wpe = v_defaultbits(1, wpe)
+            self.wpe = v_bits(1, wpe)
 
         if wps is None:
             self.wps = v_const(1)
         else:
-            self.wps = v_defaultbits(1, wps)
+            self.wps = v_bits(1, wps)
+
 
 class SIU_GPDOn(PeriphRegister):
     def __init__(self):
@@ -182,27 +195,32 @@ class SIU_GPDOn(PeriphRegister):
         self._pad0 = v_const(7)
         self.pdo = v_bits(1)
 
+
 class SIU_GPDIn(ReadOnlyRegister):
     def __init__(self):
         super().__init__()
         self._pad0 = v_const(7)
         self.pdi = v_bits(1)
 
+
 class SIU_PGPDOn(PeriphRegister):
     def __init__(self):
         super().__init__()
         self.data = v_bits(32)
+
 
 class SIU_PGPDIn(ReadOnlyRegister):
     def __init__(self):
         super().__init__()
         self.data = v_bits(32)
 
+
 class SIU_MPGPDOn(WriteOnlyRegister):
     def __init__(self):
         super().__init__()
         self.mask = v_bits(16)
         self.data = v_bits(16)
+
 
 class SIU_EIISR(PeriphRegister):
     def __init__(self):
@@ -224,6 +242,7 @@ class SIU_EIISR(PeriphRegister):
         self.esel1 = v_bits(2)
         self.esel0 = v_bits(2)
 
+
 class SIU_DISR(PeriphRegister):
     def __init__(self):
         super().__init__()
@@ -244,6 +263,7 @@ class SIU_DISR(PeriphRegister):
         self.sckseld = v_bits(2)
         self.trigseld = v_bits(2)
 
+
 class SIU_ISEL4(PeriphRegister):
     def __init__(self):
         super().__init__()
@@ -256,6 +276,7 @@ class SIU_ISEL4(PeriphRegister):
         self._pad3 = v_const(1)
         self.cTSEL2_0 = v_bits(7)
 
+
 class SIU_ISEL5(PeriphRegister):
     def __init__(self):
         super().__init__()
@@ -264,6 +285,7 @@ class SIU_ISEL5(PeriphRegister):
         self._pad1 = v_const(1)
         self.cTSEL0_0 = v_bits(7)
         self._pad2 = v_const(16)
+
 
 class SIU_ISEL6(PeriphRegister):
     def __init__(self):
@@ -277,6 +299,7 @@ class SIU_ISEL6(PeriphRegister):
         self._pad3 = v_const(1)
         self.cTSEL2_1 = v_bits(7)
 
+
 class SIU_ISEL7(PeriphRegister):
     def __init__(self):
         super().__init__()
@@ -285,6 +308,7 @@ class SIU_ISEL7(PeriphRegister):
         self._pad1 = v_const(1)
         self.cTSEL0_1 = v_bits(7)
         self._pad2 = v_const(16)
+
 
 class SIU_ISEL8(PeriphRegister):
     def __init__(self):
@@ -302,11 +326,13 @@ class SIU_ISEL8(PeriphRegister):
         self._pad5 = v_const(3)
         self.eTPU24 = v_bits(1)
 
+
 class SIU_ISEL9(PeriphRegister):
     def __init__(self):
         super().__init__()
         self._pad0 = v_const(27)
         self.eTSEL0A = v_bits(5)
+
 
 class SIU_DECFIL(PeriphRegister):
     def __init__(self):
@@ -319,6 +345,7 @@ class SIU_DECFIL(PeriphRegister):
         self.hselg = v_bits(4)
         self.zselh = v_bits(4)
         self.hselh = v_bits(4)
+
 
 class SIU_CCR(PeriphRegister):
     def __init__(self, match=0, disnex=0):
@@ -338,26 +365,30 @@ class SIU_CCR(PeriphRegister):
         self._pad1 = v_const(15)
         self.test = v_bits(1)
 
+
 class SIU_ECCR(PeriphRegister):
     def __init__(self):
         super().__init__()
         self._pad0 = v_const(16)
-        self.engdiv = v_defaultbits(8, 0x10)
+        self.engdiv = v_bits(8, 0x10)
         self.ecss = v_bits(1)
         self._pad1 = v_const(3)
         self.ebts = v_bits(1)
         self._pad2 = v_const(1)
-        self.ebdf = v_defaultbits(2, 0x1)
+        self.ebdf = v_bits(2, 0x1)
+
 
 class SIU_CBRH(PeriphRegister):
     def __init__(self):
         super().__init__()
         self.cmpbh = v_bits(32)
 
+
 class SIU_CBRL(PeriphRegister):
     def __init__(self):
         super().__init__()
         self.cmpbl = v_bits(32)
+
 
 class SIU_SYSDIV(PeriphRegister):
     def __init__(self):
@@ -365,23 +396,26 @@ class SIU_SYSDIV(PeriphRegister):
         self._pad0 = v_const(22)
         self.ipclkdiv = v_bits(2)
         self._pad1 = v_const(3)
-        self.bypass = v_defaultbits(1, 1)
+        self.bypass = v_bits(1, 1)
         self.sysclkdiv = v_bits(2)
         self._pad2 = v_const(2)
+
 
 class SIU_HLT(PeriphRegister):
     def __init__(self):
         super().__init__()
         self.hlt = v_bits(32)
 
+
 class SIU_HLTACK(PeriphRegister):
     def __init__(self):
         super().__init__()
         self.hltack = v_bits(32)
 
+
 class SIU_REGISTERS(PeripheralRegisterSet):
-    def __init__(self, wkpcfg, bootcfg, emu=None):
-        super().__init__(emu)
+    def __init__(self, wkpcfg, bootcfg):
+        super().__init__()
 
         #############################################
 

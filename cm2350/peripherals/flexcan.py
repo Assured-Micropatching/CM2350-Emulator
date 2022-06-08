@@ -215,78 +215,95 @@ FLEXCAN_RXIMR_END_OFFSET = 0x0980
 #    INTC_EVENT.CANx_ESR_ERR  | INTC_SRC.CANx_ERR
 #
 FLEXCAN_INT_EVENTS = {
-    'FlexCAN_A': (
-        INTC_EVENT.CANA_MB0,     INTC_EVENT.CANA_MB1,     INTC_EVENT.CANA_MB2,     INTC_EVENT.CANA_MB3,
-        INTC_EVENT.CANA_MB4,     INTC_EVENT.CANA_MB5,     INTC_EVENT.CANA_MB6,     INTC_EVENT.CANA_MB7,
-        INTC_EVENT.CANA_MB8,     INTC_EVENT.CANA_MB9,     INTC_EVENT.CANA_MB10,    INTC_EVENT.CANA_MB11,
-        INTC_EVENT.CANA_MB12,    INTC_EVENT.CANA_MB13,    INTC_EVENT.CANA_MB14,    INTC_EVENT.CANA_MB15,
-        INTC_EVENT.CANA_MB16,    INTC_EVENT.CANA_MB17,    INTC_EVENT.CANA_MB18,    INTC_EVENT.CANA_MB19,
-        INTC_EVENT.CANA_MB20,    INTC_EVENT.CANA_MB21,    INTC_EVENT.CANA_MB22,    INTC_EVENT.CANA_MB23,
-        INTC_EVENT.CANA_MB24,    INTC_EVENT.CANA_MB25,    INTC_EVENT.CANA_MB26,    INTC_EVENT.CANA_MB27,
-        INTC_EVENT.CANA_MB28,    INTC_EVENT.CANA_MB29,    INTC_EVENT.CANA_MB30,    INTC_EVENT.CANA_MB31,
-        INTC_EVENT.CANA_MB32,    INTC_EVENT.CANA_MB33,    INTC_EVENT.CANA_MB34,    INTC_EVENT.CANA_MB35,
-        INTC_EVENT.CANA_MB36,    INTC_EVENT.CANA_MB37,    INTC_EVENT.CANA_MB38,    INTC_EVENT.CANA_MB39,
-        INTC_EVENT.CANA_MB40,    INTC_EVENT.CANA_MB41,    INTC_EVENT.CANA_MB42,    INTC_EVENT.CANA_MB43,
-        INTC_EVENT.CANA_MB44,    INTC_EVENT.CANA_MB45,    INTC_EVENT.CANA_MB46,    INTC_EVENT.CANA_MB47,
-        INTC_EVENT.CANA_MB48,    INTC_EVENT.CANA_MB49,    INTC_EVENT.CANA_MB50,    INTC_EVENT.CANA_MB51,
-        INTC_EVENT.CANA_MB52,    INTC_EVENT.CANA_MB53,    INTC_EVENT.CANA_MB54,    INTC_EVENT.CANA_MB55,
-        INTC_EVENT.CANA_MB56,    INTC_EVENT.CANA_MB57,    INTC_EVENT.CANA_MB58,    INTC_EVENT.CANA_MB59,
-        INTC_EVENT.CANA_MB60,    INTC_EVENT.CANA_MB61,    INTC_EVENT.CANA_MB62,    INTC_EVENT.CANA_MB63,
-    ),
-    'FlexCAN_B': (
-        INTC_EVENT.CANB_MB0,     INTC_EVENT.CANB_MB1,     INTC_EVENT.CANB_MB2,     INTC_EVENT.CANB_MB3,
-        INTC_EVENT.CANB_MB4,     INTC_EVENT.CANB_MB5,     INTC_EVENT.CANB_MB6,     INTC_EVENT.CANB_MB7,
-        INTC_EVENT.CANB_MB8,     INTC_EVENT.CANB_MB9,     INTC_EVENT.CANB_MB10,    INTC_EVENT.CANB_MB11,
-        INTC_EVENT.CANB_MB12,    INTC_EVENT.CANB_MB13,    INTC_EVENT.CANB_MB14,    INTC_EVENT.CANB_MB15,
-        INTC_EVENT.CANB_MB16,    INTC_EVENT.CANB_MB17,    INTC_EVENT.CANB_MB18,    INTC_EVENT.CANB_MB19,
-        INTC_EVENT.CANB_MB20,    INTC_EVENT.CANB_MB21,    INTC_EVENT.CANB_MB22,    INTC_EVENT.CANB_MB23,
-        INTC_EVENT.CANB_MB24,    INTC_EVENT.CANB_MB25,    INTC_EVENT.CANB_MB26,    INTC_EVENT.CANB_MB27,
-        INTC_EVENT.CANB_MB28,    INTC_EVENT.CANB_MB29,    INTC_EVENT.CANB_MB30,    INTC_EVENT.CANB_MB31,
-        INTC_EVENT.CANB_MB32,    INTC_EVENT.CANB_MB33,    INTC_EVENT.CANB_MB34,    INTC_EVENT.CANB_MB35,
-        INTC_EVENT.CANB_MB36,    INTC_EVENT.CANB_MB37,    INTC_EVENT.CANB_MB38,    INTC_EVENT.CANB_MB39,
-        INTC_EVENT.CANB_MB40,    INTC_EVENT.CANB_MB41,    INTC_EVENT.CANB_MB42,    INTC_EVENT.CANB_MB43,
-        INTC_EVENT.CANB_MB44,    INTC_EVENT.CANB_MB45,    INTC_EVENT.CANB_MB46,    INTC_EVENT.CANB_MB47,
-        INTC_EVENT.CANB_MB48,    INTC_EVENT.CANB_MB49,    INTC_EVENT.CANB_MB50,    INTC_EVENT.CANB_MB51,
-        INTC_EVENT.CANB_MB52,    INTC_EVENT.CANB_MB53,    INTC_EVENT.CANB_MB54,    INTC_EVENT.CANB_MB55,
-        INTC_EVENT.CANB_MB56,    INTC_EVENT.CANB_MB57,    INTC_EVENT.CANB_MB58,    INTC_EVENT.CANB_MB59,
-        INTC_EVENT.CANB_MB60,    INTC_EVENT.CANB_MB61,    INTC_EVENT.CANB_MB62,    INTC_EVENT.CANB_MB63,
-    ),
-    'FlexCAN_C': (
-        INTC_EVENT.CANC_MB0,     INTC_EVENT.CANC_MB1,     INTC_EVENT.CANC_MB2,     INTC_EVENT.CANC_MB3,
-        INTC_EVENT.CANC_MB4,     INTC_EVENT.CANC_MB5,     INTC_EVENT.CANC_MB6,     INTC_EVENT.CANC_MB7,
-        INTC_EVENT.CANC_MB8,     INTC_EVENT.CANC_MB9,     INTC_EVENT.CANC_MB10,    INTC_EVENT.CANC_MB11,
-        INTC_EVENT.CANC_MB12,    INTC_EVENT.CANC_MB13,    INTC_EVENT.CANC_MB14,    INTC_EVENT.CANC_MB15,
-        INTC_EVENT.CANC_MB16,    INTC_EVENT.CANC_MB17,    INTC_EVENT.CANC_MB18,    INTC_EVENT.CANC_MB19,
-        INTC_EVENT.CANC_MB20,    INTC_EVENT.CANC_MB21,    INTC_EVENT.CANC_MB22,    INTC_EVENT.CANC_MB23,
-        INTC_EVENT.CANC_MB24,    INTC_EVENT.CANC_MB25,    INTC_EVENT.CANC_MB26,    INTC_EVENT.CANC_MB27,
-        INTC_EVENT.CANC_MB28,    INTC_EVENT.CANC_MB29,    INTC_EVENT.CANC_MB30,    INTC_EVENT.CANC_MB31,
-        INTC_EVENT.CANC_MB32,    INTC_EVENT.CANC_MB33,    INTC_EVENT.CANC_MB34,    INTC_EVENT.CANC_MB35,
-        INTC_EVENT.CANC_MB36,    INTC_EVENT.CANC_MB37,    INTC_EVENT.CANC_MB38,    INTC_EVENT.CANC_MB39,
-        INTC_EVENT.CANC_MB40,    INTC_EVENT.CANC_MB41,    INTC_EVENT.CANC_MB42,    INTC_EVENT.CANC_MB43,
-        INTC_EVENT.CANC_MB44,    INTC_EVENT.CANC_MB45,    INTC_EVENT.CANC_MB46,    INTC_EVENT.CANC_MB47,
-        INTC_EVENT.CANC_MB48,    INTC_EVENT.CANC_MB49,    INTC_EVENT.CANC_MB50,    INTC_EVENT.CANC_MB51,
-        INTC_EVENT.CANC_MB52,    INTC_EVENT.CANC_MB53,    INTC_EVENT.CANC_MB54,    INTC_EVENT.CANC_MB55,
-        INTC_EVENT.CANC_MB56,    INTC_EVENT.CANC_MB57,    INTC_EVENT.CANC_MB58,    INTC_EVENT.CANC_MB59,
-        INTC_EVENT.CANC_MB60,    INTC_EVENT.CANC_MB61,    INTC_EVENT.CANC_MB62,    INTC_EVENT.CANC_MB63,
-    ),
-    'FlexCAN_D': (
-        INTC_EVENT.CAND_MB0,     INTC_EVENT.CAND_MB1,     INTC_EVENT.CAND_MB2,     INTC_EVENT.CAND_MB3,
-        INTC_EVENT.CAND_MB4,     INTC_EVENT.CAND_MB5,     INTC_EVENT.CAND_MB6,     INTC_EVENT.CAND_MB7,
-        INTC_EVENT.CAND_MB8,     INTC_EVENT.CAND_MB9,     INTC_EVENT.CAND_MB10,    INTC_EVENT.CAND_MB11,
-        INTC_EVENT.CAND_MB12,    INTC_EVENT.CAND_MB13,    INTC_EVENT.CAND_MB14,    INTC_EVENT.CAND_MB15,
-        INTC_EVENT.CAND_MB16,    INTC_EVENT.CAND_MB17,    INTC_EVENT.CAND_MB18,    INTC_EVENT.CAND_MB19,
-        INTC_EVENT.CAND_MB20,    INTC_EVENT.CAND_MB21,    INTC_EVENT.CAND_MB22,    INTC_EVENT.CAND_MB23,
-        INTC_EVENT.CAND_MB24,    INTC_EVENT.CAND_MB25,    INTC_EVENT.CAND_MB26,    INTC_EVENT.CAND_MB27,
-        INTC_EVENT.CAND_MB28,    INTC_EVENT.CAND_MB29,    INTC_EVENT.CAND_MB30,    INTC_EVENT.CAND_MB31,
-        INTC_EVENT.CAND_MB32,    INTC_EVENT.CAND_MB33,    INTC_EVENT.CAND_MB34,    INTC_EVENT.CAND_MB35,
-        INTC_EVENT.CAND_MB36,    INTC_EVENT.CAND_MB37,    INTC_EVENT.CAND_MB38,    INTC_EVENT.CAND_MB39,
-        INTC_EVENT.CAND_MB40,    INTC_EVENT.CAND_MB41,    INTC_EVENT.CAND_MB42,    INTC_EVENT.CAND_MB43,
-        INTC_EVENT.CAND_MB44,    INTC_EVENT.CAND_MB45,    INTC_EVENT.CAND_MB46,    INTC_EVENT.CAND_MB47,
-        INTC_EVENT.CAND_MB48,    INTC_EVENT.CAND_MB49,    INTC_EVENT.CAND_MB50,    INTC_EVENT.CAND_MB51,
-        INTC_EVENT.CAND_MB52,    INTC_EVENT.CAND_MB53,    INTC_EVENT.CAND_MB54,    INTC_EVENT.CAND_MB55,
-        INTC_EVENT.CAND_MB56,    INTC_EVENT.CAND_MB57,    INTC_EVENT.CAND_MB58,    INTC_EVENT.CAND_MB59,
-        INTC_EVENT.CAND_MB60,    INTC_EVENT.CAND_MB61,    INTC_EVENT.CAND_MB62,    INTC_EVENT.CAND_MB63,
-    ),
+    'FlexCAN_A': {
+        'msg': (
+            INTC_EVENT.CANA_MB0,     INTC_EVENT.CANA_MB1,     INTC_EVENT.CANA_MB2,     INTC_EVENT.CANA_MB3,
+            INTC_EVENT.CANA_MB4,     INTC_EVENT.CANA_MB5,     INTC_EVENT.CANA_MB6,     INTC_EVENT.CANA_MB7,
+            INTC_EVENT.CANA_MB8,     INTC_EVENT.CANA_MB9,     INTC_EVENT.CANA_MB10,    INTC_EVENT.CANA_MB11,
+            INTC_EVENT.CANA_MB12,    INTC_EVENT.CANA_MB13,    INTC_EVENT.CANA_MB14,    INTC_EVENT.CANA_MB15,
+            INTC_EVENT.CANA_MB16,    INTC_EVENT.CANA_MB17,    INTC_EVENT.CANA_MB18,    INTC_EVENT.CANA_MB19,
+            INTC_EVENT.CANA_MB20,    INTC_EVENT.CANA_MB21,    INTC_EVENT.CANA_MB22,    INTC_EVENT.CANA_MB23,
+            INTC_EVENT.CANA_MB24,    INTC_EVENT.CANA_MB25,    INTC_EVENT.CANA_MB26,    INTC_EVENT.CANA_MB27,
+            INTC_EVENT.CANA_MB28,    INTC_EVENT.CANA_MB29,    INTC_EVENT.CANA_MB30,    INTC_EVENT.CANA_MB31,
+            INTC_EVENT.CANA_MB32,    INTC_EVENT.CANA_MB33,    INTC_EVENT.CANA_MB34,    INTC_EVENT.CANA_MB35,
+            INTC_EVENT.CANA_MB36,    INTC_EVENT.CANA_MB37,    INTC_EVENT.CANA_MB38,    INTC_EVENT.CANA_MB39,
+            INTC_EVENT.CANA_MB40,    INTC_EVENT.CANA_MB41,    INTC_EVENT.CANA_MB42,    INTC_EVENT.CANA_MB43,
+            INTC_EVENT.CANA_MB44,    INTC_EVENT.CANA_MB45,    INTC_EVENT.CANA_MB46,    INTC_EVENT.CANA_MB47,
+            INTC_EVENT.CANA_MB48,    INTC_EVENT.CANA_MB49,    INTC_EVENT.CANA_MB50,    INTC_EVENT.CANA_MB51,
+            INTC_EVENT.CANA_MB52,    INTC_EVENT.CANA_MB53,    INTC_EVENT.CANA_MB54,    INTC_EVENT.CANA_MB55,
+            INTC_EVENT.CANA_MB56,    INTC_EVENT.CANA_MB57,    INTC_EVENT.CANA_MB58,    INTC_EVENT.CANA_MB59,
+            INTC_EVENT.CANA_MB60,    INTC_EVENT.CANA_MB61,    INTC_EVENT.CANA_MB62,    INTC_EVENT.CANA_MB63,
+        ),
+    },
+    'FlexCAN_B': {
+        'msg': (
+            INTC_EVENT.CANB_MB0,     INTC_EVENT.CANB_MB1,     INTC_EVENT.CANB_MB2,     INTC_EVENT.CANB_MB3,
+            INTC_EVENT.CANB_MB4,     INTC_EVENT.CANB_MB5,     INTC_EVENT.CANB_MB6,     INTC_EVENT.CANB_MB7,
+            INTC_EVENT.CANB_MB8,     INTC_EVENT.CANB_MB9,     INTC_EVENT.CANB_MB10,    INTC_EVENT.CANB_MB11,
+            INTC_EVENT.CANB_MB12,    INTC_EVENT.CANB_MB13,    INTC_EVENT.CANB_MB14,    INTC_EVENT.CANB_MB15,
+            INTC_EVENT.CANB_MB16,    INTC_EVENT.CANB_MB17,    INTC_EVENT.CANB_MB18,    INTC_EVENT.CANB_MB19,
+            INTC_EVENT.CANB_MB20,    INTC_EVENT.CANB_MB21,    INTC_EVENT.CANB_MB22,    INTC_EVENT.CANB_MB23,
+            INTC_EVENT.CANB_MB24,    INTC_EVENT.CANB_MB25,    INTC_EVENT.CANB_MB26,    INTC_EVENT.CANB_MB27,
+            INTC_EVENT.CANB_MB28,    INTC_EVENT.CANB_MB29,    INTC_EVENT.CANB_MB30,    INTC_EVENT.CANB_MB31,
+            INTC_EVENT.CANB_MB32,    INTC_EVENT.CANB_MB33,    INTC_EVENT.CANB_MB34,    INTC_EVENT.CANB_MB35,
+            INTC_EVENT.CANB_MB36,    INTC_EVENT.CANB_MB37,    INTC_EVENT.CANB_MB38,    INTC_EVENT.CANB_MB39,
+            INTC_EVENT.CANB_MB40,    INTC_EVENT.CANB_MB41,    INTC_EVENT.CANB_MB42,    INTC_EVENT.CANB_MB43,
+            INTC_EVENT.CANB_MB44,    INTC_EVENT.CANB_MB45,    INTC_EVENT.CANB_MB46,    INTC_EVENT.CANB_MB47,
+            INTC_EVENT.CANB_MB48,    INTC_EVENT.CANB_MB49,    INTC_EVENT.CANB_MB50,    INTC_EVENT.CANB_MB51,
+            INTC_EVENT.CANB_MB52,    INTC_EVENT.CANB_MB53,    INTC_EVENT.CANB_MB54,    INTC_EVENT.CANB_MB55,
+            INTC_EVENT.CANB_MB56,    INTC_EVENT.CANB_MB57,    INTC_EVENT.CANB_MB58,    INTC_EVENT.CANB_MB59,
+            INTC_EVENT.CANB_MB60,    INTC_EVENT.CANB_MB61,    INTC_EVENT.CANB_MB62,    INTC_EVENT.CANB_MB63,
+        ),
+    },
+    'FlexCAN_C': {
+        'msg': (
+            INTC_EVENT.CANC_MB0,     INTC_EVENT.CANC_MB1,     INTC_EVENT.CANC_MB2,     INTC_EVENT.CANC_MB3,
+            INTC_EVENT.CANC_MB4,     INTC_EVENT.CANC_MB5,     INTC_EVENT.CANC_MB6,     INTC_EVENT.CANC_MB7,
+            INTC_EVENT.CANC_MB8,     INTC_EVENT.CANC_MB9,     INTC_EVENT.CANC_MB10,    INTC_EVENT.CANC_MB11,
+            INTC_EVENT.CANC_MB12,    INTC_EVENT.CANC_MB13,    INTC_EVENT.CANC_MB14,    INTC_EVENT.CANC_MB15,
+            INTC_EVENT.CANC_MB16,    INTC_EVENT.CANC_MB17,    INTC_EVENT.CANC_MB18,    INTC_EVENT.CANC_MB19,
+            INTC_EVENT.CANC_MB20,    INTC_EVENT.CANC_MB21,    INTC_EVENT.CANC_MB22,    INTC_EVENT.CANC_MB23,
+            INTC_EVENT.CANC_MB24,    INTC_EVENT.CANC_MB25,    INTC_EVENT.CANC_MB26,    INTC_EVENT.CANC_MB27,
+            INTC_EVENT.CANC_MB28,    INTC_EVENT.CANC_MB29,    INTC_EVENT.CANC_MB30,    INTC_EVENT.CANC_MB31,
+            INTC_EVENT.CANC_MB32,    INTC_EVENT.CANC_MB33,    INTC_EVENT.CANC_MB34,    INTC_EVENT.CANC_MB35,
+            INTC_EVENT.CANC_MB36,    INTC_EVENT.CANC_MB37,    INTC_EVENT.CANC_MB38,    INTC_EVENT.CANC_MB39,
+            INTC_EVENT.CANC_MB40,    INTC_EVENT.CANC_MB41,    INTC_EVENT.CANC_MB42,    INTC_EVENT.CANC_MB43,
+            INTC_EVENT.CANC_MB44,    INTC_EVENT.CANC_MB45,    INTC_EVENT.CANC_MB46,    INTC_EVENT.CANC_MB47,
+            INTC_EVENT.CANC_MB48,    INTC_EVENT.CANC_MB49,    INTC_EVENT.CANC_MB50,    INTC_EVENT.CANC_MB51,
+            INTC_EVENT.CANC_MB52,    INTC_EVENT.CANC_MB53,    INTC_EVENT.CANC_MB54,    INTC_EVENT.CANC_MB55,
+            INTC_EVENT.CANC_MB56,    INTC_EVENT.CANC_MB57,    INTC_EVENT.CANC_MB58,    INTC_EVENT.CANC_MB59,
+            INTC_EVENT.CANC_MB60,    INTC_EVENT.CANC_MB61,    INTC_EVENT.CANC_MB62,    INTC_EVENT.CANC_MB63,
+        ),
+    },
+    'FlexCAN_D': {
+        'msg': (
+            INTC_EVENT.CAND_MB0,     INTC_EVENT.CAND_MB1,     INTC_EVENT.CAND_MB2,     INTC_EVENT.CAND_MB3,
+            INTC_EVENT.CAND_MB4,     INTC_EVENT.CAND_MB5,     INTC_EVENT.CAND_MB6,     INTC_EVENT.CAND_MB7,
+            INTC_EVENT.CAND_MB8,     INTC_EVENT.CAND_MB9,     INTC_EVENT.CAND_MB10,    INTC_EVENT.CAND_MB11,
+            INTC_EVENT.CAND_MB12,    INTC_EVENT.CAND_MB13,    INTC_EVENT.CAND_MB14,    INTC_EVENT.CAND_MB15,
+            INTC_EVENT.CAND_MB16,    INTC_EVENT.CAND_MB17,    INTC_EVENT.CAND_MB18,    INTC_EVENT.CAND_MB19,
+            INTC_EVENT.CAND_MB20,    INTC_EVENT.CAND_MB21,    INTC_EVENT.CAND_MB22,    INTC_EVENT.CAND_MB23,
+            INTC_EVENT.CAND_MB24,    INTC_EVENT.CAND_MB25,    INTC_EVENT.CAND_MB26,    INTC_EVENT.CAND_MB27,
+            INTC_EVENT.CAND_MB28,    INTC_EVENT.CAND_MB29,    INTC_EVENT.CAND_MB30,    INTC_EVENT.CAND_MB31,
+            INTC_EVENT.CAND_MB32,    INTC_EVENT.CAND_MB33,    INTC_EVENT.CAND_MB34,    INTC_EVENT.CAND_MB35,
+            INTC_EVENT.CAND_MB36,    INTC_EVENT.CAND_MB37,    INTC_EVENT.CAND_MB38,    INTC_EVENT.CAND_MB39,
+            INTC_EVENT.CAND_MB40,    INTC_EVENT.CAND_MB41,    INTC_EVENT.CAND_MB42,    INTC_EVENT.CAND_MB43,
+            INTC_EVENT.CAND_MB44,    INTC_EVENT.CAND_MB45,    INTC_EVENT.CAND_MB46,    INTC_EVENT.CAND_MB47,
+            INTC_EVENT.CAND_MB48,    INTC_EVENT.CAND_MB49,    INTC_EVENT.CAND_MB50,    INTC_EVENT.CAND_MB51,
+            INTC_EVENT.CAND_MB52,    INTC_EVENT.CAND_MB53,    INTC_EVENT.CAND_MB54,    INTC_EVENT.CAND_MB55,
+            INTC_EVENT.CAND_MB56,    INTC_EVENT.CAND_MB57,    INTC_EVENT.CAND_MB58,    INTC_EVENT.CAND_MB59,
+            INTC_EVENT.CAND_MB60,    INTC_EVENT.CAND_MB61,    INTC_EVENT.CAND_MB62,    INTC_EVENT.CAND_MB63,
+        ),
+    },
+}
+
+
+FLEXCAN_INT_STATUS_REGS = {
+    'msg': ('iflag1', 'iflag2'),
+}
+
+FLEXCAN_INT_FLAG_REGS = {
+    'msg': ('imask1', 'imask2'),
 }
 
 # Simple MB to IFLAG1/2 bitmask lookup. Mailboxes 0-31 are in IFLAG1, 32-63 are
@@ -300,14 +317,14 @@ class FLEXCAN_x_MCR(PeriphRegister):
     def __init__(self):
         super().__init__()
         self.mdis = v_bits(1)
-        self.frz = v_defaultbits(1, 1)
+        self.frz = v_bits(1, 1)
         self.fen = v_bits(1)
-        self.halt = v_defaultbits(1, 1)
+        self.halt = v_bits(1, 1)
         self.not_rdy = v_const(1, 1)
         self._pad0 = v_const(1)
         self.soft_rst = v_bits(1)
         self.frz_ack = v_const(1, 1)
-        self.supv = v_defaultbits(1, 1)
+        self.supv = v_bits(1, 1)
         self._pad1 = v_const(1)
         self.wrn_en = v_bits(1)
         self.mdisack = v_const(1, 1)
@@ -321,7 +338,7 @@ class FLEXCAN_x_MCR(PeriphRegister):
         self._pad4 = v_const(2)
         self.idam = v_bits(2)
         self._pad5 = v_const(2)
-        self.maxmb = v_defaultbits(6, 0b001111)
+        self.maxmb = v_bits(6, 0b001111)
 
 class FLEXCAN_x_CTRL(PeriphRegister):
     def __init__(self):
@@ -372,19 +389,6 @@ class FLEXCAN_x_ESR(PeriphRegister):
         self.boff_int = v_w1c(1)
         self.err_int = v_w1c(1)
         self.pad2 = v_const(1)
-
-class FLEXCAN_x_MASK(PeriphRegister):
-    """
-    Used for the various RxMask, and IMASKx registers
-    """
-    def __init__(self, default=0):
-        super().__init__()
-        self.mask = v_defaultbits(32, default)
-
-class FLEXCAN_x_FLAG(PeriphRegister):
-    def __init__(self):
-        super().__init__()
-        self.flag = v_w1c(32)
 
 
 class CanMsg:
@@ -493,20 +497,20 @@ class FLEXCAN_REGISTERS(PeripheralRegisterSet):
     Register set for FlexCAN peripherals.  All registers are handled by this
     object except for the TIMER register which requires custom processing.
     """
-    def __init__(self, emu=None):
-        super().__init__(emu)
+    def __init__(self):
+        super().__init__()
 
         self.mcr        = (FLEXCAN_MCR_OFFSET,      FLEXCAN_x_MCR())
         self.ctrl       = (FLEXCAN_CTRL_OFFSET,     FLEXCAN_x_CTRL())
-        self.rxgmask    = (FLEXCAN_RXGMASK_OFFSET,  FLEXCAN_x_MASK(0xFFFFFFFF))
-        self.rx14mask   = (FLEXCAN_RX14MASK_OFFSET, FLEXCAN_x_MASK(0xFFFFFFFF))
-        self.rx15mask   = (FLEXCAN_RX15MASK_OFFSET, FLEXCAN_x_MASK(0xFFFFFFFF))
+        self.rxgmask    = (FLEXCAN_RXGMASK_OFFSET,  v_bits(32, 0xFFFFFFFF))
+        self.rx14mask   = (FLEXCAN_RX14MASK_OFFSET, v_bits(32, 0xFFFFFFFF))
+        self.rx15mask   = (FLEXCAN_RX15MASK_OFFSET, v_bits(32, 0xFFFFFFFF))
         self.ecr        = (FLEXCAN_ECR_OFFSET,      FLEXCAN_x_ECR())
         self.esr        = (FLEXCAN_ESR_OFFSET,      FLEXCAN_x_ESR())
-        self.imask2     = (FLEXCAN_IMASK2_OFFSET,   FLEXCAN_x_MASK())
-        self.imask1     = (FLEXCAN_IMASK1_OFFSET,   FLEXCAN_x_MASK())
-        self.iflag2     = (FLEXCAN_IFLAG2_OFFSET,   FLEXCAN_x_FLAG())
-        self.iflag1     = (FLEXCAN_IFLAG1_OFFSET,   FLEXCAN_x_FLAG())
+        self.imask2     = (FLEXCAN_IMASK2_OFFSET,   v_bits(32))
+        self.imask1     = (FLEXCAN_IMASK1_OFFSET,   v_bits(32))
+        self.iflag2     = (FLEXCAN_IFLAG2_OFFSET,   v_w1c(32))
+        self.iflag1     = (FLEXCAN_IFLAG1_OFFSET,   v_w1c(32))
 
         # The mailbox structure _could_ be defined with a bunch of bitfields,
         # and structures, but it makes re-using these mailbox registers for the
@@ -565,10 +569,9 @@ class FlexCAN(ExternalIOPeripheral):
         """
         super().__init__(emu, devname, mmio_addr, 0x4000,
                 regsetcls=FLEXCAN_REGISTERS,
-                isrstatus=('iflag1', 'iflag2'),
-                isrflags=('imask1', 'imask2'),
+                isrstatus=FLEXCAN_INT_STATUS_REGS,
+                isrflags=FLEXCAN_INT_FLAG_REGS,
                 isrevents=FLEXCAN_INT_EVENTS)
-
         # timer register
         self._timer = TimerRegister(16)
 
@@ -618,16 +621,16 @@ class FlexCAN(ExternalIOPeripheral):
         else:
             return super()._getPeriphReg(offset, size)
 
-    def _setPeriphReg(self, offset, bytez):
+    def _setPeriphReg(self, offset, data):
         """
-        Customization of the standard ExternalIOPeripheral _getPeriphReg()
+        Customization of the standard ExternalIOPeripheral _setPeriphReg()
         function to allow custom handling of the TIMER register which is
         emulated using a TimerRegister object.
         """
         if offset == FLEXCAN_TIMER_OFFSET:
-            self._timer.set(e_bits.parsebytes(bytez, 0, 4, bigend=self.emu.getEndian()))
+            self._timer.set(e_bits.parsebytes(data, 0, 4, bigend=self.emu.getEndian()))
         else:
-            super()._setPeriphReg(offset, bytez)
+            super()._setPeriphReg(offset, data)
 
     def _resetFilters(self):
         """
@@ -722,7 +725,9 @@ class FlexCAN(ExternalIOPeripheral):
 
         if len(self._rx_fifo) == 0:
             # If the FIFO is empty, place the message directly into MB0 and
-            # place a None placeholder item in the RxFIFO
+            # place a None placeholder item in the RxFIFO so the length of the
+            # RxFIFO represents the number of messages that have been received
+            # and not read.
             self.normalRx(0, msg)
             self._rx_fifo.append(None)
             return True
@@ -741,7 +746,7 @@ class FlexCAN(ExternalIOPeripheral):
             # perhaps it means if there were 5 messages in the RxFIFO before a
             # new message was queued?
             if len(self._rx_fifo) == FLEXCAN_RxFIFO_MAX_LEN:
-                self.event(6, FLEXCAN_RxFIFO_WARNING_MASK)
+                self.event('msg', 6, FLEXCAN_RxFIFO_WARNING_MASK)
             return True
 
         else:
@@ -798,7 +803,7 @@ class FlexCAN(ExternalIOPeripheral):
             if last_match == 0 and self.registers.mcr.fen:
                 # If the RxFIFO is enabled and the last match was "MB0" then
                 # signal an RxFIFO Overflow interrupt (MB7)
-                self.event(7, FLEXCAN_RxFIFO_OVERFLOW_MASK)
+                self.event('msg', 7, FLEXCAN_RxFIFO_OVERFLOW_MASK)
             else:
                 # mark the last matched mailbox as overrun
                 self.setMBCode(last_match, FLEXCAN_CODE_RX_OVERRUN)
@@ -855,20 +860,19 @@ class FlexCAN(ExternalIOPeripheral):
 
         # If Rx FIFO mode is enabled, the MB0 interrupt flag is cleared, and
         # there is a message available in the rx fifo, populate MB0
-        if self.registers.mcr.fen and \
-                self._rx_fifo and \
-                (self.registers.iflag1.flag & FLEXCAN_RxFIFO_MSG_AVAIL_MASK) == 0:
-            # Discard the first RxFIFO element, it is a 'None' placeholder
-            self._rx_fifo.pop(0)
+        if self.registers.mcr.fen and self._rx_fifo and \
+                (self.registers.iflag1 & FLEXCAN_RxFIFO_MSG_AVAIL_MASK) == 0:
+            if len(self._rx_fifo) == 1:
+                # Discard the first RxFIFO element, it is a 'None' placeholder
+                # representing the current message that is in the RxFIFO mailbox
+                # (mailbox 0) already. Clearing the interrupt flag indicates
+                # that the software is finished with the message
+                self._rx_fifo.pop(0)
 
-            # If there are messages in the queue place the next one into MB0
-            if self._rx_fifo:
-                # Get the next message and insert None at index 0 to indicate
-                # that message is in MB0
-                msg = self._rx_fifo.pop(0)
-                self._rx_fifo.insert(0, None)
-
-                # Now place the message into MB0
+            elif len(self._rx_fifo) > 1:
+                # Leave the placeholder None in index 0 of the RxFIFO and move
+                # the next unread message into the RxFIFO mailbox (mailbox 0)
+                msg = self._rx_fifo.pop(1)
                 self.normalRx(0, msg)
 
     def mbUpdate(self, thing, idx, size):
@@ -925,20 +929,20 @@ class FlexCAN(ExternalIOPeripheral):
         if mb == 0 and self.registers.mcr.fen:
             # Use the timestamp for when the message was received by the RxFIFO
             msg.into_mb(self.registers.mb, offset=idx, code=0, timestamp=msg.timestamp)
-            self.event(5, FLEXCAN_RxFIFO_MSG_AVAIL_MASK)
+            self.event('msg', 5, FLEXCAN_RxFIFO_MSG_AVAIL_MASK)
 
         elif mb < 32:
             # Set the code to indicate that a message has been received (this
             # isn't done for the RxFIFO received messages)
             msg.into_mb(self.registers.mb, offset=idx, code=FLEXCAN_CODE_RX_FULL, timestamp=self._timer.get())
-            self.event(mb, FLEXCAN_IFLAG1_MASK[mb])
+            self.event('msg', mb, FLEXCAN_IFLAG1_MASK[mb])
 
         else:
             # Set the code to indicate that a message has been received (this
             # isn't done for the RxFIFO received messages)
             msg.into_mb(self.registers.mb, offset=idx, code=FLEXCAN_CODE_RX_FULL, timestamp=self._timer.get())
 
-            self.event(mb, FLEXCAN_IFLAG2_MASK[mb])
+            self.event('msg', mb, FLEXCAN_IFLAG2_MASK[mb])
 
     def normalTx(self, mb):
         """
@@ -1021,7 +1025,7 @@ class FlexCAN(ExternalIOPeripheral):
             else:
                 mask_val = FLEXCAN_IFLAG2_MASK[mb]
 
-            self.event(mb, mask_val)
+            self.event('msg', mb, mask_val)
 
         # If mode is NORMAL or LOOP-BACK, and the MCR[SRX_DIS] bit == 0
         # (self-reception of messages enabled), feed this message
@@ -1061,22 +1065,22 @@ class FlexCAN(ExternalIOPeripheral):
             # filter (RXGMASK), except for MB14 (RX14MASK) and MB15
             # (RX15MASK).
             if mb == 14:
-                return self.registers.rx14mask.mask
+                return self.registers.rx14mask
             elif mb == 15:
-                return self.registers.rx15mask.mask
+                return self.registers.rx15mask
             else:
-                return self.registers.rxgmask.mask
+                return self.registers.rxgmask
         else:
             # If MCR[FEN] is set then the RxFIFO is active and the RX14MASK
             # applies to both MB14 and the 6th filter ID in the RxFIFO
             # filter ID list. RX15MASK applies to MB15 and the 7th ID in the
             # RxFIFO filter list.
             if mb in (6, 14):
-                return self.registers.rx14mask.mask
+                return self.registers.rx14mask
             elif mb in (7, 15):
-                return self.registers.rx15mask.mask
+                return self.registers.rx15mask
             else:
-                return self.registers.rxgmask.mask
+                return self.registers.rxgmask
 
     def filterAddRtrMB(self, mb):
         """

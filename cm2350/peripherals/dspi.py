@@ -155,7 +155,7 @@ class DSPI_x_MCR(PeriphRegister):
         self.clr_rxf = v_bits(1)
         self.smpl_pt = v_bits(2)
         self._pad1 = v_const(7)
-        self.halt = v_defaultbits(1, 1)
+        self.halt = v_bits(1, 1)
 
 
 class DSPI_x_TCR(PeriphRegister):
@@ -169,7 +169,7 @@ class DSPI_x_CTAR(PeriphRegister):
     def __init__(self):
         super().__init__()
         self.dbr = v_bits(1)
-        self.fmsz = v_defaultbits(4, 0xF)
+        self.fmsz = v_bits(4, 0xF)
         self.cpol = v_bits(1)
         self.cpha = v_bits(1)
         self.lsbfe = v_bits(1)
@@ -272,8 +272,8 @@ class DSPI_REGISTERS(PeripheralRegisterSet):
     """
     Register set for DSPI peripherals.
     """
-    def __init__(self, emu=None):
-        super().__init__(emu)
+    def __init__(self):
+        super().__init__()
 
         # Basic SPI operation
         self.mcr    = (DSPI_MCR_OFFSET,    DSPI_x_MCR())

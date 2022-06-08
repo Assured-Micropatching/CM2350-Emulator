@@ -591,8 +591,8 @@ class EQADC_REDLCCR(PeriphRegister):
         self.srv1 = v_bits(4)
 
 class EQADC_REGISTERS(PeripheralRegisterSet):
-    def __init__(self, emu=None):
-        super().__init__(emu)
+    def __init__(self):
+        super().__init__()
 
         self.mcr     = (EQADC_MCR_OFFSET, EQADC_MCR())
         self.etdfr   = (EQADC_ETDFR_OFFSET, EQADC_ETDFR())
@@ -790,7 +790,7 @@ class EQADC(ExternalIOPeripheral):
         # Update mode for the channel being updated
         self.updateMode(idx)
 
-    def _update_cfsr(self, channel, triggered=False):
+    def _update_cfsr(self, channel, triggered):
         mode = self.mode[channel]
         field = EQADC_CFS_FIELDS[channel]
         if mode in EQADC_CFS_IDLE_MODES:

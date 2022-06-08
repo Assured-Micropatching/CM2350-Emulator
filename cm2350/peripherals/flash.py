@@ -190,8 +190,8 @@ def getFlashOffsets(filename):
 
 
 class FLASH_MCR(PeriphRegister):
-    def __init__(self, las, mas):
-        PeriphRegister.__init__(self)
+    def __init__(self, las, mas, bigend=True):
+        PeriphRegister.__init__(self, bigend=bigend)
         self._pad0 = v_const(5)
         self.size = v_const(3, 0b101)
         self._pad1 = v_const(1)
@@ -213,8 +213,8 @@ class FLASH_MCR(PeriphRegister):
         self.ehv = v_bits(1)
 
 class FLASH_LMLR(PeriphRegister):
-    def __init__(self):
-        PeriphRegister.__init__(self)
+    def __init__(self, bigend=True):
+        PeriphRegister.__init__(self, bigend=bigend)
         self.lme = v_const(1)
         self._pad0 = v_const(10)
         self.slock = v_bits(1)
@@ -224,15 +224,15 @@ class FLASH_LMLR(PeriphRegister):
         self.llock = v_bits(10)
 
 class FLASH_HLR(PeriphRegister):
-    def __init__(self):
-        PeriphRegister.__init__(self)
+    def __init__(self, bigend=True):
+        PeriphRegister.__init__(self, bigend=bigend)
         self.hbe = v_const(1)
         self._pad0 = v_const(21)
         self.hlock = v_bits(10)
 
 class FLASH_SLMLR(PeriphRegister):
-    def __init__(self):
-        PeriphRegister.__init__(self)
+    def __init__(self, bigend=True):
+        PeriphRegister.__init__(self, bigend=bigend)
         self.sle = v_const(1)
         self._pad0 = v_const(10)
         self.sslock = v_bits(1)
@@ -242,30 +242,30 @@ class FLASH_SLMLR(PeriphRegister):
         self.sllock = v_bits(10)
 
 class FLASH_LMSR(PeriphRegister):
-    def __init__(self):
-        PeriphRegister.__init__(self)
+    def __init__(self, bigend=True):
+        PeriphRegister.__init__(self, bigend=bigend)
         self._pad0 = v_const(14)
         self.msel = v_bits(2)
         self._pad1 = v_const(6)
         self.lsel = v_bits(10)
 
 class FLASH_HSR(PeriphRegister):
-    def __init__(self):
-        PeriphRegister.__init__(self)
+    def __init__(self, bigend=True):
+        PeriphRegister.__init__(self, bigend=bigend)
         self._pad0 = v_const(26)
         self.hsel = v_bits(6)
 
 class FLASH_AR(PeriphRegister):
-    def __init__(self):
-        PeriphRegister.__init__(self)
+    def __init__(self, bigend=True):
+        PeriphRegister.__init__(self, bigend=bigend)
         self.sad = v_const(1)
         self._pad0 = v_const(13)
         self.addr = v_bits(15)
         self._pad1 = v_const(3)
 
 class FLASH_BIUCR(PeriphRegister):
-    def __init__(self):
-        PeriphRegister.__init__(self)
+    def __init__(self, bigend=True):
+        PeriphRegister.__init__(self, bigend=bigend)
         self._pad0 = v_const(7)
         self.m8pfe = v_bits(1)
         self._pad1 = v_const(1)
@@ -274,9 +274,9 @@ class FLASH_BIUCR(PeriphRegister):
         self.m4pfe = v_bits(1)
         self._pad2 = v_const(3)
         self.m0pfe = v_bits(1)
-        self.apc = v_defaultbits(3, 0b111)
-        self.wwsc = v_defaultbits(2, 0b11)
-        self.rwsc = v_defaultbits(3, 0b111)
+        self.apc = v_bits(3, 0b111)
+        self.wwsc = v_bits(2, 0b11)
+        self.rwsc = v_bits(3, 0b111)
         self._pad3 = v_const(1)
         self.dpfen = v_bits(1)
         self._pad4 = v_const(1)
@@ -286,8 +286,8 @@ class FLASH_BIUCR(PeriphRegister):
         self.bfen = v_bits(1)
 
 class FLASH_BIUAPR(PeriphRegister):
-    def __init__(self):
-        PeriphRegister.__init__(self)
+    def __init__(self, bigend=True):
+        PeriphRegister.__init__(self, bigend=bigend)
         # The pad fields in this register aren't v_const because the
         # documentation seems to indicate that the values read may be 1 if
         # shadow flash has been erased
@@ -296,33 +296,33 @@ class FLASH_BIUAPR(PeriphRegister):
         # what is shown in the documentation.  Even though this is the only
         # register in the flash controller that seems to be this way.  So I
         # suspect this is probably a documentation bug.
-        self._pad0 = v_defaultbits(14, 0x3FFF)
-        self.m8ap = v_defaultbits(2, 0b11)
-        self._pad1 = v_defaultbits(2, 0b11)
-        self.m6ap = v_defaultbits(2, 0b11)
-        self.m5ap = v_defaultbits(2, 0b11)
-        self.m4ap = v_defaultbits(2, 0b11)
-        self._pad2 = v_defaultbits(6, 0x3F)
-        self.m0ap = v_defaultbits(2, 0b11)
+        self._pad0 = v_bits(14, 0x3FFF)
+        self.m8ap = v_bits(2, 0b11)
+        self._pad1 = v_bits(2, 0b11)
+        self.m6ap = v_bits(2, 0b11)
+        self.m5ap = v_bits(2, 0b11)
+        self.m4ap = v_bits(2, 0b11)
+        self._pad2 = v_bits(6, 0x3F)
+        self.m0ap = v_bits(2, 0b11)
 
 class FLASH_BIUCR2(PeriphRegister):
-    def __init__(self):
+    def __init__(self, bigend=True):
         # The pad fields in this register aren't v_const because the
         # documentation seems to indicate that the values read may be 1 if
         # shadow flash has been erased
-        PeriphRegister.__init__(self)
+        PeriphRegister.__init__(self, bigend=bigend)
         self.lbcfg = v_bits(2)
         self._pad0 = v_bits(30)
 
 class FLASH_UT0(PeriphRegister):
-    def __init__(self):
-        PeriphRegister.__init__(self)
+    def __init__(self, bigend=True):
+        PeriphRegister.__init__(self, bigend=bigend)
         self.ute = v_bits(1)
         self.scbe = v_bits(1)
         self._pad0 = v_const(6)
         self.dsi = v_bits(8)
         self._pad1 = v_const(8)
-        self.ea = v_defaultbits(1, 1)
+        self.ea = v_bits(1, 1)
         self._pad2 = v_const(1)
         self.mre = v_bits(1)
         self.mrv = v_bits(1)
@@ -332,13 +332,13 @@ class FLASH_UT0(PeriphRegister):
         self.aid = v_const(1, 1)
 
 class FLASH_UT1(PeriphRegister):
-    def __init__(self):
-        PeriphRegister.__init__(self)
+    def __init__(self, bigend=True):
+        PeriphRegister.__init__(self, bigend=bigend)
         self.dai = v_bits(32)
 
 class FLASH_UT2(PeriphRegister):
-    def __init__(self):
-        PeriphRegister.__init__(self)
+    def __init__(self, bigend=True):
+        PeriphRegister.__init__(self, bigend=bigend)
         self.dai = v_bits(32)
 
 
@@ -392,7 +392,7 @@ def _loadFromFile(filename, offset, size):
 
 
 class FlashArray:
-    def __init__(self, flashdev, device):
+    def __init__(self, flashdev, device, bigend=True):
         self.flashdev = flashdev
         self.device = device
         self.shadow = None
@@ -455,18 +455,18 @@ class FlashArray:
             errmsg = 'Invalid %s device: %r' % (self.__class__.__name__, device)
             raise Exception(errmsg)
 
-        self.lmlr = FLASH_LMLR()
-        self.hlr = FLASH_HLR()
-        self.slmlr = FLASH_SLMLR()
-        self.lmsr = FLASH_LMSR()
-        self.hsr = FLASH_HSR()
-        self.ar = FLASH_AR()
-        self.biucr = FLASH_BIUCR()
-        self.biuapr = FLASH_BIUAPR()
-        self.biucr2 = FLASH_BIUCR2()
-        self.ut0 = FLASH_UT0()
-        self.ut1 = FLASH_UT1()
-        self.ut2 = FLASH_UT2()
+        self.lmlr = FLASH_LMLR(bigend=bigend)
+        self.hlr = FLASH_HLR(bigend=bigend)
+        self.slmlr = FLASH_SLMLR(bigend=bigend)
+        self.lmsr = FLASH_LMSR(bigend=bigend)
+        self.hsr = FLASH_HSR(bigend=bigend)
+        self.ar = FLASH_AR(bigend=bigend)
+        self.biucr = FLASH_BIUCR(bigend=bigend)
+        self.biuapr = FLASH_BIUAPR(bigend=bigend)
+        self.biucr2 = FLASH_BIUCR2(bigend=bigend)
+        self.ut0 = FLASH_UT0(bigend=bigend)
+        self.ut1 = FLASH_UT1(bigend=bigend)
+        self.ut2 = FLASH_UT2(bigend=bigend)
 
         # TODO: At the moment all read/write operations are assumed to be coming
         # from the Z7 core (Bus Master ID 0), need to provide a method for other
@@ -952,8 +952,8 @@ class FLASH(mmio.MMIO_DEVICE):
 
         # Initialize the A and B flash arrays.  These objects handle both the
         # configuration registers and the shadow flash.
-        self.A = FlashArray(self, FlashDevice.FLASH_A_CONFIG)
-        self.B = FlashArray(self, FlashDevice.FLASH_B_CONFIG)
+        self.A = FlashArray(self, FlashDevice.FLASH_A_CONFIG, bigend=emu.getEndian())
+        self.B = FlashArray(self, FlashDevice.FLASH_B_CONFIG, bigend=emu.getEndian())
 
         # Flash memory for blocks A and B are distributed oddly
         # (from "Table 11-1. Memory Map" MPC5674FRM.pdf page 366):

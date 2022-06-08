@@ -119,8 +119,8 @@ class ECSM_ATTRS(PeriphRegister):
 
 
 class ECSM_REGISTERS(PeripheralRegisterSet):
-    def __init__(self, emu=None):
-        super().__init__(emu)
+    def __init__(self):
+        super().__init__()
 
         self.pct   = (ECSM_PCT_OFFSET,   ECSM_16BIT_CONST(0xE760))
         self.rev   = (ECSM_REV_OFFSET,   ECSM_16BIT_CONST(0x0000))

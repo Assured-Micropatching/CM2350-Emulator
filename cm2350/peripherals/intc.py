@@ -66,7 +66,7 @@ class INTC_CPR(PeriphRegister):
     def __init__(self):
         super().__init__()
         self._pad0 = v_const(28)
-        self.pri = v_defaultbits(4, 0xF)
+        self.pri = v_bits(4, 0xF)
 
 class INTC_SSCIRn(PeriphRegister):
     def __init__(self):
@@ -76,8 +76,8 @@ class INTC_SSCIRn(PeriphRegister):
         self.clr = v_w1c(1)
 
 class INTC_REGISTERS(PeripheralRegisterSet):
-    def __init__(self, emu=None):
-        super().__init__(emu)
+    def __init__(self):
+        super().__init__()
         self.mcr        = (INTC_MCR_OFFSET, INTC_MCR())
         self.cpr        = (INTC_CPR_OFFSET, INTC_CPR())
 

@@ -32,7 +32,7 @@ class FMPLL_ESYNCR1(PeriphRegister):
         self._pad1 = v_const(8)
         self.eprediv = v_bits(4)
         self._pad2 = v_const(8)
-        self.emfd = v_defaultbits(8, 0x20)
+        self.emfd = v_bits(8, 0x20)
 
 class FMPLL_ESYNCR2(PeriphRegister):
     def __init__(self):
@@ -49,7 +49,7 @@ class FMPLL_ESYNCR2(PeriphRegister):
         self._pad2 = v_const(4)
         self.edepth = v_bits(3)
         self._pad3 = v_const(2)
-        self.erfd = v_defaultbits(6, 0x07)
+        self.erfd = v_bits(6, 0x07)
 
 class FMPLL_SYNFMCR(PeriphRegister):
     def __init__(self):
@@ -62,8 +62,8 @@ class FMPLL_SYNFMCR(PeriphRegister):
 
 
 class FMPLL_REGISTERS(PeripheralRegisterSet):
-    def __init__(self, emu=None):
-        super().__init__(emu)
+    def __init__(self):
+        super().__init__()
 
         self.synsr   = (0x0004, FMPLL_SYNSR())
         self.esyncr1 = (0x0008, FMPLL_ESYNCR1())

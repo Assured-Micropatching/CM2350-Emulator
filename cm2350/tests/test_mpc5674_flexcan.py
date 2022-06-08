@@ -419,7 +419,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
 
             self.assertEqual(self.emu.readMemory(addr, 4), b'\xff\xff\xff\xff')
             self.assertEqual(self.emu.readMemValue(addr, 4), 0xffffffff)
-            self.assertEqual(self.emu.can[idx].registers.rxgmask.mask, 0xffffffff)
+            self.assertEqual(self.emu.can[idx].registers.rxgmask, 0xffffffff)
 
     def test_flexcan_rx14mask_defaults(self):
         for idx in range(4):
@@ -428,7 +428,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
 
             self.assertEqual(self.emu.readMemory(addr, 4), b'\xff\xff\xff\xff')
             self.assertEqual(self.emu.readMemValue(addr, 4), 0xffffffff)
-            self.assertEqual(self.emu.can[idx].registers.rx14mask.mask, 0xffffffff)
+            self.assertEqual(self.emu.can[idx].registers.rx14mask, 0xffffffff)
 
     def test_flexcan_rx15mask_defaults(self):
         for idx in range(4):
@@ -437,7 +437,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
 
             self.assertEqual(self.emu.readMemory(addr, 4), b'\xff\xff\xff\xff')
             self.assertEqual(self.emu.readMemValue(addr, 4), 0xffffffff)
-            self.assertEqual(self.emu.can[idx].registers.rx15mask.mask, 0xffffffff)
+            self.assertEqual(self.emu.can[idx].registers.rx15mask, 0xffffffff)
 
     def test_flexcan_ecr_defaults(self):
         for idx in range(4):
@@ -481,22 +481,22 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             # IMASK1
             self.assertEqual(self.emu.readMemory(addr1, 4), b'\x00\x00\x00\x00')
             self.assertEqual(self.emu.readMemValue(addr1, 4), 0x00000000)
-            self.assertEqual(self.emu.can[idx].registers.imask1.mask, 0x00000000)
+            self.assertEqual(self.emu.can[idx].registers.imask1, 0x00000000)
 
             self.emu.writeMemory(addr1, b'\xff\xff\xff\xff')
             self.assertEqual(self.emu.readMemory(addr1, 4), b'\xff\xff\xff\xff')
             self.assertEqual(self.emu.readMemValue(addr1, 4), 0xffffffff)
-            self.assertEqual(self.emu.can[idx].registers.imask1.mask, 0xffffffff)
+            self.assertEqual(self.emu.can[idx].registers.imask1, 0xffffffff)
 
             # IMASK2
             self.assertEqual(self.emu.readMemory(addr2, 4), b'\x00\x00\x00\x00')
             self.assertEqual(self.emu.readMemValue(addr2, 4), 0x00000000)
-            self.assertEqual(self.emu.can[idx].registers.imask2.mask, 0x00000000)
+            self.assertEqual(self.emu.can[idx].registers.imask2, 0x00000000)
 
             self.emu.writeMemory(addr2, b'\xff\xff\xff\xff')
             self.assertEqual(self.emu.readMemory(addr2, 4), b'\xff\xff\xff\xff')
             self.assertEqual(self.emu.readMemValue(addr2, 4), 0xffffffff)
-            self.assertEqual(self.emu.can[idx].registers.imask2.mask, 0xffffffff)
+            self.assertEqual(self.emu.can[idx].registers.imask2, 0xffffffff)
 
     def test_flexcan_iflag_defaults(self):
         for idx in range(4):
@@ -507,48 +507,48 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             # IFLAG1
             self.assertEqual(self.emu.readMemory(addr1, 4), b'\x00\x00\x00\x00')
             self.assertEqual(self.emu.readMemValue(addr1, 4), 0x00000000)
-            self.assertEqual(self.emu.can[idx].registers.iflag1.flag, 0x00000000)
+            self.assertEqual(self.emu.can[idx].registers.iflag1, 0x00000000)
 
             # Ensure the flag1 register are w1c and can't be set by writing
             self.emu.writeMemory(addr1, b'\xff\xff\xff\xff')
             self.assertEqual(self.emu.readMemory(addr1, 4), b'\x00\x00\x00\x00')
             self.assertEqual(self.emu.readMemValue(addr1, 4), 0x00000000)
-            self.assertEqual(self.emu.can[idx].registers.iflag1.flag, 0x00000000)
+            self.assertEqual(self.emu.can[idx].registers.iflag1, 0x00000000)
 
-            self.emu.can[idx].registers.iflag1.vsOverrideValue('flag', 0xffffffff)
+            self.emu.can[idx].registers.vsOverrideValue('iflag1', 0xffffffff)
 
             self.assertEqual(self.emu.readMemory(addr1, 4), b'\xff\xff\xff\xff')
             self.assertEqual(self.emu.readMemValue(addr1, 4), 0xffffffff)
-            self.assertEqual(self.emu.can[idx].registers.iflag1.flag, 0xffffffff)
+            self.assertEqual(self.emu.can[idx].registers.iflag1, 0xffffffff)
 
             # Clear some flags
             self.emu.writeMemory(addr1, b'\xa5\xa5\xa5\xa5')
             self.assertEqual(self.emu.readMemory(addr1, 4), b'\x5a\x5a\x5a\x5a')
             self.assertEqual(self.emu.readMemValue(addr1, 4), 0x5a5a5a5a)
-            self.assertEqual(self.emu.can[idx].registers.iflag1.flag, 0x5a5a5a5a)
+            self.assertEqual(self.emu.can[idx].registers.iflag1, 0x5a5a5a5a)
 
             # IFLAG2
             self.assertEqual(self.emu.readMemory(addr2, 4), b'\x00\x00\x00\x00')
             self.assertEqual(self.emu.readMemValue(addr2, 4), 0x00000000)
-            self.assertEqual(self.emu.can[idx].registers.iflag2.flag, 0x00000000)
+            self.assertEqual(self.emu.can[idx].registers.iflag2, 0x00000000)
 
             # Ensure the flag2 register are w1c and can't be set by writing
             self.emu.writeMemory(addr2, b'\xff\xff\xff\xff')
             self.assertEqual(self.emu.readMemory(addr2, 4), b'\x00\x00\x00\x00')
             self.assertEqual(self.emu.readMemValue(addr2, 4), 0x00000000)
-            self.assertEqual(self.emu.can[idx].registers.iflag2.flag, 0x00000000)
+            self.assertEqual(self.emu.can[idx].registers.iflag2, 0x00000000)
 
-            self.emu.can[idx].registers.iflag2.vsOverrideValue('flag', 0xffffffff)
+            self.emu.can[idx].registers.vsOverrideValue('iflag2', 0xffffffff)
 
             self.assertEqual(self.emu.readMemory(addr2, 4), b'\xff\xff\xff\xff')
             self.assertEqual(self.emu.readMemValue(addr2, 4), 0xffffffff)
-            self.assertEqual(self.emu.can[idx].registers.iflag2.flag, 0xffffffff)
+            self.assertEqual(self.emu.can[idx].registers.iflag2, 0xffffffff)
 
             # Clear some flags
             self.emu.writeMemory(addr2, b'\x5a\x5a\x5a\x5a')
             self.assertEqual(self.emu.readMemory(addr2, 4), b'\xa5\xa5\xa5\xa5')
             self.assertEqual(self.emu.readMemValue(addr2, 4), 0xa5a5a5a5)
-            self.assertEqual(self.emu.can[idx].registers.iflag2.flag, 0xa5a5a5a5)
+            self.assertEqual(self.emu.can[idx].registers.iflag2, 0xa5a5a5a5)
 
     def test_flexcan_modes(self):
         for idx in range(4):

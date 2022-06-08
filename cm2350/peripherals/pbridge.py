@@ -29,16 +29,16 @@ class PBRIDGE_x_MPCR(PeriphRegister):
         #   mtw: master trusted for writes
         #   mpl: master privilege level (0 = force user, 1 = not forced)
 
-        self.mb0    = v_defaultbits(4, 0b0111)
-        self.mb1    = v_defaultbits(4, 0b0111)
+        self.mb0    = v_bits(4, 0b0111)
+        self.mb1    = v_bits(4, 0b0111)
 
         # masters 2 and 3 are fixed
         self.mb2    = v_const(4, 0b0111)
         self.mb3    = v_const(4, 0b0111)
 
-        self.mb4    = v_defaultbits(4, 0b0111)
-        self.mb5    = v_defaultbits(4, 0b0111)
-        self.mb6    = v_defaultbits(4, 0b0111)
+        self.mb4    = v_bits(4, 0b0111)
+        self.mb5    = v_bits(4, 0b0111)
+        self.mb6    = v_bits(4, 0b0111)
 
         # master 7 is fixed
         self.mb7    = v_const(4, 0b0111)
@@ -55,19 +55,19 @@ class PBRIDGE_x_PACRn(PeriphRegister):
         #   tp: peripheral allows writes from untrusted masters (1 = not
         #       allowed)
 
-        self.p0    = v_defaultbits(4, 0b0100)
-        self.p1    = v_defaultbits(4, 0b0100)
-        self.p2    = v_defaultbits(4, 0b0100)
-        self.p3    = v_defaultbits(4, 0b0100)
-        self.p4    = v_defaultbits(4, 0b0100)
-        self.p5    = v_defaultbits(4, 0b0100)
-        self.p6    = v_defaultbits(4, 0b0100)
-        self.p7    = v_defaultbits(4, 0b0100)
+        self.p0    = v_bits(4, 0b0100)
+        self.p1    = v_bits(4, 0b0100)
+        self.p2    = v_bits(4, 0b0100)
+        self.p3    = v_bits(4, 0b0100)
+        self.p4    = v_bits(4, 0b0100)
+        self.p5    = v_bits(4, 0b0100)
+        self.p6    = v_bits(4, 0b0100)
+        self.p7    = v_bits(4, 0b0100)
 
 
 class PBRIDGE_A_REGISTERS(PeripheralRegisterSet):
-    def __init__(self, emu=None):
-        super().__init__(emu)
+    def __init__(self):
+        super().__init__()
         self.mpcr   = (PBRIDGE_MPCR_OFFSET,   PBRIDGE_x_MPCR())
         self.pacr0  = (PBRIDGE_PACR0_OFFSET,  PBRIDGE_x_PACRn())
         self.pacr1  = None
@@ -79,8 +79,8 @@ class PBRIDGE_A_REGISTERS(PeripheralRegisterSet):
 
 
 class PBRIDGE_B_REGISTERS(PeripheralRegisterSet):
-    def __init__(self, emu=None):
-        super().__init__(emu)
+    def __init__(self):
+        super().__init__()
         self.mpcr   = (PBRIDGE_MPCR_OFFSET,   PBRIDGE_x_MPCR())
         self.pacr0  = (PBRIDGE_PACR0_OFFSET,  PBRIDGE_x_PACRn())
         self.pacr1  = (PBRIDGE_PACR1_OFFSET,  PBRIDGE_x_PACRn())

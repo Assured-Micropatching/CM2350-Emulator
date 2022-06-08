@@ -22,9 +22,8 @@ logger = logging.getLogger(__name__)
 
 import envi
 import envi.memory as e_mem
-from vstruct.bitfield import *
 from envi.archs.ppc.regs import REG_MCSR, REG_MSR, REG_TSR, REG_TCR, REG_HID0, REG_HID1, REG_TBU, REG_TB, REG_TBU_WO, REG_TBL_WO
-from .ppc_vstructs import BitFieldSPR, v_const, v_w1c
+from .ppc_vstructs import BitFieldSPR, v_const, v_w1c, v_bits
 
 from . import emutimers, mmio, ppc_mmu, e200_intc, e200_gdb
 from .const import *
@@ -71,7 +70,7 @@ class HID1(BitFieldSPR):
 
 
 class TSR(BitFieldSPR):
-    def __init__(self, emu, bigend=True):
+    def __init__(self, emu):
         super().__init__(REG_TSR, emu)
         self.enw = v_bits(1)
         self.wis = v_bits(1)
@@ -606,11 +605,10 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator, eape.Ppc32Em
         '''
         self.mcu_intc.queueException(exception)
 
-    def dmaRequest(self, source):
-        logger.debug('DMA request for %s (%d)', source.name, source.value)
-
-        # Identify which DMA device this request should go to
-        EDMA_SRC_TO_CHAN
+    def dmaRequest(self, request):
+        logger.debug('DMA request for %s (%s)', request.name, request.value)
+        devname, channel = request.value
+        self.modules[devname].dmaRequest(channel)
 
     def parseOpcode(self, va, arch=envi.ARCH_PPC_E32, skipcache=False):
         '''

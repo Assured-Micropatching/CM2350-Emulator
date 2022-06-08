@@ -7,6 +7,7 @@ import struct
 import pickle
 import select
 import atexit
+import inspect
 
 import envi.bits as e_bits
 
@@ -139,134 +140,167 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
         # is used the read/write functions in this base class can be used
         # unmodified.
         if regsetcls is not None:
-            self.registers = regsetcls()
+            # If the register set accepts a bigend parameter supply it from the
+            # emulator
+            if 'bigend' in inspect.signature(regsetcls).parameters:
+                self.registers = regsetcls(bigend=emu.getEndian())
+            else:
+                self.registers = regsetcls()
         else:
             self.registers = None
 
         # Initialize the ISR status, flag and source information
         self._initISRInfo(isrstatus, isrflags, isrevents)
 
-        # Now initialize the event set/clear functions that are appropriate for
-        # the ISR status, flag, and events provided.
-        self._initISRFunctions()
-
         # Lastly find any possible DMA request events for this peripheral
         self._initDMASources()
+
+    def _is_isr_no_channels(self, isrstatus, isrflags, isrevents):
+        if isrstatus in self.registers._vs_fields and \
+                isrflags in self.registers._vs_fields:
+            status_reg = self.registers.vsGetField(isrstatus)
+            flags_reg = self.registers.vsGetField(isrflags)
+        else:
+            status_reg = None
+            flags_reg = None
+
+        is_no_channels_config = isinstance(status_reg, PeriphRegister) and \
+                isinstance(flags_reg, PeriphRegister)
+
+        if is_no_channels_config:
+            # If this does look like a "no channels" config sanity check the
+            # event data against the available fields in the target registers
+            if not all(f in status_reg._vs_fields and f in flags_reg._vs_fields for f in isrevents):
+                src_fields_str = ', '.join(isrevents)
+                status_fields_str = ', '.join(status_reg._vs_fields)
+                flag_fields_str = ', '.join(flags_reg._vs_fields)
+                raise Exception('ISR status and flag registers missing sources: %s (status: %s, flag: %s)' % \
+                        (src_fields_str, status_fields_str, flag_fields_str))
+
+        return is_no_channels_config
+
+    def _is_isr_with_channels(self, isrstatus, isrflags, isrevents):
+        if isrstatus in self.registers._vs_fields and \
+                isrflags in self.registers._vs_fields:
+            status_reg = self.registers.vsGetField(isrstatus)
+            flags_reg = self.registers.vsGetField(isrflags)
+        else:
+            status_reg = None
+            flags_reg = None
+
+        is_with_channels_config = isinstance(status_reg, VArray) and \
+                isinstance(status_reg[0], PeriphRegister) and \
+                isinstance(flags_reg, VArray) and \
+                isinstance(flags_reg[0], PeriphRegister)
+
+        if is_with_channels_config:
+            if len(status_reg._vs_fields) != len(flags_reg._vs_fields):
+                raise Exception('ISR status and flag size mismatch: (%s) %s != (%s) %s' %
+                        (isrstatus, len(status_reg._vs_fields),
+                            isrflags, len(flags_reg._vs_fields)))
+
+            # If this does look like a "no channels" config sanity check the
+            # event data against the available fields in the target registers
+            if not all(f in status_reg[0]._vs_fields and f in flags_reg[0]._vs_fields for f in isrevents[0]):
+                src_fields_str = ', '.join(isrevents[0])
+                status_fields_str = ', '.join(status_reg[0]._vs_fields)
+                flag_fields_str = ', '.join(flags_reg[0]._vs_fields)
+                raise Exception('ISR status and flag registers missing sources: %s:\n\tstatus: %s\n\tflag: %s' % \
+                        (src_fields_str, status_fields_str, flag_fields_str))
+
+        return is_with_channels_config
+
+    def _is_isr_only_channels(self, isrstatus, isrflags, isrevents):
+        # If interrupt status and events is not indicated through a single field
+        # in a register then it will be a dictionary of "events" (because the
+        # register names will vary) and lists of status and flag registers.
+
+        is_only_channels_config = isinstance(isrstatus, dict) and \
+                isinstance(isrflags, dict) and \
+                isinstance(isrevents, dict)
+
+        if is_only_channels_config:
+            if isrstatus.keys() != isrflags.keys() or  \
+                    isrstatus.keys() != isrevents.keys():
+                raise Exception('ISR status and flag events mismatch: %s != %s != %s' %
+                        (', '.join(isrstatus), ', '.join(isrflags), ', '.join(isrevents)))
+
+            for name in isrstatus:
+                status_regs = [self.registers.vsGetField(n) for n in isrstatus[name]]
+                if not all(isinstance(r, (v_w1c, v_bits)) for r in status_regs):
+                    types_str = ', '.join(str(type(r)) for r in status_regs)
+                    raise Exception('Invalid register status regs types for event %s: %s' % (name, types_str))
+
+                flag_regs = [self.registers.vsGetField(n) for n in isrflags[name]]
+                if not all(isinstance(r, (v_w1c, v_bits)) for r in flag_regs):
+                    types_str = ', '.join(str(type(r)) for r in flag_regs)
+                    raise Exception('Invalid register flag regs types for event %s: %s' % (name, types_str))
+
+                status_len = sum(r._vs_bitwidth for r in status_regs)
+                flag_len = sum(r._vs_bitwidth for r in status_regs)
+                if status_len != flag_len or status_len != len(isrevents[name]):
+                    raise Exception('ISR channels mismatch for event %s' % name)
+
+        return is_only_channels_config
+
+    def _populate_isr_channels(self, reg_info):
+        channels = {}
+        for name in reg_info:
+            reg_list = [(n, self.registers.vsGetField(n)._vs_bitwidth) for n in reg_info[name]]
+            # Save the register name that each channel should reference
+            channels[name] = tuple(sum(([name] * bits for name, bits in reg_list), []))
+        return channels
 
     def _initISRInfo(self, isrstatus=None, isrflags=None, isrevents=None):
         """
         Initialize the peripheral ISR status, flag and source information
         """
         if isrstatus is not None and isrflags is not None and isrevents is not None:
-            if isinstance(isrstatus, (tuple, list)) and \
-                    isinstance(isrflags, (tuple, list)):
-                # This will be a channel-only ISR config, create the ISR status
-                # and flag lists
-                self.isrstatus = []
-                for name in isrstatus:
-                    reg = self.registers.vsGetField(name)
-                    self.isrstatus.extend([reg] * (len(reg) * 8))
+            # There may be different registers for each instance of this type of
+            # peripheral.
+            if isinstance(isrstatus, dict) and self.devname in isrstatus:
+                isrstatus = isrstatus[self.devname]
 
-                self.isrflags = []
-                for name in isrflags:
-                    reg = self.registers.vsGetField(name)
-                    self.isrflags.extend([reg] * (len(reg) * 8))
+            if isinstance(isrflags, dict) and self.devname in isrflags:
+                isrflags = isrflags[self.devname]
 
-            else:
-                # ISR status and flag registers used by the standard event()
-                # function
-                self.isrstatus = self.registers.vsGetField(isrstatus)
-                self.isrflags = self.registers.vsGetField(isrflags)
-
-            # Keep track of the interrupt events for this peripheral. There may
-            # be different events for each instance of this type of peripheral
-            # so get the instance-specific ISR events for this peripheral.
             if isinstance(isrevents, dict) and self.devname in isrevents:
                 self.isrevents = isrevents[self.devname]
             else:
-              self.isrevents = isrevents
+                self.isrevents = isrevents
+
+            # Identify the type of ISR configs
+            if self._is_isr_only_channels(isrstatus, isrflags, self.isrevents):
+                self.isrstatus = self._populate_isr_channels(isrstatus)
+                self.isrflags = self._populate_isr_channels(isrflags)
+
+                self.event = self._eventRequestWithOnlyChannel
+
+            elif self._is_isr_with_channels(isrstatus, isrflags, self.isrevents):
+                self.isrstatus = self.registers.vsGetField(isrstatus)
+                self.isrflags = self.registers.vsGetField(isrflags)
+
+                self.event = self._eventRequestWithChannel
+
+            elif self._is_isr_no_channels(isrstatus, isrflags, self.isrevents):
+                self.isrstatus = self.registers.vsGetField(isrstatus)
+                self.isrflags = self.registers.vsGetField(isrflags)
+
+                self.event = self._eventRequest
+
+            else:
+                raise Exception('Inconsistent ISR information provided:\n\t%s\n\t%s\n\t%s' %
+                        (isrstatus, isrflags, self.isrevents))
 
         elif isrstatus is None and isrflags is None and isrevents is None:
             self.isrstatus = None
             self.isrflags = None
             self.isrevents = None
 
+            self.event = self._eventDoNothing
+
         else:
             raise Exception('Inconsistent ISR information provided for peripheral %s' % self.devname)
-
-    def _initISRFunctions(self):
-        """
-        Assign the correct event set/clear functions that correspond to the
-        possible ISR events for this peripheral
-        """
-        if self.isrstatus is None:
-            # Set a placeholder event function
-            self.event = self._eventDoNothing
-            return
-
-        # Determine if the ISR events and register types require a channel
-        if isinstance(self.isrstatus, PeriphRegister) and \
-                isinstance(self.isrflags, PeriphRegister) and \
-                isinstance(self.isrevents, dict):
-
-            # Standard case, only field names expected
-            self.event = self._eventRequest
-
-            src_fields = self.isrevents.keys()
-            status_reg = self.isrstatus
-            flag_reg = self.isrflags
-
-        elif isinstance(self.isrstatus, VArray) and \
-                isinstance(self.isrflags, VArray) and \
-                isinstance(self.isrevents, (tuple, list)):
-
-            # Channel case, both channel number and field names expected
-            self.event = self._eventRequestWithChannel
-
-            # Ensure that the events for each channel are a dictionary and have
-            # the same keys.
-            if any(not isinstance(src, dict) for src in self.isrevents):
-                src_types_str = ', '.join(str(type(src)) for src in self.isrevents)
-                raise Exception('Inconsistent ISR channel source types: %s' % src_types_str)
-
-            src_fields = self.isrevents[0].keys()
-            status_reg = self.isrstatus[0]
-            flag_reg = self.isrflags[0]
-
-            if not all(src.keys() == src_fields and len(src) == len(src_fields) for src in self.isrevents[1:]):
-                src_fields_str = ', '.join(src_fields)
-                raise Exception('Inconsistent ISR channel events != %s' % src_fields_str)
-
-        elif isinstance(self.isrstatus, list) and \
-                isinstance(self.isrflags, list) and \
-                isinstance(self.isrevents, (tuple, list)):
-
-            # Channel-only case, only a channel number expected but status and
-            # flag values are split across one or more multi-bit wide w1c
-            # registers
-            self.event = self._eventRequestWithOnlyChannel
-
-            if len(self.isrevents) != len(self.isrstatus) or \
-                    len(self.isrevents) != len(self.isrflags):
-                raise Exception('ISR status (%d), flags (%d), and events (%d) mismatch' %
-                        (len(self.isrstatus), len(self.isrflags), len(self.isrevents)))
-
-            # The final check doesn't apply tho this ISR configuration
-            return
-
-        else:
-            raise Exception('Inconsistent channel requirements for ISR status (%s), flags (%s) and events (%s)' %
-                    (isinstance(self.isrstatus, VArray),
-                        isinstance(self.isrflags, VArray),
-                        isinstance(self.isrevents, (tuple, list))))
-
-        # Ensure that all ISR sources are in the status and flag registers
-        if not all(f in status_reg._vs_fields and f in flag_reg._vs_fields for f in src_fields):
-            src_fields_str = ', '.join(src_fields)
-            status_fields_str = ', '.join(status_reg._vs_fields)
-            flag_fields_str = ', '.join(flag_reg._vs_fields)
-            raise Exception('ISR status and flag registers missing sources: %s (status: %s, flag: %s)' % \
-                    (src_fields_str, status_fields_str, flag_fields_str))
 
     def _initDMASources(self):
         """
@@ -306,6 +340,15 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
                 # interrupt source
                 self.dmaevents[field] = None
 
+    def init(self, emu):
+        """
+        Initialize the peripheral registers
+        """
+        if self.registers is not None and hasattr(self.registers, 'init'):
+            self.registers.init(emu)
+
+        super().init(emu)
+
     def reset(self, emu):
         """
         Reset the peripheral registers here rather than having them be
@@ -317,15 +360,15 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
             # we need to provide the emu now in case there is some emulator
             # state information required to properly return the register set to
             # it's initial reset state.
-            self.registers.reset(self.emu)
+            self.registers.reset(emu)
 
         elif isinstance(self.registers, (list, tuple)):
             # If instead of a PeripheralRegisterSet (or other VStruct) the
             # registers are a list, go through the list and reset any list item
             # that is a VStruct.
             for item in self.registers:
-                if isVstructType(self.registers) and hasattr(self.registers, 'reset'):
-                    item.reset(self.emu)
+                if isVstructType(item) and hasattr(item, 'reset'):
+                    item.reset(emu)
 
     def _getPeriphReg(self, offset, size):
         """
@@ -338,7 +381,7 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
         """
         return self.registers.vsEmitFromOffset(offset, size)
 
-    def _setPeriphReg(self, offset, bytez):
+    def _setPeriphReg(self, offset, data):
         """
         Utility function to set a peripheral register value at a particular
         offset.
@@ -347,7 +390,7 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
         self.registers class attribute is a VStruct-like PeripheralRegisterSet
         that can have part of of the registers read from or written to.
         """
-        self.registers.vsParseAtOffset(offset, bytez)
+        self.registers.vsParseAtOffset(offset, data)
 
     def _slow_mmio_read(self, va, offset, size):
         """
@@ -401,14 +444,14 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
             })
             raise exc
 
-    def _slow_mmio_write(self, va, offset, bytez):
+    def _slow_mmio_write(self, va, offset, data):
         """
         A slower version of _mmio_write that automatically suppresses PPC write errors
         """
         idx = 0
-        while idx < len(bytez):
+        while idx < len(data):
             try:
-                self._setPeriphReg(offset+idx, bytez[idx:])
+                self._setPeriphReg(offset+idx, data[idx:])
 
                 # If this completed successfully all data was written
                 break
@@ -420,29 +463,29 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
                     # Just move to the next byte and try again
                     idx += 1
 
-    def _mmio_write(self, va, offset, bytez):
+    def _mmio_write(self, va, offset, data):
         """
         Standard MMIO peripheral write function.
         """
-        if len(bytez) > PPC_MAX_READ_SIZE:
+        if len(data) > PPC_MAX_READ_SIZE:
             # Assume that this is not a value being changed by emulated
             # instructions
             # TODO: this seems inefficient, but should be good enough for now
-            return self._slow_mmio_write(va, offset, bytez)
+            return self._slow_mmio_write(va, offset, data)
 
-        logger.debug("0x%x:  %s: write [%x] = %s", self.emu.getProgramCounter(), self.__class__.__name__, va, bytez.hex())
+        logger.debug("0x%x:  %s: write [%x] = %s", self.emu.getProgramCounter(), self.__class__.__name__, va, data.hex())
         try:
-            self._setPeriphReg(offset, bytez)
+            self._setPeriphReg(offset, data)
 
         except NotImplementedError:
             # Make the errors generated by the PlaceholderRegister more useful
-            raise NotImplementedError('0x%x:  %s: BAD WRITE [%x:%r]' % (self.emu.getProgramCounter(), self.__class__.__name__, va, bytez))
+            raise NotImplementedError('0x%x:  %s: BAD WRITE [%x:%r]' % (self.emu.getProgramCounter(), self.__class__.__name__, va, data))
 
         except (MceWriteBusError, AlignmentException) as exc:
             # Add in the correct machine state information to this exception
             exc.kwargs.update({
                 'va': va,
-                'data': bytez,
+                'data': data,
                 'pc': self.emu.getProgramCounter(),
             })
             raise exc
@@ -464,25 +507,25 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
         there is a dma event associated with the supplied field then a DMA event
         will also be initiated.
         """
-        if value and self.isrstatus.vsGetField(field) == 0:
+        reg = self.isrstatus.vsGetField(field)
+        if value and reg.vsGetValue() == 0:
             # Set the ISR status flag
-            self.isrstatus.vsOverrideValue(field, int(value))
+            reg.vsOverrideValue(int(value))
 
-            if self.isrflags.vsGetField(field) == 1:
-                event = self.isrevents[field]
-                intc_src, dma_req = INTC_EVENT_MAP.get(event, (None, None))
-                dma_field = self.dmaevents[field]
+            event = self.isrevents[field]
+            intc_src, dma_req = INTC_EVENT_MAP.get(event, (None, None))
+            dma_field = self.dmaevents[field]
 
-                if dma_req is not None and dma_field is not None and \
-                        self.isrflags.vsGetField(dma_field) == 1:
-                    self.emu.dmaRequest(dma_req)
+            if dma_req is not None and dma_field is not None and \
+                    self.isrflags.vsGetField(dma_field) == 1:
+                self.emu.dmaRequest(dma_req)
 
-                elif intc_src is not None:
-                    self.emu.queueException(ExternalException(intc_src))
+            elif intc_src is not None:
+                self.emu.queueException(ExternalException(intc_src))
 
-                else:
-                    logger.warning('[%s] Ignoring %s event because no valid ISR source or DMA request configured',
-                                   self.devname, field)
+            else:
+                logger.warning('[%s] Ignoring %s event because no valid ISR source or DMA request configured',
+                               self.devname, field)
 
     def _eventRequestWithChannel(self, channel, field, value):
         """
@@ -498,27 +541,27 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
         there is a dma event associated with the supplied field then a DMA event
         will also be initiated.
         """
-        if value and self.isrstatus[channel].vsGetField(field) == 0:
+        reg = self.isrstatus.vsGetField(field)
+        if value and reg.vsGetValue() == 0:
             # Set the ISR status flag
-            self.isrstatus[channel].vsOverrideValue(field, int(value))
+            reg.vsOverrideValue(int(value))
 
-            if self.isrflags[channel].vsGetField(field) == 1:
-                event = self.isrevents[channel][field]
-                intc_src, dma_req = INTC_EVENT_MAP.get(event, (None, None))
-                dma_field = self.dmaevents[field]
+            event = self.isrevents[channel][field]
+            intc_src, dma_req = INTC_EVENT_MAP.get(event, (None, None))
+            dma_field = self.dmaevents[field]
 
-                if dma_req is not None and dma_field is not None and \
-                        self.isrflags[channel].vsGetField(dma_field) == 1:
-                    self.emu.dmaRequest(dma_req)
+            if dma_req is not None and dma_field is not None and \
+                    self.isrflags[channel].vsGetField(dma_field) == 1:
+                self.emu.dmaRequest(dma_req)
 
-                elif intc_src is not None:
-                    self.emu.queueException(ExternalException(intc_src))
+            elif intc_src is not None:
+                self.emu.queueException(ExternalException(intc_src))
 
-                else:
-                    logger.warning('[%s] Ignoring channel %d %s event because no valid ISR source or DMA request configured',
-                                   self.devname, channel, field)
+            else:
+                logger.warning('[%s] Ignoring channel %d %s event because no valid ISR source or DMA request configured',
+                               self.devname, channel, field)
 
-    def _eventRequestWithOnlyChannel(self, channel, value):
+    def _eventRequestWithOnlyChannel(self, event, channel, value):
         """
         Takes a channel, and a value to set in one of the ISR status and mask
         registers.  Because this variation of the event() function is used only
@@ -534,16 +577,18 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
         there is a dma event associated with the supplied field then a DMA event
         will also be initiated.
         """
-        name, status = next((n, v) for n, v in self.isrstatus[channel])
-        new_status = value & ~status
-        if new_status != 0:
+        # Check if the specified value is set in the target register or not
+        reg = self.registers.vsGetField(self.isrstatus[event][channel])
+        status = reg.vsGetValue()
+        new_bits = value & ~status
+        if new_bits:
             # Set the ISR status flag
-            self.isrstatus[channel].vsOverrideValue(name, value | status)
+            reg.vsOverrideValue(new_bits | status)
 
-            flags = next(val for _, val in self.isrflags[channel])
-            if new_status & flags:
-                event = self.isrevents[channel]
-                intc_src, _ = INTC_EVENT_MAP.get(event, (None, None))
+            flag_reg = self.registers.vsGetField(self.isrflags[event][channel])
+            flags = flag_reg.vsGetValue()
+            if new_bits & flags:
+                intc_src, _ = INTC_EVENT_MAP.get(self.isrevents[event][channel], (None, None))
 
                 if intc_src is not None:
                     # channel-only event configurations don't have corresponding
@@ -646,7 +691,9 @@ class ExternalIOPeripheral(MMIOPeripheral):
     # object so the peripheral port/type/style/whatever is defined in the
     # config, and the correct configuration values and defaults could be defined
     # in the peripheral class itself.
-    def __init__(self, emu, devname, mmio_addr, mmio_size, **kwargs):
+    #
+    def __init__(self, emu, devname, mapaddr, mapsize, regsetcls=None,
+                 isrstatus=None, isrflags=None, isrevents=None, **kwargs):
         """
         Constructor for ExternalIOPeripheral class.
 
@@ -661,7 +708,9 @@ class ExternalIOPeripheral(MMIOPeripheral):
                       emu.addMMIO() to allow a peripheral object to specify
                       custom permissions or an mmio_bytes function.
         """
-        super().__init__(emu, devname, mmio_addr, mmio_size, **kwargs)
+        super().__init__(emu, devname, mapaddr, mapsize, regsetcls=regsetcls,
+                         isrstatus=isrstatus, isrflags=isrflags,
+                         isrevents=isrevents, **kwargs)
 
         # Get the server configuration from the peripheral config
         host = self._config['host']

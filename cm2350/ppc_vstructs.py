@@ -1,26 +1,29 @@
 import struct
 import operator
-
-from vstruct import VStruct, VArray, isVstructType
-from vstruct.bitfield import VBitField, v_bits
-from vstruct.primitives import v_bytes
+import vstruct.bitfield
+import vstruct.primitives
 import envi.bits as e_bits
 
 from .intc_exc import AlignmentException, MceWriteBusError, MceDataReadBusError
 
+# Import some values from vstruct that we want to re-export
+from vstruct import VStruct, isVstructType
+from vstruct.bitfield import VBitField
+
 __all__ = [
     # standard VStruct types
     'VStruct',
-    'VArray',
     'isVstructType',
-    'v_bits',
     'VBitField',
 
     # New VStruct types
-    'v_defaultbits',
+    'v_bits',
+    'v_sbits',
     'v_const',
+    'v_sconst',
     'v_w1c',
     'v_bytearray',
+    'VArray',
     'PlaceholderRegister',
     'PeriphRegister',
     'ReadOnlyRegister',
@@ -30,34 +33,136 @@ __all__ = [
 ]
 
 
-class v_defaultbits(v_bits):
+class v_bits(vstruct.bitfield.v_bits):
     """
     Slight adaptation of the v_bits class that allows setting an initial value
     """
-    def __init__(self, width, value=0):
+    def __init__(self, width, value=0, bigend=None):
         """
-        Constructor for v_defaultbits class
+        Constructor for v_bits class
 
         Parameters:
             width (int): bit width of field
             value (int): default value
         """
         super().__init__(width)
+
+        # To mimic the __len__ behavior of the v_number class translate the
+        # _vs_bitwidth into the number of bytes wide this object is.  This
+        # allows v_bits objects to be used directly in VArrays.  The length will
+        # round up to the nearest byte so will not produced correct packed
+        # VArray behavior if the size is not a multiple of 8, but that should be
+        # ok because this shouldn't be necessary very often.
+        self._vs_length = (self._vs_bitwidth + 7) // 8
+
+        # An endianness setting doesn't really matter much for most bitfields,
+        # but if this is a multi-byte bitfield it could matter
+        self.vsSetEndian(bigend)
+
+        # Set the initial value
         self._vs_value = value
 
-    def __len__(self):
+    def vsParse(self, data, offset=0):
+        self.vsSetValue(struct.unpack_from(self._vs_fmt, data, offset)[0])
+        return offset + self._vs_length
+
+    def vsEmit(self):
+        return struct.pack(self._vs_fmt, self._vs_value)
+
+    def vsOverrideValue(self, value):
+        self._vs_value = value
+
+    def vsSetEndian(self, bigend):
         """
-        Returns the byte length of the field. It will round down to the nearest
-        byte. Implementing this function allows v_defaultbits fields to be used
-        directly in VArray's that can be directly indexed with the
-        PeripheralRegisterSet.vsGetFieldByOffset() function.
+        Change the saved endianness of this object and the parse/emit format
         """
-        return self._vs_bitwidth // 8
+        self._vs_bigend = bigend
+        self._vs_fmt = vstruct.primitives.num_fmts.get((bigend, self._vs_length))
 
 
-class v_const(v_defaultbits):
+class v_sbits(vstruct.bitfield.v_bits):
     """
-    A variation of the v_defaultbits class. The vsSetValue function will not
+    signed v_bits, adds signed number processing to v_bits class.
+
+    This has to inherit from the v_bits class instead of v_snumber because the
+    VBitField class specifically looks for v_bits when calculating field sizes.
+    """
+    def __init__(self, width, value=0, bigend=None):
+        super().__init__(width)
+
+        # Values used by _get_svalue()
+        self._signed_mask = 2**(self._vs_bitwidth-1)
+        self._mask = e_bits.b_masks[self._vs_bitwidth]
+
+        # To mimic the __len__ behavior of the v_number class translate the
+        # _vs_bitwidth into the number of bytes wide this object is.  This
+        # allows v_bits objects to be used directly in VArrays.  The length will
+        # round up to the nearest byte so will not produced correct packed
+        # VArray behavior if the size is not a multiple of 8, but that should be
+        # ok because this shouldn't be necessary very often.
+        self._vs_length = (self._vs_bitwidth + 7) // 8
+
+        # An endianness setting doesn't really matter much for most bitfields,
+        # but if this is a multi-byte bitfield it could matter
+        self.vsSetEndian(bigend)
+
+        # Set the initial value
+        self._vs_value = value
+
+    def _get_svalue(self, value):
+        """
+        Helper function to return a properly converted signed integer based on
+        this field's bitwidth.
+        """
+        if value & self._signed_mask:
+            return -((~value + 1) & self._mask)
+        else:
+            return value & self._mask
+
+    def vsSetValue(self, value):
+        """
+        The v_bits class relies on the higher-level VBitField to set the
+        correctly sized values, do additional signed conversion now.
+        """
+        self._vs_value = self._get_svalue(value)
+
+    def vsParse(self, data, offset=0):
+        self.vsSetValue(struct.unpack_from(self._vs_fmt, data, offset)[0])
+        return offset + self._vs_length
+
+    def vsOverrideValue(self, value):
+        self._vs_value = self._get_svalue(value)
+
+    def vsSetEndian(self, bigend):
+        """
+        Change the saved endianness of this object and the parse/emit format
+        """
+        self._vs_bigend = bigend
+        self._vs_fmt = vstruct.primitives.signed_fmts.get((bigend, self._vs_length))
+
+
+class v_const(v_bits):
+    """
+    A variation of the v_bits class. The vsSetValue function will not
+    change the _vs_value of this field which makes this class useful for
+    defining bitfields in registers that should not be modifiable by standard
+    user write operations. Instead the owning peripheral should either directly
+    modify _vs_value, or if this field is part of a PeriphRegister object the
+    PeriphRegister.vsOverrideValue function can be used.
+    """
+    def vsSetValue(self, value):
+        """
+        This is a constant field so the value cannot be modified after creation
+        (except by using the vsOverrideValue function).
+
+        Parameters:
+            value (int): ignored
+        """
+        pass
+
+class v_sconst(v_sbits):
+    """
+    A variation of the v_sbits class. The vsSetValue function will not
     change the _vs_value of this field which makes this class useful for
     defining bitfields in registers that should not be modifiable by standard
     user write operations. Instead the owning peripheral should either directly
@@ -75,9 +180,9 @@ class v_const(v_defaultbits):
         pass
 
 
-class v_w1c(v_defaultbits):
+class v_w1c(v_bits):
     """
-    A variation of the v_defaultbits class. Bit values can only be changed from
+    A variation of the v_bits class. Bit values can only be changed from
     1 to 0 by writing a value of 1 for that bit. Normal write operations cannot
     change the bit value from 0 to 1, instead the owning peripheral should
     either directly modify _vs_value, or if this field is part of a
@@ -96,7 +201,7 @@ class v_w1c(v_defaultbits):
             self._vs_value = self._vs_value & ~value
 
 
-class v_bytearray(v_bytes):
+class v_bytearray(vstruct.primitives.v_bytes):
     """
     A bytearray-version of v_bytes, this allows in-place parse/emit
     like the VArray type using __getitem__ and __setitem__ operations.
@@ -126,13 +231,63 @@ class v_bytearray(v_bytes):
         self._vs_value[index] = value
 
 
+class VArray(VStruct):
+    """
+    Re-imagining of the VStruct VArray class to improve efficiency
+    """
+    def __init__(self, elems):
+        VStruct.__init__(self)
+        self._vs_elems = list(elems)
+
+    def vsAddElement(self, elem):
+        """
+        Used to add elements to an array
+        """
+        self._vs_elems.append(elem)
+
+    def vsAddElements(self, count, eclass):
+        self._vs_elems.extend([eclass()] * count)
+
+    def __getitem__(self, index):
+        return self._vs_elems[index]
+
+    def __setitem__(self, index, valu):
+        self._vs_elems[index] = vsSetField("%d" % index, valu)
+
+    # A few more modifications to the standard VStruct functions are necessary
+    # to make a list/index based VArray class work
+
+    def __len__(self):
+        return sum(len(e) for e in self._vs_elems)
+
+    def __iter__(self):
+        for idx, value in enumerate(self._vs_elems):
+            yield (idx, value)
+
+    '''
+    @property
+    def _vs_fields(self):
+        for idx in range(len(self._vs_elems)):
+            yield idx
+
+    @property
+    def _vs_values(self):
+        return dict(range(len(self._vs_elems)))
+        for idx in range(len(self._vs_elems)):
+            yield idx
+    '''
+
+    def vsGetFields(self):
+        self.__iter__()
+
+
 class PlaceholderRegister(v_const):
     """
     A v_const-like value that represents a peripheral register that has not yet
     been implemented and raises a NotImplementedError whenever it is read from
     or written to using the standard VStruct vsEmit or vsParse functions.
     """
-    def vsParse(self, bytez, offset=0):
+    def vsParse(self, data, offset=0):
         raise NotImplementedError()
 
     def vsEmit(self):
@@ -143,7 +298,7 @@ class PeriphRegister(VBitField):
     """
     A VBitField object that enables easy integration into a bare metal emulator.
     """
-    def __init__(self, emu=None, name=None):
+    def __init__(self, emu=None, name=None, bigend=None):
         """
         Constructor for PeriphRegister class.  If this object is not part of a
         peripheral but a standalone special register then it the emu and name
@@ -159,6 +314,10 @@ class PeriphRegister(VBitField):
         super().__init__()
         self._vs_defaults = {}
 
+        # Save the endianness so we can update all added fields, VBitField
+        # doesn't support the bigend parameter so we set it manually now.
+        self._vs_bigend = bigend
+
         if emu is not None:
             if name is None:
                 name = self.__class__.__name__
@@ -168,11 +327,39 @@ class PeriphRegister(VBitField):
                 raise ValueError('Module %s:%r already registered, cannot register %s:%r' % (name, cur_module, name, self))
             emu.modules[name] = self
 
+    def vsSetEndian(self, bigend):
+        if bigend is None:
+            raise ValueError('Cannot set endianness of %s to %s' % (self.__class__.__name__, bigend))
+
+        self._vs_bigend = bigend
+
+        # Now go update all fields this class has
+        for _, value in self:
+            self._vsUpdateValueEndian(value)
+
+    def _vsUpdateValueEndian(self, value):
+        if hasattr(value, 'vsSetEndian'):
+            value.vsSetEndian(self._vs_bigend)
+        elif hasattr(value, '_vs_bigend'):
+            value._vs_bigend = self._vs_bigend
+        elif isinstance(value, VArray):
+            # Do the same for every item in the VArray
+            for _, elem in value:
+                if hasattr(elem, 'vsSetEndian'):
+                    elem.vsSetEndian(self._vs_bigend)
+                elif hasattr(elem, '_vs_bigend'):
+                    elem._vs_bigend = self._vs_bigend
+
     def vsAddField(self, name, value):
         """
         Allows adding a field to an existing PeriphRegister object. Tracks the
         initial value of the field which is used when the register is reset.
         """
+        # Now update the endianness setting for this field
+        if self._vs_bigend is not None:
+            self._vsUpdateValueEndian(value)
+
+        # Now add field
         super().vsAddField(name, value)
         if not name.startswith('_') and not isinstance(value, PlaceholderRegister):
             self._vs_defaults[name] = value.vsGetValue()
@@ -182,26 +369,37 @@ class PeriphRegister(VBitField):
         Sometimes it is necessary to change the value of a read-only field
         because of some internal emulation logic.  This function helps do that.
         """
-        self._vs_values[name]._vs_value = value
+        self._vs_values[name].vsOverrideValue(value)
 
     def init(self, emu):
         """
         Init function, used when a peripheral register is initialized as an
         emulator module.
         """
-        self.reset(emu)
+        # If the endianness of this register set has not yet been defined, set
+        # it now
+        if self._vs_bigend is None:
+            bigend = emu.getEndian()
+            self.vsSetEndian(bigend)
 
     def reset(self, emu):
         """
         Reset function, used to return a peripheral register to the correct
         initial state.
         """
+        # For any items with defaults set them now
         for name, value in self._vs_defaults.items():
             # Set values directly instead of using the vsSetField() function
             # to make it easier to reset w1c fields to their default values.  We
             # could use vsOverrideValue() but the normal v_bits() fields don't
             # have this function.
             self.vsOverrideValue(name, value)
+
+        # If there are any fields that have their own reset function, call it
+        # now
+        for name, value in self._vs_values.items():
+            if name not in self._vs_defaults and hasattr(value, 'reset'):
+                value.reset(emu)
 
 
 class ReadOnlyRegister(PeriphRegister):
@@ -268,34 +466,60 @@ class PeripheralRegisterSet(VStruct):
             self.mb[:] = b'\x00' * 0x800
             self.rximr[:] = b'\x00' * 0x400
     """
-    def __init__(self, emu=None, name=None):
+    def __init__(self, name=None, bigend=None):
         """
         Constructor for PeripheralRegisterSet class.  If this object is not
         part of a peripheral but a standalone special register then it the emu
         and name fields should be supplied to enable standard emulator module
         init and reset behavior.
 
+        The PeripheralRegisterSet class does not support an emu parameter
+        because it is intended to be attached to a Peripheral object, instead of
+        directly to an emulator.
+
         Parameters:
-            emu (object) optional : The emulator this register should be
-                                    registered with
             name (string) optional: The name to use when registering this
                                     object as an emulator module.
         """
         super().__init__()
+
+        self._vs_bigend = bigend
+
         self._vs_field_offset = {}
 
         # Regenerated each time a field is added, makes it faster to find the
         # field to emit from or parse into
         self._vs_field_by_offset = {}
 
-        if emu is not None:
-            if name is None:
-                name = self.__class__.__name__
-            if name in emu.modules:
-                idx = emu.modules.index(name)
-                cur_module = emu.modules[idx]
-                raise ValueError('Module %s:%r already registered, cannot register %s:%r' % (name, cur_module, name, self))
-            emu.modules[name] = self
+    def _vsUpdateValueEndian(self, value):
+        if hasattr(value, 'vsSetEndian'):
+            value.vsSetEndian(self._vs_bigend)
+        elif hasattr(value, '_vs_bigend'):
+            value._vs_bigend = self._vs_bigend
+        elif isinstance(value, VArray):
+            # Do the same for every item in the VArray
+            for _, elem in value:
+                if hasattr(elem, 'vsSetEndian'):
+                    elem.vsSetEndian(self._vs_bigend)
+                elif hasattr(elem, '_vs_bigend'):
+                    elem._vs_bigend = self._vs_bigend
+
+    def vsSetEndian(self, bigend):
+        if bigend is None:
+            raise ValueError('Cannot set endianness of %s to %s' % (self.__class__.__name__, bigend))
+
+        self._vs_bigend = bigend
+
+        # Now go update all fields this class has
+        for _, value in self:
+            self._vsUpdateValueEndian(value)
+
+    def vsOverrideValue(self, name, value):
+        """
+        Sometimes it is necessary to change the value of a read-only field
+        because of some internal emulation logic.  This function helps do that.
+        """
+        self._vs_values[name].vsOverrideValue(value)
 
     def __setattr__(self, name, value):
         """
@@ -316,7 +540,8 @@ class PeripheralRegisterSet(VStruct):
         # If the value is a tuple where the first element is an integer and the
         # second is a vstruct type, use the integer as the desired offset for
         # this field
-        if isinstance(value, tuple) and \
+        if isinstance(value, (list, tuple)) and \
+                len(value) > 0 and \
                 isinstance(value[0], int) and \
                 isVstructType(value[1]):
             return self.vsAddField(name, value[1], offset=value[0])
@@ -375,6 +600,10 @@ class PeripheralRegisterSet(VStruct):
             befname (string)     : field to insert the new field before
             offset (int) optional: offset to use for the new field
         """
+        # First update the endianness setting for this field
+        if self._vs_bigend is not None:
+            self._vsUpdateValueEndian(value)
+
         super().vsInsertField(name, value, befname)
 
         if offset is not None:
@@ -422,6 +651,10 @@ class PeripheralRegisterSet(VStruct):
             value (object)       : initial value of the new field
             offset (int) optional: offset to use for the new field
         """
+        # First update the endianness setting for this field
+        if self._vs_bigend is not None:
+            self._vsUpdateValueEndian(value)
+
         super().vsAddField(name, value)
         if offset is None:
             # Because the field offsets haven't been updated yet use the len()
@@ -678,21 +911,24 @@ class PeripheralRegisterSet(VStruct):
         return '.'.join(nparts), field
 
     def init(self, emu):
-        for name in self._vs_fields:
-            vobj = self._vs_values[name]
-            if hasattr(vobj, 'init') and callable(vobj.init):
-                vobj.init(emu)
+        # If the endianness of this register set has not yet been defined, set
+        # it now
+        if self._vs_bigend is None:
+            bigend = emu.getEndian()
+            self.vsSetEndian(bigend)
+
+        for _, value in self:
+            if hasattr(value, 'init') and callable(value.init):
+                value.init(emu)
 
     def reset(self, emu):
-        for name in self._vs_fields:
-            vobj = self._vs_values[name]
-            if hasattr(vobj, 'reset') and callable(vobj.reset):
-                vobj.reset(emu)
-            elif isinstance(vobj, VArray):
-                # If the items in the array have reset attributes, use it
-                for _, varray_obj in vobj:
-                    if hasattr(varray_obj, 'reset') and callable(varray_obj.reset):
-                        varray_obj.reset(emu)
+        for _, value in self:
+            if hasattr(value, 'reset') and callable(value.reset):
+                value.reset(emu)
+            elif isinstance(value, VArray):
+                for _, elem in value:
+                    if hasattr(elem, 'reset') and callable(elem.reset):
+                        elem.reset(emu)
 
 
 class BitFieldSPR(PeriphRegister):
@@ -712,7 +948,7 @@ class BitFieldSPR(PeriphRegister):
             emu (object): The emulator this SPR module should be registered with
         """
         # Use the SPR name as the module name
-        super().__init__(emu, emu.getRegisterName(spridx))
+        super().__init__(emu, emu.getRegisterName(spridx), bigend=emu.getEndian())
         self._reg = spridx
 
         # SPRs should be 4 or 8 bytes

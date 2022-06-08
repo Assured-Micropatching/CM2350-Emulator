@@ -138,8 +138,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 import envi
-import vstruct
-import envi.bits as e_bits
 import envi.memory as e_mem
 import envi.archs.ppc.regs as ppc_regs
 import envi.archs.ppc.const as ppc_const

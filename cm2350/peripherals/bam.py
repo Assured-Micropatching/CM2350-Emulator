@@ -20,14 +20,18 @@ BAM_RCHW_SIZE     = 8
 class RCHW(VBitField):
     def __init__(self):
         VBitField.__init__(self)
-        self.rsvd = v_bits(4)
-        self.swt = v_bits(1)
-        self.wte = v_bits(1)
-        self.ps0 = v_bits(1)
-        self.vle = v_bits(1)
-        self.bootid = v_bits(8)
-        self._pad0 = v_bits(16)
-        self.entry_point = v_bits(32)
+
+        # VBitField doesn't use the bigend parameter so we must set it manually.
+        # Because this is used during boot the PPC RCHW will _always_ be big
+        # endian.
+        self.rsvd = v_bits(4, bigend=True)
+        self.swt = v_bits(1, bigend=True)
+        self.wte = v_bits(1, bigend=True)
+        self.ps0 = v_bits(1, bigend=True)
+        self.vle = v_bits(1, bigend=True)
+        self.bootid = v_bits(8, bigend=True)
+        self._pad0 = v_bits(16, bigend=True)
+        self.entry_point = v_bits(32, bigend=True)
 
 
 class BAM(MMIOPeripheral):

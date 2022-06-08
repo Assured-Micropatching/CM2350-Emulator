@@ -3,9 +3,8 @@ import enum
 import envi
 from envi.archs.ppc.regs import *
 from envi.archs.ppc.const import *
-from vstruct.bitfield import v_bits
 
-from .ppc_vstructs import BitFieldSPR, v_const, v_defaultbits
+from .ppc_vstructs import BitFieldSPR, v_const
 
 
 __all__ = [

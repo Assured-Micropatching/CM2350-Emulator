@@ -1,6 +1,6 @@
 VENV ?= ENV
 
-.PHONY: all virtualenv venv tests clean
+.PHONY: all virtualenv venv tests
 
 all: tests
 
@@ -12,8 +12,3 @@ $(VENV):
 
 tests: $(VENV)
 	. $(VENV)/bin/activate && python -m unittest --buffer --verbose
-
-clean:
-ifneq ($(wildcard VENV),)
-	rm -rf $(VENV)
-endif

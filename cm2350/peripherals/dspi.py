@@ -278,7 +278,7 @@ class DSPI_REGISTERS(PeripheralRegisterSet):
         # Basic SPI operation
         self.mcr    = (DSPI_MCR_OFFSET,    DSPI_x_MCR())
         self.tcr    = (DSPI_TCR_OFFSET,    DSPI_x_TCR())
-        self.ctar   = (DSPI_CTAR_OFFSET,   VArray([DSPI_x_CTAR() for x in range(DSPI_CTAS_MAX)]))
+        self.ctar   = (DSPI_CTAR_OFFSET,   VTuple([DSPI_x_CTAR() for x in range(DSPI_CTAS_MAX)]))
         self.sr     = (DSPI_SR_OFFSET,     DSPI_x_SR())
         self.rser   = (DSPI_RSER_OFFSET,   DSPI_x_RSER())
 

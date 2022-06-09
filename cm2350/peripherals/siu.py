@@ -506,13 +506,13 @@ class SIU_REGISTERS(PeripheralRegisterSet):
         # PCR (Pin Control Registers)
         # PCR registers must be initialized using the PCR_DEFAULT values because
         # not all PCR fields can be modified for all pins.
-        self.pcr     = (0x0040, VArray([SIU_PCRn() if c is None else SIU_PCRn(**c) for c in self._pcr_defaults]))
+        self.pcr     = (0x0040, VTuple([SIU_PCRn() if c is None else SIU_PCRn(**c) for c in self._pcr_defaults]))
 
         # Legacy GPDO
-        self.gpdo    = (0x0600, VArray([SIU_GPDOn() for i in range(NUM_GPDIO_PINS)]))
+        self.gpdo    = (0x0600, VTuple([SIU_GPDOn() for i in range(NUM_GPDIO_PINS)]))
 
         # Legacy GPDI (only first 256 pins)
-        self.gpdi    = (0x0800, VArray([SIU_GPDIn() for i in range(NUM_GPDIO_PINS // 2)]))
+        self.gpdi    = (0x0800, VTuple([SIU_GPDIn() for i in range(NUM_GPDIO_PINS // 2)]))
 
         self.eiisr   = (0x0904, SIU_EIISR())
         self.disr    = (0x0908, SIU_DISR())
@@ -534,22 +534,22 @@ class SIU_REGISTERS(PeripheralRegisterSet):
 
         # Parallel GPDO
         # 4 bytes for every 32 pins
-        self.pgpdo   = (0x0C00, VArray([SIU_PGPDOn() for i in range(NUM_GPDIO_PINS // 32)]))
+        self.pgpdo   = (0x0C00, VTuple([SIU_PGPDOn() for i in range(NUM_GPDIO_PINS // 32)]))
 
         # Parallel GPDI
         # 4 bytes for every 32 pins
-        self.pgpdi   = (0x0C40, VArray([SIU_PGPDIn() for i in range(NUM_GPDIO_PINS // 32)]))
+        self.pgpdi   = (0x0C40, VTuple([SIU_PGPDIn() for i in range(NUM_GPDIO_PINS // 32)]))
 
         # Masked Parallel GPDO
         # 2 bytes of mask and 2 bytes of data for every 16 pins
-        self.mpgpdo  = (0x0C80, VArray([SIU_MPGPDOn() for i in range(NUM_GPDIO_PINS // 16)]))
+        self.mpgpdo  = (0x0C80, VTuple([SIU_MPGPDOn() for i in range(NUM_GPDIO_PINS // 16)]))
 
         # 0x0D00-0x0E00 is unimplemented (related to DSPI or eTPU functionality)
         # 0x100 bytes / 32 bits per register = 64 placeholder registers
-        self.tbd     = (0x0D00, VArray([PlaceholderRegister(32) for i in range(64)]))
+        self.tbd     = (0x0D00, VTuple([PlaceholderRegister(32) for i in range(64)]))
 
         # Legacy GPDI (full range)
-        self.gpdi_full = (0x0E00, VArray([SIU_GPDIn() for i in range(NUM_GPDIO_PINS)]))
+        self.gpdi_full = (0x0E00, VTuple([SIU_GPDIn() for i in range(NUM_GPDIO_PINS)]))
 
     def reset(self, emu):
         # TODO: Will probably need to set some other register values based on

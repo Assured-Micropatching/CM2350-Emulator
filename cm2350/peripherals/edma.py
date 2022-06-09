@@ -194,8 +194,8 @@ class EDMA_A_REGISTERS(PeripheralRegisterSet):
         self.hrsl   = (EDMA_HRSL_OFFSET,   EDMA_32BIT_REG())
         self.gwrh   = (EDMA_GWRH_OFFSET,   EDMA_32BIT_REG())
         self.gwrl   = (EDMA_GWRL_OFFSET,   EDMA_32BIT_REG())
-        self.cpr    = (EDMA_CPRx_OFFSET,   VArray([EDMA_x_CPRx() for i in range(EDMA_A_NUM_CHAN)]))
-        self.tcd    = (EDMA_TCDx_OFFSET,   VArray([EDMA_x_TCDx() for i in range(EDMA_A_NUM_CHAN)]))
+        self.cpr    = (EDMA_CPRx_OFFSET,   VTuple([EDMA_x_CPRx() for i in range(EDMA_A_NUM_CHAN)]))
+        self.tcd    = (EDMA_TCDx_OFFSET,   VTuple([EDMA_x_TCDx() for i in range(EDMA_A_NUM_CHAN)]))
 
     def reset(self, emu):
         """
@@ -228,8 +228,8 @@ class EDMA_B_REGISTERS(PeripheralRegisterSet):
         self.erl    = (EDMA_ERL_OFFSET,    EDMA_32BIT_REG())
         self.hrsl   = (EDMA_HRSL_OFFSET,   EDMA_32BIT_REG())
         self.gwrl   = (EDMA_GWRL_OFFSET,   EDMA_32BIT_REG())
-        self.cpr    = (EDMA_CPRx_OFFSET,   VArray([EDMA_x_CPRx() for i in range(EDMA_B_NUM_CHAN)]))
-        self.tcd    = (EDMA_TCDx_OFFSET,   VArray([EDMA_x_TCDx() for i in range(EDMA_B_NUM_CHAN)]))
+        self.cpr    = (EDMA_CPRx_OFFSET,   VTuple([EDMA_x_CPRx() for i in range(EDMA_B_NUM_CHAN)]))
+        self.tcd    = (EDMA_TCDx_OFFSET,   VTuple([EDMA_x_TCDx() for i in range(EDMA_B_NUM_CHAN)]))
 
     def reset(self, emu):
         """

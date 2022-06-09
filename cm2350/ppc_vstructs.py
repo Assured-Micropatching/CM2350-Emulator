@@ -1,3 +1,4 @@
+import bisect
 import struct
 import operator
 import vstruct.bitfield
@@ -9,6 +10,11 @@ from .intc_exc import AlignmentException, MceWriteBusError, MceDataReadBusError
 # Import some values from vstruct that we want to re-export
 from vstruct import VStruct, isVstructType
 from vstruct.bitfield import VBitField
+
+
+import logging
+logger = logging.getLogger(__name__)
+
 
 __all__ = [
     # standard VStruct types
@@ -24,6 +30,7 @@ __all__ = [
     'v_w1c',
     'v_bytearray',
     'VArray',
+    'VTuple',
     'PlaceholderRegister',
     'PeriphRegister',
     'ReadOnlyRegister',
@@ -231,22 +238,106 @@ class v_bytearray(vstruct.primitives.v_bytes):
         self._vs_value[index] = value
 
 
+class VArrayFieldsView:
+    def __init__(self, varray):
+        assert isinstance(varray, VArray)
+        self._varray = varray
+
+    def __len__(self):
+        return len(self._varray._vs_elems)
+
+    def __iter__(self):
+        return iter(range(len(self._varray._vs_elems)))
+
+    def __getitem__(self, idx):
+        if isinstance(idx, int) and idx in range(len(self._varray._vs_elems)):
+            return idx
+        else:
+            raise KeyError(idx)
+
+    def get(self, idx, default=None):
+        if isinstance(idx, int) and idx in range(len(self._varray._vs_elems)):
+            return idx
+        else:
+            return default
+
+
+class VArrayValuesView:
+    def __init__(self, varray):
+        assert isinstance(varray, VArray)
+        self._varray = varray
+
+    def __len__(self):
+        return len(self._varray._vs_elems)
+
+    def __iter__(self):
+        return enumerate(self._varray._vs_elems)
+
+    def __getitem__(self, idx):
+        if isinstance(idx, int) and idx in range(len(self._varray._vs_elems)):
+            return self._varray._vs_elems[idx]
+        else:
+            raise KeyError(idx)
+
+    def get(self, idx, default=None):
+        if isinstance(idx, int) and idx in range(len(self._varray._vs_elems)):
+            return self._varray._vs_elems[idx]
+        else:
+            return default
+
+
 class VArray(VStruct):
     """
     Re-imagining of the VStruct VArray class to improve efficiency
     """
-    def __init__(self, elems):
-        VStruct.__init__(self)
+    def __init__(self, elems, count=0):
+        super().__init__()
+
+        if isinstance(elems, (list, tuple)):
+            self._vsInitElems(elems)
+        elif count and isinstance(elems, type) and \
+                issubclass(vstruct.primitives.v_base):
+            self._vsInitElems(elems() for i in range(count))
+        else:
+            raise TypeError('Cannot create %s with %s' % (self.__class__.__name, elems))
+
+        try:
+            self._vs_elem_type = type(self._vs_elems[0])
+            self._vs_elem_size = len(self._vs_elems[0])
+
+            # Ensure that all elements in this object are the same type
+            if not all(type(e) == self._vs_elem_type for e in self._vs_elems):
+                raise TypeError('Cannot create %s with elements of different types' %
+                        self.__class__.__name__)
+
+        except IndexError:
+            self._vs_elem_type = None
+            self._vs_elem_size = None
+
+    def _vsInitElems(self, elems):
         self._vs_elems = list(elems)
 
     def vsAddElement(self, elem):
-        """
-        Used to add elements to an array
-        """
+        if self._vs_elem_type is None:
+            self._vs_elem_type = type(elem)
+            self._vs_elem_size = len(elem)
+        elif type(elem) != self._vs_elem_type:
+            raise TypeError('Cannot create %s with elements of different types (%s != %s)' %
+                    (self.__class__.__name__, type(elem), self._vs_elem_type))
+
         self._vs_elems.append(elem)
 
     def vsAddElements(self, count, eclass):
+        if self._vs_elem_type is None:
+            self._vs_elem_type = eclass
+        elif eclass != self._vs_elem_type:
+            raise TypeError('Cannot create %s with elements of different types (%s != %s)' %
+                    (self.__class__.__name__, eclass, self._vs_elem_type))
+
         self._vs_elems.extend([eclass()] * count)
+
+        if self._vs_elem_size is None and count:
+            self._vs_elem_size = len(self._vs_elems[0])
 
     def __getitem__(self, index):
         return self._vs_elems[index]
@@ -258,27 +349,64 @@ class VArray(VStruct):
     # to make a list/index based VArray class work
 
     def __len__(self):
-        return sum(len(e) for e in self._vs_elems)
+        return len(self._vs_elems) * self._vs_elem_size
 
     def __iter__(self):
         for idx, value in enumerate(self._vs_elems):
             yield (idx, value)
 
-    '''
     @property
     def _vs_fields(self):
-        for idx in range(len(self._vs_elems)):
-            yield idx
+        return VArrayFieldsView(self)
+
+    @_vs_fields.setter
+    def _vs_fields(self, value):
+        # Placeholder setter to allow standard VStruct __init__ work
+        pass
 
     @property
     def _vs_values(self):
-        return dict(range(len(self._vs_elems)))
-        for idx in range(len(self._vs_elems)):
-            yield idx
-    '''
+        return VArrayValuesView(self)
+
+    @_vs_values.setter
+    def _vs_values(self, value):
+        # Placeholder setter to allow standard VStruct __init__ work
+        pass
 
     def vsGetFields(self):
-        self.__iter__()
+        return self.__iter__()
+
+    def vsGetFieldByOffset(self, offset, names=None, coffset=0):
+        """
+        Modification of the standard VStruct vsGetFieldByOffset() function to
+        allow for a faster search because the array elements have consistent
+        sizes.
+        """
+        oidx = offset // self._vs_elem_size
+        foffset = oidx * self._vs_elem_size
+
+        fname = str(oidx)
+        field = self._vs_elems[oidx]
+
+        # The offset falls somewhere in this field
+        names.append(fname)
+
+        off = offset - foffset
+        # If the offset is not at 0 we haven't found the start of the target
+        if off > 0:
+            return field.vsGetFieldByOffset(off, names=names, coffset=0)
+
+        # If no field was found that matches the offset, then this is an invalid
+        # address offset
+        if not names:
+            raise MceDataReadBusError()
+
+        return '.'.join(names), field
+
+
+class VTuple(VArray):
+    def _vsInitElems(self, elems):
+        self._vs_elems = tuple(elems)
 
 
 class PlaceholderRegister(v_const):
@@ -490,6 +618,7 @@ class PeripheralRegisterSet(VStruct):
         # Regenerated each time a field is added, makes it faster to find the
         # field to emit from or parse into
         self._vs_field_by_offset = {}
+        self._vs_sorted_offsets = []
 
     def _vsUpdateValueEndian(self, value):
         if hasattr(value, 'vsSetEndian'):
@@ -540,10 +669,8 @@ class PeripheralRegisterSet(VStruct):
         # If the value is a tuple where the first element is an integer and the
         # second is a vstruct type, use the integer as the desired offset for
         # this field
-        if isinstance(value, (list, tuple)) and \
-                len(value) > 0 and \
-                isinstance(value[0], int) and \
-                isVstructType(value[1]):
+        if isinstance(value, (list, tuple)) and len(value) == 2 and \
+                isinstance(value[0], int) and isVstructType(value[1]):
             return self.vsAddField(name, value[1], offset=value[0])
 
         # Fail over to standard object attribute behavior
@@ -575,19 +702,21 @@ class PeripheralRegisterSet(VStruct):
             # an entry for each valid offset
             if isinstance(value, v_bytearray):
                 for elem_idx in range(0, len(value)):
-                    self._vs_field_by_offset[offset + elem_idx] = (name, elem_idx)
+                    self._vs_field_by_offset[offset + elem_idx] = (name, elem_idx, value)
 
             elif isinstance(value, VArray):
                 elem_size = len(value[0])
                 for elem_off in range(0, len(value), elem_size):
                     elem_idx = elem_off // elem_size
-                    self._vs_field_by_offset[offset + elem_off] = (name, elem_idx)
+                    self._vs_field_by_offset[offset + elem_off] = (name, elem_idx, value)
 
             else:
-                self._vs_field_by_offset[offset] = (name, None)
+                self._vs_field_by_offset[offset] = (name, None, value)
 
             end_offset = offset + len(value)
             prev_fname = name
+
+        self._vs_sorted_offsets = sorted(self._vs_field_by_offset)
 
     def vsInsertField(self, name, value, befname, offset=None):
         """
@@ -718,7 +847,7 @@ class PeripheralRegisterSet(VStruct):
                     # do stuff
                     pass
         """
-        # TODO: This could be spead up by directly associating the callbacks
+        # TODO: This could be sped up by directly associating the callbacks
         # with the field offset so a field name lookup isn't necessary.
         if fieldname[:7] == 'by_idx_':
             fname = fieldname[7:]
@@ -748,13 +877,13 @@ class PeripheralRegisterSet(VStruct):
         reading a sub element of a register field, but it performs a slower
         lookup.
         """
-        value = self._vs_field_by_offset.get(addr, None)
-        if value is not None:
-            return value
-        else:
+        try:
+            return self._vs_field_by_offset[addr]
+        except KeyError:
             # Do a slower check to see if this address is valid, but it cannot
             # be completed because it is improperly aligned.
             name, field = self.vsGetFieldByOffset(addr)
+            logger.debug('Found %s (%s) at address 0x%x', name, field, addr)
 
             # A valid field was found, but because we can't index it that means
             # the original read was not properly aligned
@@ -771,21 +900,19 @@ class PeripheralRegisterSet(VStruct):
         addr_offset = 0
         try:
             while len(data) < size:
-                name, idx = self._getValueByOffsetLookup(addr + addr_offset)
+                name, idx, value = self._getValueByOffsetLookup(addr + addr_offset)
 
                 # Now that we have valid name and index, read data
                 if idx is not None:
-                    array = self._vs_values[name]
-
-                    if isinstance(array, v_bytearray):
+                    if isinstance(value, v_bytearray):
                         # If this is a v_byetarray the bytes to emit directly from
                         # the value at the right offset
-                        new_data = array._vs_value[idx:idx+size]
+                        new_data = value._vs_value[idx:idx+size]
 
                     else:
-                        new_data = array[idx].vsEmit()
+                        new_data = value[idx].vsEmit()
                 else:
-                    new_data = self._vs_values[name].vsEmit()
+                    new_data = value.vsEmit()
 
                 addr_offset += len(new_data)
                 data += new_data
@@ -812,32 +939,29 @@ class PeripheralRegisterSet(VStruct):
         addr_offset = 0
         try:
             while offset < len(bytez):
-                name, idx = self._getValueByOffsetLookup(addr + addr_offset)
+                name, idx, value = self._getValueByOffsetLookup(addr + addr_offset)
 
                 if idx is not None:
-                    array = self._vs_values[name]
-
-                    if isinstance(array, v_bytearray):
+                    if isinstance(value, v_bytearray):
                         # If this is a v_byetarray the bytes to parse can just
                         # be written directly into the value at the right offset
-                        array._vs_value[idx:idx+len(bytez)] = bytez
+                        value._vs_value[idx:idx+len(bytez)] = bytez
                         value_len = len(bytez)
 
                     else:
-                        value = array[idx]
+                        value = value[idx]
                         value.vsParse(bytez, offset=offset)
                         value_len = len(value)
 
                         # It's possible for specific array elements to have
                         # callbacks, trigger those now if any are set
-                        array._vsFireCallbacks(str(idx))
+                        value._vsFireCallbacks(str(idx))
 
                     # Since this is an VArray (or v_bytearray) see if there is a
                     # 'by_idx_<field>' callback defined and if so call it
                     self._vsFireCallbacks('by_idx_%s' % name, idx=idx, size=value_len)
 
                 else:
-                    value = self._vs_values[name]
                     value.vsParse(bytez, offset=offset)
                     value_len = len(value)
 
@@ -880,35 +1004,34 @@ class PeripheralRegisterSet(VStruct):
         Modification of the standard VStruct vsGetFieldByOffset() function to
         search faster based on the _vs_field_offset lookup table.
         """
-        nparts = names
-        if nparts is None:
-            nparts = []
+        if names is None:
+            names = []
 
-        # Do this the slow way so we can find subfields.
-        # First find the field closest to the offset without
-        for fname, foffset in self._vs_field_offset.items():
-            field = self._vs_values.get(fname)
-            flen = len(field)
-            if offset < foffset or offset >= foffset + flen:
-                continue
+        oidx = bisect.bisect(self._vs_sorted_offsets, offset)
 
-            # The offset falls somewhere in this field
-            nparts.append(fname)
+        print(offset, oidx, len(self._vs_sorted_offsets))
 
-            off = offset - foffset
-            # If the offset is not at 0 we haven't found the start of the target
-            # field yet
-            if off > 0:
-                if isinstance(field, VStruct):
-                    return field.vsGetFieldByOffset(off, names=nparts, coffset=0)
-            break
+        # The >= offset will always be one index to the left of the returned
+        # value
+        if oidx > 0 and oidx < len(self._vs_sorted_offsets):
+            foffset = self._vs_sorted_offsets[oidx-1]
+            fname, idx, field = self._vs_field_by_offset[foffset]
+            names.append(fname)
 
-        # If no field was found that matches the offset, then this is an invalid
-        # address offset
-        if len(nparts) == 0:
-            raise MceDataReadBusError()
+            if idx is not None:
+                names.append(str(idx))
+                field = field[idx]
 
-        return '.'.join(nparts), field
+            if offset < foffset + len(field):
+                if foffset == offset:
+                    return '.'.join(names), field
+                else:
+                    # We have not found an exact match yet
+                    off = offset - foffset
+                    return field.vsGetFieldByOffset(off, names=names, coffset=0)
+
+        # This object does not contain the requested offset
+        raise MceDataReadBusError()
 
     def init(self, emu):
         # If the endianness of this register set has not yet been defined, set

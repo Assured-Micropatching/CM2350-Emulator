@@ -123,6 +123,16 @@ class MPC5674_Test(unittest.TestCase):
         val_bytes = e_bits.buildbytes(val, size, self.emu.getEndian())
         return (val, val_bytes)
 
+    def get_random_flash_addr_and_data(self):
+        start, end = self.emu.flash_mmaps[0]
+        addr = random.randrange(start, end, 4)
+
+        # Determine write size and generate some data
+        size = random.choice((1, 2, 4))
+        value = random.getrandbits(size * 8)
+
+        return (addr, value, size)
+
     def get_random_ram_addr_and_data(self):
         start, end = self.emu.ram_mmaps[0]
         addr = random.randrange(start, end, 4)

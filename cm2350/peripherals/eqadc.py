@@ -596,11 +596,11 @@ class EQADC_REGISTERS(PeripheralRegisterSet):
 
         self.mcr     = (EQADC_MCR_OFFSET, EQADC_MCR())
         self.etdfr   = (EQADC_ETDFR_OFFSET, EQADC_ETDFR())
-        self.cfcr    = (EQADC_CFCR_OFFSET, VArray([EQADC_CFCRx() for i in range(EQADC_NUM_CBUFFERS)]))
-        self.idcr    = (EQADC_IDCR_OFFSET, VArray([EQADC_IDCRx() for i in range(EQADC_NUM_CBUFFERS)]))
-        self.fisr    = (EQADC_FISR_OFFSET, VArray([EQADC_FISRx() for i in range(EQADC_NUM_CBUFFERS)]))
-        self.cftcr   = (EQADC_CFTCR_OFFSET, VArray([EQADC_CFTCRx() for i in range(EQADC_NUM_CBUFFERS)]))
-        self.cfssr   = (EQADC_CFSSR_OFFSET, VArray([EQADC_CFSSRx() for i in range(EQADC_NUM_ADCS)]))
+        self.cfcr    = (EQADC_CFCR_OFFSET, VTuple([EQADC_CFCRx() for i in range(EQADC_NUM_CBUFFERS)]))
+        self.idcr    = (EQADC_IDCR_OFFSET, VTuple([EQADC_IDCRx() for i in range(EQADC_NUM_CBUFFERS)]))
+        self.fisr    = (EQADC_FISR_OFFSET, VTuple([EQADC_FISRx() for i in range(EQADC_NUM_CBUFFERS)]))
+        self.cftcr   = (EQADC_CFTCR_OFFSET, VTuple([EQADC_CFTCRx() for i in range(EQADC_NUM_CBUFFERS)]))
+        self.cfssr   = (EQADC_CFSSR_OFFSET, VTuple([EQADC_CFSSRx() for i in range(EQADC_NUM_ADCS)]))
         self.cfsr    = (EQADC_CFSR_OFFSET, EQADC_CFSR())
         self.redlccr = (EQADC_REDLCCR_OFFSET, EQADC_REDLCCR())
 

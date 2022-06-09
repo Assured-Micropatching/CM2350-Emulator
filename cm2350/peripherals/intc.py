@@ -84,7 +84,7 @@ class INTC_REGISTERS(PeripheralRegisterSet):
         # The IACKR and EOIR registers can't be emulated with VStructs and is
         # implemented directly in the FlexCAN _getPeriphReg and _setPeriphReg
         # functions below.
-        self.sscir      = (INTC_SSCIR_OFFSET, VArray([INTC_SSCIRn() for x in range(INTC_MAX_SW_INTERRUPTS)]))
+        self.sscir      = (INTC_SSCIR_OFFSET, VTuple([INTC_SSCIRn() for x in range(INTC_MAX_SW_INTERRUPTS)]))
         self.psr        = (INTC_PSR_OFFSET, v_bytearray(size=INTC_MAX_INTERRUPTS))
 
     def reset(self, emu):

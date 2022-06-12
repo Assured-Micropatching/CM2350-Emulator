@@ -12,7 +12,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 __all__  = [
-    'EQADC',
+    'eQADC',
 ]
 
 
@@ -145,7 +145,7 @@ EQADC_SINGLE_SCAN_TRIGGER_MODES = (
 
 # Based on the configured mode of each channel there is a 2-bit CFIFO status
 # field in the CFSR register
-class EQUADC_CFS_MODE(enum.IntEnum):
+class EQADC_CFS_MODE(enum.IntEnum):
     IDLE                    = 0b00
     #RESERVED               = 0b01
     WAITING_FOR_TRIGGER     = 0b10
@@ -605,7 +605,7 @@ class EQADC_REGISTERS(PeripheralRegisterSet):
         self.redlccr = (EQADC_REDLCCR_OFFSET, EQADC_REDLCCR())
 
 
-class EQADC(ExternalIOPeripheral):
+class eQADC(ExternalIOPeripheral):
     """
     Class to emulate the EQADC peripheral.
 
@@ -654,7 +654,7 @@ class EQADC(ExternalIOPeripheral):
         # Voltage inputs, there are 256 possible input channels
         self.channels = None
 
-        # Each eQADC device has 2 ADC conversion chips that are indirectly
+        # Each EQADC device has 2 ADC conversion chips that are indirectly
         # accessed and programmed
         self.adc = (ADC(self, 'ADC0'), ADC(self, 'ADC1'))
 
@@ -760,8 +760,8 @@ class EQADC(ExternalIOPeripheral):
         # If the SSE flag is set update the SSS status indicator in the FISRx
         # register
         if self.registers.cfcr[idx].sse:
+            self._update_cfsr(idx, triggered=True)
             self.registers.cfcr[idx].sse = 0
-            self.registers.fisr[idx].vsOverrideValue('sss', 1)
 
         if self.registers.cfcr[idx].cfinv:
             self.registers.cfcr[idx].cfinv = 0
@@ -790,16 +790,18 @@ class EQADC(ExternalIOPeripheral):
         # Update mode for the channel being updated
         self.updateMode(idx)
 
-    def _update_cfsr(self, channel, triggered):
+    def _update_cfsr(self, channel, triggered=False):
         mode = self.mode[channel]
         field = EQADC_CFS_FIELDS[channel]
         if mode in EQADC_CFS_IDLE_MODES:
-            cfsr_val = EQUADC_CFS_MODE.IDLE
+            self.registers.fisr[channel].vsOverrideValue('sss', 0)
+            self.registers.cfsr.vsOverrideValue(field, EQADC_CFS_MODE.IDLE)
         elif triggered:
-            cfsr_val = EQUADC_CFS_MODE.TRIGGERED
+            self.registers.fisr[channel].vsOverrideValue('sss', 1)
+            self.registers.cfsr.vsOverrideValue(field, EQADC_CFS_MODE.TRIGGERED)
         else:
-            cfsr_val = EQUADC_CFS_MODE.WAITING_FOR_TRIGGER
-        self.registers.cfsr.vsOverrideValue(field, cfsr_val)
+            self.registers.fisr[channel].vsOverrideValue('sss', 0)
+            self.registers.cfsr.vsOverrideValue(field, EQADC_CFS_MODE.WAITING_FOR_TRIGGER)
 
     def updateMode(self, channel):
         mode = EQADC_MODE(self.registers.cfcr[channel].mode)
@@ -809,20 +811,15 @@ class EQADC(ExternalIOPeripheral):
 
         # NOTE: Continuous or non-software triggered results should be generated
         # based on a periodic timer to mimic how long it takes hardware to
-        # generate an ADC result
+        # generate an ADC result, for now only the SW triggered results are
 
         if self.mode[channel] != mode:
             self.mode[channel] = mode
             logger.debug('%s[%d]: changing to mode %s', self.devname, channel, self.mode[channel].name)
 
-            # If the mode is set to single scan - non sw triggered events,
-            # indicate that the event is ready
-            if mode in EQADC_SINGLE_SCAN_TRIGGER_MODES:
-                self.registers.fisr[channel].vsOverrideValue('sss', 1)
-            else:
-                self.registers.fisr[channel].vsOverrideValue('sss', 0)
-
-            # Update the CFSR value
+            # TODO: the sss bit should indicate that the event has not yet
+            # occured, when the event is eventually triggered then the sss bit
+            # will be set.
             self._update_cfsr(channel)
 
             # If the channel is not disabled and there are commands in the fifo,

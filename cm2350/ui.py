@@ -238,8 +238,8 @@ class TestEmulator:
     def printStats(self, i):
         curtime = time.time()
         dtime = curtime - self.startRun
-        print("since start: %d instructions in %.3f secs: %3f ops/sec" % \
-                (i, dtime, i//dtime))
+        print("since start: %d instructions in %.3f secs: %.3f ops/sec" % \
+                (i, dtime, i/dtime))
 
     def run(self, maxstep=None, follow=True, showafter=True, runTil=None, pause=True, silent=False, finish=0, tracedict=None, haltonerror=False):
         '''

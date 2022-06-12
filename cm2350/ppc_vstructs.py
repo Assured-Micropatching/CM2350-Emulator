@@ -95,11 +95,12 @@ class v_sbits(vstruct.bitfield.v_bits):
     VBitField class specifically looks for v_bits when calculating field sizes.
     """
     def __init__(self, width, value=0, bigend=None):
-        super().__init__(width)
 
         # Values used by _get_svalue()
-        self._signed_mask = 2**(self._vs_bitwidth-1)
-        self._mask = e_bits.b_masks[self._vs_bitwidth]
+        self._signed_mask = 2**(width-1)
+        self._mask = e_bits.b_masks[width]
+
+        super().__init__(width)
 
         # To mimic the __len__ behavior of the v_number class translate the
         # _vs_bitwidth into the number of bytes wide this object is.  This
@@ -1008,8 +1009,6 @@ class PeripheralRegisterSet(VStruct):
             names = []
 
         oidx = bisect.bisect(self._vs_sorted_offsets, offset)
-
-        print(offset, oidx, len(self._vs_sorted_offsets))
 
         # The >= offset will always be one index to the left of the returned
         # value

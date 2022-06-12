@@ -72,9 +72,10 @@ class Peripheral:
                 devcfg = project_subcfg.getSubConfig(devname, add=False)
                 if devcfg is not None:
                     self._config = weakref.proxy(devcfg)
+                    break
             else:
-                print(emu.vw.config.project.reprConfigPaths())
-                raise Exception('ERROR: duplicate project config entries for peripheral %s' % devname)
+                raise Exception('ERROR: duplicate project config entries for peripheral %s:\n%s' %
+                        (devname, emu.vw.config.project.reprConfigPaths()))
 
     def init(self, emu):
         """
@@ -132,6 +133,9 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
         """
         super().__init__(emu, devname)
 
+        # Keep track of the base address for this peripheral
+        self.baseaddr = mapaddr
+
         # Don't do the normal MMIO_DEVICE __init__ because it assigns emu, since
         # this is a module we should wait to store the emu instance
         emu.addMMIO(mapaddr, mapsize, devname, self._mmio_read, self._mmio_write, **kwargs)
@@ -165,7 +169,8 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
             flags_reg = None
 
         is_no_channels_config = isinstance(status_reg, PeriphRegister) and \
-                isinstance(flags_reg, PeriphRegister)
+                isinstance(flags_reg, PeriphRegister) and \
+                isinstance(isrevents, dict)
 
         if is_no_channels_config:
             # If this does look like a "no channels" config sanity check the
@@ -191,7 +196,8 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
         is_with_channels_config = isinstance(status_reg, VArray) and \
                 isinstance(status_reg[0], PeriphRegister) and \
                 isinstance(flags_reg, VArray) and \
-                isinstance(flags_reg[0], PeriphRegister)
+                isinstance(flags_reg[0], PeriphRegister) and \
+                isinstance(isrevents, (list, tuple))
 
         if is_with_channels_config:
             if len(status_reg._vs_fields) != len(flags_reg._vs_fields):
@@ -507,9 +513,6 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
         there is a dma event associated with the supplied field then a DMA event
         will also be initiated.
         """
-        print(field, value)
-        print(self.isrstatus.tree())
-        print(self.isrflags.tree())
         field_value = self.isrstatus.vsGetField(field)
         if value and field_value == 0:
             # Set the ISR status flag
@@ -533,9 +536,6 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
                     logger.warning('[%s] Ignoring %s event because no valid ISR source or DMA request configured',
                                    self.devname, field)
 
-        print(self.isrstatus.tree())
-        print(self.isrflags.tree())
-
     def _eventRequestWithChannel(self, channel, field, value):
         """
         Takes a register field name, channel, and a value to set in the ISR
@@ -553,7 +553,7 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
         field_value = self.isrstatus[channel].vsGetField(field)
         if value and field_value == 0:
             # Set the ISR status flag
-            self.isrstatus.vsOverrideValue(field, int(value))
+            self.isrstatus[channel].vsOverrideValue(field, int(value))
 
             intc_src, dma_req = INTC_EVENT_MAP.get(self.isrevents[channel][field], (None, None))
             dma_field = self.dmaevents[field]
@@ -725,18 +725,30 @@ class ExternalIOPeripheral(MMIOPeripheral):
                          isrstatus=isrstatus, isrflags=isrflags,
                          isrevents=isrevents, **kwargs)
 
-        # Get the server configuration from the peripheral config
-        host = self._config['host']
-        port = self._config['port']
+        # Get the server configuration from the peripheral config (if a config
+        # was found)
+        if self._config is not None:
+            # Check if the IO thread should be created or not
+            if emu.vw.getTransMeta('ProjectMode') == 'test':
+                self._server_args = None
+                logger.debug('Test mode enabled, not creating IO thread for IO module %s',
+                        self.devname)
+            elif self._config['port'] is None:
+                self._server_args = None
+                logger.debug('No port configured, not creating IO thread for IO module %s',
+                        self.devname)
+            else:
+                # If the host IP address is empty default to localhost
+                if self._config['host'] is None:
+                    host = 'localhost'
+                    self._server_args = (host, port)
+                else:
+                    self._server_args = (self._config['host'], self._config['port'])
 
-        # Check if the IO thread should be created or not
-        if emu.vw.getTransMeta('ProjectMode') != 'test' and port is not None:
-            # If the host IP address is empty default to localhost
-            if host is None:
-                host = 'localhost'
-
-            self._server_args = (host, port)
+                logger.debug('Using %s:%s for IO module %s',
+                        self._server_args[0], self._server_args[1], self.devname)
         else:
+            logger.warning('Could not locate configuration for IO module %s', self.devname)
             self._server_args = None
 
         self._server = None

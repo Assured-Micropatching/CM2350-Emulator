@@ -6,6 +6,9 @@ from envi.archs.ppc.const import *
 
 from .ppc_vstructs import BitFieldSPR, v_const
 
+import logging
+logger = logging.getLogger(__name__)
+
 
 __all__ = [
     'PpcMMU',
@@ -101,6 +104,33 @@ _tlb_address_mask = (
     0xC0000000,  # [20]   1GB Pages
     0x80000000,  # [21]   2GB Pages
     0x00000000,  # [22]   4GB Pages
+)
+
+# TLB entry size debug msg strings
+_tlb_size_str = (
+    '1kB',
+    '2kB',
+    '4kB',
+    '8kB',
+    '16kB',
+    '32kB',
+    '64kB',
+    '128kB',
+    '256kB',
+    '512kB',
+    '1MB',
+    '2MB',
+    '4MB',
+    '8MB',
+    '16MB',
+    '32MB',
+    '64MB',
+    '128MB',
+    '256MB',
+    '512MB',
+    '1GB',
+    '2GB',
+    '4GB',
 )
 
 
@@ -208,6 +238,10 @@ MAS6_SAS_SHIFT     = 0
 
 
 class PpcTLBEntry:
+    # Define the attributes for this class in slots to improve performance
+    __slots__ = ['esel', 'valid', 'iprot', 'tid', 'ts', 'tsiz', 'epn', 'flags',
+            'rpn', 'user', 'perm', 'mask', 'vle']
+
     def __init__(self, esel, valid=0, iprot=0, tid=0, ts=0, tsiz=0, epn=0, flags=0, rpn=0, user=0, perm=0):
         # the entry selector (index) can't be changed
         self.esel = esel
@@ -218,22 +252,21 @@ class PpcTLBEntry:
         self.iprot = iprot
         self.tid = tid
         self.ts = ts
-        self.tsiz = tsiz
+        self.tsiz = PpcTlbPageSize(tsiz)
         self.epn = epn
-        self.flags = flags
+        self.flags = PpcTlbFlags(flags)
         self.rpn = rpn
         self.user = user
-        self.perm = perm
+        self.perm = PpcTlbPerm(perm)
 
-    def mask(self):
-        '''
-        Helper function that returns an address mask based on this TLB
-        entry's page size
-        '''
-        return _tlb_address_mask[self.tsiz]
+        # Calculate the mask now
+        self.mask = _tlb_address_mask[self.tsiz]
 
-    def vle(self):
-        return bool(self.flags & PpcTlbFlags.VLE)
+        self.vle = bool(self.flags & PpcTlbFlags.VLE)
+
+    def size(self):
+        # Used in debug messages
+        return _tlb_size_str[self.tsiz]
 
     def read(self):
         '''
@@ -263,16 +296,16 @@ class PpcTLBEntry:
         # just from being invalidated by the tlbivax instruction or by setting
         # the MMUCSR0[TLB1_FI] bit.
 
-        self.valid = (mas1 & MAS1_VALID_MASK) >> MAS1_VALID_SHIFT
-        self.iprot = (mas1 & MAS1_IPROT_MASK) >> MAS1_IPROT_SHIFT
-        self.tid   = (mas1 & MAS1_TID_MASK) >> MAS1_TID_SHIFT
-        self.ts    = (mas1 & MAS1_TS_MASK) >> MAS1_TS_SHIFT
-        self.tsiz  = (mas1 & MAS1_TSIZ_MASK) >> MAS1_TSIZ_SHIFT
-        self.epn   = mas2 & EPN_MASK
-        self.flags = (mas2 & MAS2_FLAGS_MASK) >> MAS2_FLAGS_SHIFT
-        self.rpn   = mas3 & EPN_MASK
-        self.user  = (mas3 & MAS3_USER_MASK) >> MAS3_USER_SHIFT
-        self.perm  = (mas3 & MAS3_PERM_MASK) >> MAS3_PERM_SHIFT
+        self.config(valid=(mas1 & MAS1_VALID_MASK) >> MAS1_VALID_SHIFT,
+                    iprot=(mas1 & MAS1_IPROT_MASK) >> MAS1_IPROT_SHIFT,
+                    tid=(mas1 & MAS1_TID_MASK) >> MAS1_TID_SHIFT,
+                    ts=(mas1 & MAS1_TS_MASK) >> MAS1_TS_SHIFT,
+                    tsiz=(mas1 & MAS1_TSIZ_MASK) >> MAS1_TSIZ_SHIFT,
+                    epn=mas2 & EPN_MASK,
+                    flags=(mas2 & MAS2_FLAGS_MASK) >> MAS2_FLAGS_SHIFT,
+                    rpn=mas3 & EPN_MASK,
+                    user=(mas3 & MAS3_USER_MASK) >> MAS3_USER_SHIFT,
+                    perm=(mas3 & MAS3_PERM_MASK) >> MAS3_PERM_SHIFT)
 
     def invalidate(self):
         '''
@@ -325,6 +358,10 @@ class PpcMMU:
         mas0 = self.emu.getRegister(REG_MAS0)
         esel = (mas0 & MAS0_ESEL_MASK) >> MAS0_ESEL_SHIFT
 
+        logger.debug('MMU: read mapping %d: 0x%08x -> 0x%08x (%s VLE=%d)',
+                esel, self._tlb[esel].rpn, self._tlb[esel].epn,
+                self._tlb[esel].size(), self._tlb[esel].vle)
+
         mas1, mas2, mas3 = self._tlb[esel].read()
 
         self.emu.setRegister(REG_MAS1, mas1)
@@ -344,6 +381,10 @@ class PpcMMU:
         mas3 = self.emu.getRegister(REG_MAS3)
 
         self._tlb[esel].write(mas1, mas2, mas3)
+
+        logger.debug('MMU: write mapping %d: 0x%08x -> 0x%08x (%s VLE=%d)',
+                esel, self._tlb[esel].rpn, self._tlb[esel].epn,
+                self._tlb[esel].size(), self._tlb[esel].vle)
 
     def i_tlbsx(self, op):
         '''
@@ -367,6 +408,9 @@ class PpcMMU:
         entry = self.tlbFindEntry(ea, ts=sas, tid=spid)
         if entry is not None:
             mas1, mas2, mas3 = entry.read()
+
+            logger.debug('MMU: search found mapping %d: 0x%08x -> 0x%08x (%s VLE=%d)',
+                    entry.esel, entry.rpn, entry.epn, entry.size(), entry.vle)
 
             # Update MAS0 to indicate which entry this is
             mas0 = (1 << MAS0_TBSEL_SHIFT) | (entry.esel << MAS0_ESEL_SHIFT)
@@ -405,9 +449,12 @@ class PpcMMU:
             #
             # TODO: Best as I can tell the epn should be masked by the entry's
             # page-size determiend mask
-            matching_entries = [e for e in self._tlb if ea & e.mask() == e.epn & e.mask()]
+            matching_entries = [e for e in self._tlb if ea & e.mask == e.epn & e.mask]
 
         for entry in matching_entries:
+            logger.debug('MMU: invalidating mapping %d: 0x%08x -> 0x%08x (%s VLE=%d)',
+                    entry.esel, entry.rpn, entry.epn, entry.size(), entry.vle)
+
             entry.invalidate()
 
     def i_tlbsync(self, op):
@@ -455,7 +502,7 @@ class PpcMMU:
                 # Not sure if this is necessary, but mask the EPN value as well
                 # to ensure that only the bits that should be compared are
                 # checked.
-                if va & entry.mask() == entry.epn & entry.mask():
+                if va & entry.mask == entry.epn & entry.mask:
                     return entry
         return None
 
@@ -470,6 +517,10 @@ class PpcMMU:
         values.
         '''
         self._tlb[esel].config(valid, iprot, tid, ts, tsiz, epn, flags, rpn, user, perm)
+
+        logger.debug('MMU: configured mapping %d: 0x%08x -> 0x%08x (%s VLE=%d)',
+                esel, self._tlb[esel].rpn, self._tlb[esel].epn,
+                self._tlb[esel].size(), self._tlb[esel].vle)
 
     def tlbMiss(self, va, ts, tid):
         # Per "10.6.5 TLB miss exception update" (e200z759CRM.pdf page 570):
@@ -521,7 +572,7 @@ class PpcMMU:
         '''
         entry = self.getDataEntry(va)
         if entry is not None:
-            return entry.rpn | (va & ~entry.mask())
+            return entry.rpn | (va & ~entry.mask)
 
         else:
             # TODO: replace standard envi SegmentationViolation with the correct
@@ -539,8 +590,8 @@ class PpcMMU:
         '''
         entry = self.getInstrEntry(va)
         if entry is not None:
-            ea = entry.rpn | (va & ~entry.mask())
-            return (ea, entry.vle())
+            ea = entry.rpn | (va & ~entry.mask)
+            return (ea, entry.vle)
 
         else:
             # TODO: replace standard envi SegmentationViolation with the correct

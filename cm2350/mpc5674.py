@@ -117,7 +117,7 @@ mpc5674 is reponsible for defining:
     * FlexCAN module
     * DSPI - Deserial Serial Peripheral Interface
     * eSCI - enhanced Serial Comms Interface
-    * EQADC - Enhanced Queued Analog to Digical Converter
+    * eQADC - Enhanced Queued Analog to Digical Converter
     * Decimation Filter
     * eTPU2 - enhanced Time Processing Unit
     * EBI - External Bus Interface
@@ -158,12 +158,13 @@ from .peripherals.flexcan import FlexCAN
 from .peripherals.intc import INTC
 from .peripherals.dspi import DSPI
 from .peripherals.sim import SIM
-from .peripherals.eqadc import EQADC
+from .peripherals.eqadc import eQADC
 from .peripherals.decfilt import DECFILT
 from .peripherals.ebi import EBI
 from .peripherals.ecsm import ECSM
 from .peripherals.xbar import XBAR
 from .peripherals.pbridge import PBRIDGE
+from .peripherals.edma import eDMA
 
 
 __all__ = [
@@ -484,14 +485,14 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         self.swt = SWT(self, 0xFFF38000)
         # self.stm = STM(self, 0xFFF3C000)
         self.ecsm = ECSM(self, 0xFFF40000)
-        #self.dma = (
-        #        EDMA('eDMA_A', self, 0xFFF44000),
-        #        EDMA('eDMA_B', self, 0xFFF54000),
-        #)
+        self.dma = (
+                eDMA('eDMA_A', self, 0xFFF44000),
+                eDMA('eDMA_B', self, 0xFFF54000),
+        )
         self.intc = INTC(self, 0xFFF48000)
         self.eqadc = (
-            EQADC('eQADC_A', self, 0xFFF80000),
-            EQADC('eQADC_B', self, 0xFFF84000),
+            eQADC('eQADC_A', self, 0xFFF80000),
+            eQADC('eQADC_B', self, 0xFFF84000),
         )
         self.decfilt = (
             DECFILT('DECFILT_A', self, 0xFFF88000),

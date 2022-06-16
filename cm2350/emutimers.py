@@ -17,6 +17,8 @@ class EmuTimer:
 
     EmuTimer objects are created from the EmulationTime.registerTimer() function.
     '''
+    #__slots__ = ('_emutime', 'name', '_callback', 'freq', 'period', 'target')
+
     def __init__(self, emutime, name, callback, freq=None, period=None):
         '''
         Saves timer configuration information and leaves the timer disabled.
@@ -171,6 +173,11 @@ class EmulationTime:
     time, and to allow the creation and management of multiple timers with
     callbacks, and allows the emulator time to be halted and resumed.
     '''
+    # attributes used by the EmulationTime class, but we can't define
+    # __slots__ here because this is used as a parent class for multiple
+    # inheritance.
+    slots = ['_systime_scaling', '_timers', '_timer_lock', '_timer_update',
+            '_stop', '_tb_thread', '_sysoffset', '_breakstart', 'freq']
 
     def __init__(self, systime_scaling=1.0):
         '''

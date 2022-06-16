@@ -112,6 +112,7 @@ class e200INTC:
             logger.warning('not handling exception: %r', exception)
             return
 
+        raise Exception(exception)
         logger.debug('queuing exception: %r', exception)
         self.intqs[exception.prio].put(exception)
         self.exc_count += 1
@@ -153,7 +154,7 @@ class e200INTC:
 
                 # Check if there are any peripheral-specific callbacks for this
                 # exception type
-                for callback in self._callbacks.get(newexc.source, []):
+                for callback in self._callbacks.get(type(newexc), []):
                     callback(newexc)
 
                 logger.debug('PC: 0x%08x (%r)', self.emu.getProgramCounter(), newexc)

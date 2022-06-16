@@ -157,7 +157,7 @@ class EDMA_x_CPRx(PeriphRegister):
 # The TCD structure has quite a few fields that can be interpreted in different
 # ways, the structure here just defines the standard field and the extraction of
 # specific bit fields is done at processing time.
-class EDMA_x_TCDx(PeriphRegister):
+class EDMA_x_TCDx(PeriphRegSubFieldMixin, PeriphRegister):
     def __init__(self):
         super().__init__()
         self.saddr = v_bits(32)         # Source address
@@ -204,7 +204,7 @@ class EDMA_A_REGISTERS(PeripheralRegisterSet):
         super().__init__()
 
         self.mcr    = (EDMA_MCR_OFFSET,    EDMA_A_MCR())
-        self.esr    = (EDMA_ESR_OFFSET,    v_bits(32))
+        self.esr    = (EDMA_ESR_OFFSET,    EDMA_x_ESR())
         self.erqrh  = (EDMA_ERQRH_OFFSET,  v_bits(32))
         self.erqrl  = (EDMA_ERQRL_OFFSET,  v_bits(32))
         self.eeirh  = (EDMA_EEIRLH_OFFSET, v_bits(32))
@@ -232,7 +232,6 @@ class EDMA_A_REGISTERS(PeripheralRegisterSet):
         """
         super().reset(emu)
 
-        self.esr    = 0
         self.erqrh  = 0
         self.erqrl  = 0
         self.eeirh  = 0
@@ -261,7 +260,7 @@ class EDMA_B_REGISTERS(PeripheralRegisterSet):
         super().__init__()
 
         self.mcr    = (EDMA_MCR_OFFSET,    EDMA_B_MCR())
-        self.esr    = (EDMA_ESR_OFFSET,    v_bits(32))
+        self.esr    = (EDMA_ESR_OFFSET,    EDMA_x_ESR())
         self.erqrl  = (EDMA_ERQRL_OFFSET,  v_bits(32))
         self.eeirl  = (EDMA_EEIRL_OFFSET,  v_bits(32))
         self.irqrl  = (EDMA_IRQRL_OFFSET,  v_bits(32))
@@ -283,7 +282,6 @@ class EDMA_B_REGISTERS(PeripheralRegisterSet):
         """
         super().reset(emu)
 
-        self.esr    = 0
         self.erqrl  = 0
         self.eeirl  = 0
         self.irqrl  = 0
@@ -389,8 +387,7 @@ EDMA_INT_MASKS = tuple(2 ** i for i in range(32)) + tuple(2 ** i for i in range(
 # Object to hold the parsed TCD configuration values
 class TCDConfig:
     # The attributes for this class are fixed
-    __slots__ = 'channel', 'tcd', 'ssize', 'dsize', 'mloff', 'nbytes', 'linkch', \
-            '_citer'
+    __slots__ = ('channel', 'tcd', 'ssize', 'dsize', 'mloff', 'nbytes', 'linkch', '_citer')
 
     def __init__(self, channel, tcd, emlm):
         self.channel = channel
@@ -542,14 +539,14 @@ class eDMA(MMIOPeripheral):
         # Return the group numbers (indexes) for this peripheral ordered by
         # which priority values are highest
         return [i for _, i in \
-                sorted(((self.registers.mcr.vsGetField(f), i) \
+                sorted(((self.registers.mcr.vsGetField(f).vsGetValue(), i) \
                        for i, (_, f) in enumerate(self.groups)), reverse=True)]
 
     def _get_channel_fixed_priorities(self, channels):
         # Return the channel numbers (indexes) for this peripheral ordered by
         # which priority values are highest
         return [c for _, c in \
-                sorted(((self.registers.cpr[c].chpri, c) for c in channels), reverse=True)]
+                sorted(((cpr.chpri, c) for c, cpr in self.registers.cpr), reverse=True)]
 
     def _get_next_channel(self):
         """
@@ -701,7 +698,7 @@ class eDMA(MMIOPeripheral):
         Check for any global configuration errors:
             - group priority configuration
         """
-        group_priorities = set(self.registers.mcr.vsGetField(f) for _, f in self.groups)
+        group_priorities = set(self.registers.mcr.vsGetField(f).vsGetValue() for _, f in self.groups)
         if len(set(group_priorities)) != len(self.groups):
             self.registers.esr.gpe = 1
         else:
@@ -742,7 +739,7 @@ class eDMA(MMIOPeripheral):
 
         if self.registers.mcr.halt == 0:
             for channel in range(self.num_channels):
-                if channel not in self._pending and self.registers.tcd[c].start == 1:
+                if channel not in self._pending and self.registers.tcd[channel].start == 1:
                     self.startTransfer(channel)
 
     def esrUpdate(self, thing):
@@ -757,7 +754,7 @@ class eDMA(MMIOPeripheral):
         Check for any global configuration errors:
             - channel priority configuration
         """
-        all_chan_priorities = [cpr.chpri for cpr in self.registers.cpr]
+        all_chan_priorities = [cpr.chpri for _, cpr in self.registers.cpr]
         grouped_chan_priorities = [all_chan_priorities[i:i+16] \
                 for i in range(0, len(self.registers.cpr), 16)]
         for grp, chan_priorities in enumerate(grouped_chan_priorities):

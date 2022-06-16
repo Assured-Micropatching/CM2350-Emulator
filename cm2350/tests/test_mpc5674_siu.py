@@ -915,7 +915,7 @@ class MPC5674_SIU_Test(MPC5674_Test):
                 'pc': pc,
                 'data': read_data,
             }
-            self.assertEqual(cm.exception.kwargs, args)
+            self.assertEqual(cm.exception.kwargs, args, msg=msg)
 
     def test_siu_unaligned_write(self):
         pcr_range, size = SIU_PCR
@@ -947,7 +947,7 @@ class MPC5674_SIU_Test(MPC5674_Test):
                 'data': data,
                 'written': written,
             }
-            self.assertEqual(cm.exception.kwargs, args)
+            self.assertEqual(cm.exception.kwargs, args, msg=msg)
 
     # GPIO tests
 
@@ -1448,13 +1448,13 @@ class MPC5674_SIU_Test(MPC5674_Test):
         )
         for sysdiv_val, sysckldiv_val, ipclkdiv_val, sys_freq, cpu_freq, periph_freq, etpu_freq in tests:
             self.emu.writeMemValue(addr, sysdiv_val, size)
-            self.assertEqual(self.emu.siu.registers.sysdiv.ipclkdiv, ipclkdiv_val)
-            self.assertEqual(self.emu.siu.registers.sysdiv.bypass, 1)
-            self.assertEqual(self.emu.siu.registers.sysdiv.sysclkdiv, sysckldiv_val)
-            self.assertEqual(self.emu.siu.f_sys(), sys_freq)
-            self.assertEqual(self.emu.siu.f_cpu(), cpu_freq)
-            self.assertEqual(self.emu.siu.f_periph(), periph_freq)
-            self.assertEqual(self.emu.siu.f_etpu(), etpu_freq)
+            self.assertEqual(self.emu.siu.registers.sysdiv.ipclkdiv, ipclkdiv_val, msg=hex(sysdiv_val))
+            self.assertEqual(self.emu.siu.registers.sysdiv.bypass, 1, msg=hex(sysdiv_val))
+            self.assertEqual(self.emu.siu.registers.sysdiv.sysclkdiv, sysckldiv_val, msg=hex(sysdiv_val))
+            self.assertEqual(self.emu.siu.f_sys(), sys_freq, msg=hex(sysdiv_val))
+            self.assertEqual(self.emu.siu.f_cpu(), cpu_freq, msg=hex(sysdiv_val))
+            self.assertEqual(self.emu.siu.f_periph(), periph_freq, msg=hex(sysdiv_val))
+            self.assertEqual(self.emu.siu.f_etpu(), etpu_freq, msg=hex(sysdiv_val))
 
         # When bypass is disabled the system clock is the FMPLL clock divided
         # down based on SYSDIV[SYSCLKDIV]:

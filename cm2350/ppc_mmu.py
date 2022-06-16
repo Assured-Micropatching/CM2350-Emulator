@@ -239,8 +239,8 @@ MAS6_SAS_SHIFT     = 0
 
 class PpcTLBEntry:
     # Define the attributes for this class in slots to improve performance
-    __slots__ = ['esel', 'valid', 'iprot', 'tid', 'ts', 'tsiz', 'epn', 'flags',
-            'rpn', 'user', 'perm', 'mask', 'vle']
+    #__slots__ = ['esel', 'valid', 'iprot', 'tid', 'ts', 'tsiz', 'epn', 'flags',
+    #        'rpn', 'user', 'perm', 'mask', 'vle']
 
     def __init__(self, esel, valid=0, iprot=0, tid=0, ts=0, tsiz=0, epn=0, flags=0, rpn=0, user=0, perm=0):
         # the entry selector (index) can't be changed

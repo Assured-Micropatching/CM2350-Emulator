@@ -107,6 +107,11 @@ class PpcEmulationTime(emutimers.EmulationTime):
     '''
     PowerPC specific emulator time and timer handling.
     '''
+    # attributes used by the PpcEmulationTime class, but we can't define
+    # __slots__ here because this is used as a parent class for multiple
+    # inheritance.
+    slots = list(set(emutimers.EmulationTime.slots + ['_tb_offset']))
+
     def __init__(self, systime_scaling=1.0):
         super().__init__(systime_scaling)
 
@@ -209,9 +214,13 @@ class PpcEmulationTime(emutimers.EmulationTime):
 
 
 import envi.archs.ppc.emu as eape
-import vivisect.impemu.emulator as vimp_emu
+import vivisect.impemu.platarch.ppc as vimp_ppc_emu
 #class PPC_e200z7(mmio.ComplexMemoryMap, eape.Ppc32EmbeddedEmulator, PpcEmulationTime):
-class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator, eape.Ppc32EmbeddedEmulator, PpcEmulationTime):
+class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.Ppc32EmbeddedEmulator, PpcEmulationTime):
+    #__slots__ = tuple(set(list(eape.Ppc32EmbeddedEmulator.__slots__) +
+    #    vimp_ppc_emu.PpcWorkspaceEmulator.slots + mmio.ComplexMemoryMap.slots + PpcEmulationTime.slots +
+    #    ['modules', 'mmu', 'mcu_intc', 'opcache', '_cur_instr', '_read_callbacks', '_write_callbacks']))
+
     def __init__(self, vw):
         # module registry
         self.modules = {}
@@ -232,20 +241,22 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator, eape.Ppc32Em
         # class the PPC_e200z7 is designed so that the core vivisect workspace
         # emulator can be removed in the future to improve performance (at the
         # cost of analysis/inspection/live debug capabilities).
-        vimp_emu.WorkspaceEmulator.__init__(self, vw, nostack=True, funconly=False)
+        vimp_ppc_emu.PpcWorkspaceEmulator.__init__(self, vw, nostack=True, funconly=False)
 
         #PpcEmulationTime.__init__(self, 0.1)
         PpcEmulationTime.__init__(self)
 
-        self.tcr = TCR(self)
-        self.tsr = TSR(self)
-        self.mcsr = MCSR(self)
+        # Create some special SPR handlers, we don't need to save a reference to
+        # these because they automatically install themselves as modules
+        TCR(self)
+        TSR(self)
+        MCSR(self)
 
-        self.hid0 = HID0(self)
+        hid0 = HID0(self)
         # Attach a callback to HID0[TBEN] that can start/stop timebase
-        self.hid0.vsAddParseCallback('tben', self._tbUpdate)
+        hid0.vsAddParseCallback('tben', self._tbUpdate)
 
-        self.hid1 = HID1(self)
+        HID1(self)
 
         # Create the MMU peripheral and then redirect the TLB instruction
         # handlers to the MMU
@@ -297,8 +308,8 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator, eape.Ppc32Em
                     self.modules[mname].stop()
                 del self.modules[mname]
 
-    def _tbUpdate(self, thing):
-        if self.hid0.tben:
+    def _tbUpdate(self, hid0):
+        if hid0.tben:
             self.enableTimebase()
         else:
             self.disableTimebase()
@@ -543,6 +554,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator, eape.Ppc32Em
             # do normal opcode parsing and execution
             pc = self.getProgramCounter()
             op = self.parseOpcode(pc)
+            print(hex(pc), op)
             # TODO: check MSR for FP (MSR_FP_MASK) and SPE (MSR_SPE_MASK)
             # support here?
             self.executeOpcode(op)

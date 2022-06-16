@@ -111,6 +111,7 @@ class e200INTC:
             logger.warning('not handling exception: %r', exception)
             return
 
+        raise Exception(exception)
         logger.debug('queuing exception: %r', exception)
         self.intqs[exception.prio].put(exception)
         self.exc_count += 1
@@ -150,15 +151,8 @@ class e200INTC:
 
                 # Check if there are any peripheral-specific callbacks for this
                 # exception type
-                ######################T SHIS IS SOME JACKED UP CRAP....  .source doesn't exist on more exceptions!
-                if newexc.__ivor__ == EXC_EXTERNAL_INPUT:
-                    for callback in self._callbacks_ext.get(newexc.source, []):
-                        callback(newexc)
-
-                else: 
-                    if newexc.__ivor__ in self._callbacks:
-                        for callback in self._callbacks.get(newexc.__ivor__, []):
-                            callback(newexc)
+                for callback in self._callbacks.get(type(newexc), []):
+                    callback(newexc)
 
                 logger.debug('PC: 0x%08x (%r)', self.emu.getProgramCounter(), newexc)
                 logger.debug('NEWPC: %r', newpc)

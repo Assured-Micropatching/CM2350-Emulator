@@ -723,10 +723,10 @@ class SIU(MMIOPeripheral):
 
         # Attach the callback functions to handle writes that need to cause GPIO
         # value updates
-        self.registers.vsAddParseCallback('by_idx_pcr', self.pcrUpdate)
-        self.registers.vsAddParseCallback('by_idx_gpdo', self.gpdoUpdate)
-        self.registers.vsAddParseCallback('by_idx_pgpdo', self.pgpdoUpdate)
-        self.registers.vsAddParseCallback('by_idx_mpgpdo', self.mpgpdoUpdate)
+        self.registers.pcr.vsAddParseCallback('by_idx', self.pcrUpdate)
+        self.registers.gpdo.vsAddParseCallback('by_idx', self.gpdoUpdate)
+        self.registers.pgpdo.vsAddParseCallback('by_idx', self.pgpdoUpdate)
+        self.registers.mpgpdo.vsAddParseCallback('by_idx', self.mpgpdoUpdate)
 
     def reset(self, emu):
         """
@@ -810,7 +810,7 @@ class SIU(MMIOPeripheral):
         else:
             self._default_value[idx] &= ~pinmask
 
-    def pcrUpdate(self, thing, idx, size):
+    def pcrUpdate(self, thing, idx, size, **kwargs):
         """
         Update the GPIO(s) that correspond to the PCR that was just set (the
         PCR index == the GPIO pin number)
@@ -818,7 +818,7 @@ class SIU(MMIOPeripheral):
         self.updateMasksFromPCR(idx)
         self.refreshPinValue(idx)
 
-    def gpdoUpdate(self, thing, idx, size):
+    def gpdoUpdate(self, thing, idx, size, **kwargs):
         """
         Update the output value for then pin controlled by the specified GPDO register
         """
@@ -836,7 +836,7 @@ class SIU(MMIOPeripheral):
         self.registers.pgpdo[pgpdo_idx].data = pgpdo_val
         self.refreshPinValue(pin)
 
-    def pgpdoUpdate(self, thing, idx, size):
+    def pgpdoUpdate(self, thing, idx, size, **kwargs):
         """
         Update the output value for pins controlled by the specified PGPDO register
         """
@@ -851,7 +851,7 @@ class SIU(MMIOPeripheral):
 
         self.refreshBlockValue(idx)
 
-    def mpgpdoUpdate(self, thing, idx, size):
+    def mpgpdoUpdate(self, thing, idx, size, **kwargs):
         # There are 2 MPGPDO registers for every PGPDO register, 8-byte aligned
         # addresses map to the upper 15 bits of the PGPDO register, the next
         # register maps to the lower 16 bits of the PGPDO register.

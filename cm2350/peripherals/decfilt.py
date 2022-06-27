@@ -265,7 +265,7 @@ class DECFILT(MMIOPeripheral):
         self.registers.vsAddParseCallback('mcr', self.mcrUpdate)
         self.registers.vsAddParseCallback('mxcr', self.mxcrUpdate)
         self.registers.vsAddParseCallback('ib', self.ibUpdate)
-        self.registers.vsAddParseCallback('by_idx_coef', self.coefUpdate)
+        self.registers.coef.vsAddParseCallback('by_idx', self.coefUpdate)
 
     def softReset(self):
         """
@@ -292,7 +292,7 @@ class DECFILT(MMIOPeripheral):
     def ibUpdate(self, thing):
         self.newInput()
 
-    def coefUpdate(self, thing, idx, size):
+    def coefUpdate(self, thing, idx, size, **kwargs):
         # Take the 24-bit 2's compliment value and sign extend it
         coef = self.registers.coef[idx].value
         if coef & DECFILT_COEF_SIGN:

@@ -84,7 +84,7 @@ class INTC_REGISTERS(PeripheralRegisterSet):
         # The IACKR and EOIR registers can't be emulated with VStructs and is
         # implemented directly in the FlexCAN _getPeriphReg and _setPeriphReg
         # functions below.
-        self.sscir      = (INTC_SSCIR_OFFSET, VTuple([INTC_SSCIRn() for x in range(INTC_MAX_SW_INTERRUPTS)]))
+        self.sscir      = (INTC_SSCIR_OFFSET, VArray([INTC_SSCIRn() for x in range(INTC_MAX_SW_INTERRUPTS)]))
         self.psr        = (INTC_PSR_OFFSET, v_bytearray(size=INTC_MAX_INTERRUPTS))
 
     def reset(self, emu):
@@ -125,7 +125,7 @@ class INTC(MMIOPeripheral):
 
         # Install a callback handler for the SSCIR register so when values are
         # written the correct actions can be taken.
-        self.registers.vsAddParseCallback('by_idx_sscir', self.sscirUpdate)
+        self.registers.sscir.vsAddParseCallback('by_idx', self.sscirUpdate)
 
         # A callback for the CPR register, so when the priority changes any
         # delayed interrupts that have been saved will be re-queued.
@@ -191,7 +191,7 @@ class INTC(MMIOPeripheral):
             else:
                 super()._setPeriphReg(offset, bytez)
 
-    def sscirUpdate(self, thing, idx, size):
+    def sscirUpdate(self, thing, idx, size, **kwargs):
         if self.registers.sscir[idx].set:
             # If the SSCIRn[SET] bit is set, queue an exception and clear the
             # SET bit (it should always read 0)

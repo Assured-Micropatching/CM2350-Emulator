@@ -182,6 +182,11 @@ class FMPLL(MMIOPeripheral):
         #   SYNSR[MODE] == ESYNCR1[CLKCFG2]
         #   SYNSR[PLLREF] == ESYNCR1[CLKCFG1]
         #   SYNSR[PLLSEL] == ESYNCR1[CLKCFG0]
+
+        print('synsr  ', self.registers.synsr.vsEmit().hex())
+        print('esyncr1', self.registers.esyncr1.vsEmit().hex())
+        print('esyncr2', self.registers.esyncr2.vsEmit().hex())
+
         clkcfg = self.registers.esyncr1.clkcfg
         mode = (clkcfg >> 2) & 0b001
         self.registers.synsr.vsOverrideValue('mode',  mode)
@@ -199,6 +204,8 @@ class FMPLL(MMIOPeripheral):
         # achieved.
         self.registers.synsr.vsOverrideValue('locks', pllsel)
         self.registers.synsr.vsOverrideValue('lock', pllsel)
+
+        print(clkcfg, mode, pllref, pllsel)
 
         # Table 5-10. Clock-Out vs. Clock-In Relationships
         # (MPC5674FRM.pdf page 196)
@@ -221,6 +228,8 @@ class FMPLL(MMIOPeripheral):
         logger.debug('FMPLL: Setting PLL to %f MHz', self.pll / 1000000)
 
     def esyncr1Update(self, thing):
+        print('esyncr1 written', self.registers.esyncr1.vsEmit().hex())
+        print(self.registers.esyncr1.tree())
         # Only allow clkcfg to change if ESYNCR2[CLKCFG_DIS] is 0, if
         # ESYNCR2[CLKCFG_DIS] is 1 restore the previously saved ESYNCR1[CLKCFG]
         if self.registers.esyncr2.clkcfg_dis == 1:
@@ -236,6 +245,7 @@ class FMPLL(MMIOPeripheral):
         self.configClock()
 
     def esyncr2Update(self, thing):
+        print('esyncr2 written', self.registers.esyncr1.vsEmit().hex())
         # TODO: Trigger loss of clock interrupts if enabled and the clock values
         # are changed
 

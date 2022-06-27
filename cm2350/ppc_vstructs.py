@@ -82,7 +82,7 @@ class v_bits(vstruct.bitfield.v_bits):
     Slight adaptation of the v_bits class that allows setting an initial value
     """
     __slots__ = tuple(set(vstruct.bitfield.v_bits.__slots__ +
-        ('maxval', '_vs_size', '_vs_startbyte', '_vs_startbit', '_vs_endbyte',
+        ('_vs_mask', '_vs_size', '_vs_startbyte', '_vs_startbit', '_vs_endbyte',
             '_vs_endbit', '_vs_shift')))
 
     def __init__(self, width, value=0, bigend=None):
@@ -93,11 +93,7 @@ class v_bits(vstruct.bitfield.v_bits):
             width (int): bit width of field
             value (int): default value
         """
-        # Define a few unused fields at the moment
-
-        super().__init__(width)
-
-        self.maxval = e_bits.b_masks[width]
+        self._vs_mask = e_bits.b_masks[width]
 
         # To mimic the __len__ behavior of the v_number class translate the
         # _vs_bitwidth into the number of bytes wide this object is.  This
@@ -105,7 +101,9 @@ class v_bits(vstruct.bitfield.v_bits):
         # round up to the nearest byte so will not produced correct packed
         # VArray behavior if the size is not a multiple of 8, but that should be
         # ok because this shouldn't be necessary very often.
-        self._vs_size = (self._vs_bitwidth + 7) // 8
+        self._vs_size = (width + 7) // 8
+
+        super().__init__(width)
 
         self._vs_startbyte = None
         self._vs_startbit = None
@@ -121,10 +119,10 @@ class v_bits(vstruct.bitfield.v_bits):
         self.vsOverrideValue(value)
 
     def vsSetValue(self, value):
-        self._vs_value = value & self.maxval
+        self._vs_value = value & self._vs_mask
 
     def vsOverrideValue(self, value):
-        self._vs_value = value & self.maxval
+        self._vs_value = value & self._vs_mask
 
     def vsSetEndian(self, bigend):
         """
@@ -199,9 +197,9 @@ class v_sbits(v_bits):
         this field's bitwidth.
         """
         if value & self._vs_mask:
-            return -((~value + 1) & self.maxval)
+            return -((~value + 1) & self._vs_mask)
         else:
-            return value & self.maxval
+            return value & self._vs_mask
 
     def vsSetValue(self, value):
         """
@@ -309,11 +307,21 @@ class v_w1c(v_bits):
             self._vs_value = self._vs_value & ~value
 
 
+# quick map lookup for big/little endian formats
+_fmt_chars = (
+    e_bits.le_fmt_chars,
+    e_bits.be_fmt_chars,
+)
+
+
 class v_bytearray(vstruct.primitives.v_bytes):
     """
-    A bytearray-version of v_bytes, this allows in-place parse/emit
-    like the VArray type using __getitem__ and __setitem__ operations.
+    A bytearray-version of v_bytes, this allows in-place parse/emit like the
+    VArray type using __getitem__ and __setitem__ operations.
     """
+    __slots__ = list(set(vstruct.primitives.v_bytes.__slots__ +
+        ('_vs_pcallbacks',)))
+
     def __init__(self, size=0, vbytes=None):
         """
         Constructor for v_bytearray class
@@ -324,7 +332,25 @@ class v_bytearray(vstruct.primitives.v_bytes):
         """
         if vbytes is None:
             vbytes = b'\x00' * size
+        self._vs_pcallbacks = {}
         super().__init__(size=size, vbytes=bytearray(vbytes))
+
+    def vsSetValue(self, value):
+        # Raw bytes should be the only values written, so set this the same as
+        # vsParse
+        self.vsParseAtOffset(0, value, 0)
+
+    def vsGetValue(self):
+        """
+        To ensure that this primitive not accidentally overwritten return this
+        object itself as the "value" and then implement setitem/getitem methods
+        to allow accessing the individual array components.
+        """
+        return self
+
+    @property
+    def value(self):
+        return self._vs_value
 
     def __getitem__(self, index):
         """
@@ -337,6 +363,73 @@ class v_bytearray(vstruct.primitives.v_bytes):
         Directly modifies an element in the _vs_value bytearray
         """
         self._vs_value[index] = value
+
+    def vsEmitFromOffset(self, offset, size):
+        if offset > self._vs_size:
+            raise VStructDataError()
+        return self._vs_value[offset:offset+size]
+
+    def vsParseAtOffset(self, offset, data, data_offset=0):
+        if offset > self._vs_size:
+            raise VStructDataError()
+
+        write_len = len(data) - data_offset
+        end = offset + write_len
+        self._vs_value[offset:end] = data[data_offset:]
+        written = min(write_len, self._vs_size - offset)
+
+        self._vsFireCallbacks('by_idx', idx=offset, foffset=0, size=written)
+
+        return offset + written
+
+    def parsebytes(self, offset, size, sign=False, bigend=False):
+        """
+        Provides envi.bits.parsebytes-like functionality but based on the
+        contents of this v_bytearray.
+        """
+        return e_bits.parsebytes(self._vs_value, offset, size, sign=sign, bigend=bigend)
+
+    def buildbytes(self, offset, value, size, bigend=False):
+        """
+        Provides envi.bits.buildbytes-like functionality but based on the
+        contents of this v_bytearray. Instead of returning the resulting bytes
+        they are placed into the contents of this v_bytearray at the specified
+        offset.
+        """
+        struct.pack_into(self._vs_value, offset, _fmt_chars[bigend][size],
+                e_bits.unsigned(value, size))
+
+    def vsEmit(self):
+        return self._vs_value
+
+    def vsParse(self, data, offset=0):
+        return self.vsParseAtOffset(0, data, offset)
+
+    def vsAddParseCallback(self, fieldname, callback):
+        """
+        Allow attaching a generic parse callback handler for all array indexes
+        """
+        if fieldname == 'by_idx':
+            # We don't have to validate that this is an element
+            cblist = self._vs_pcallbacks.get(fieldname)
+            if cblist is None:
+                cblist = []
+                self._vs_pcallbacks[fieldname] = cblist
+            cblist.append(callback)
+        else:
+            super().vsAddParseCallback(fieldname, callback)
+
+    def _vsFireCallbacks(self, fname, *args, **kwargs):
+        """
+        Slight modification of the standard VStruct._vsFireCallbacks function
+        that handles extra args that can be passed to the callback functions
+        (such as for by_idx callbacks).
+        """
+        callback = getattr(self, 'pcb_%s' % fname, None)
+        if callback is not None:
+            callback(*args, **kwargs)
+        for callback in self._vs_pcallbacks.get(fname, []):
+            callback(self, *args, **kwargs)
 
 
 class VArrayFieldsView:
@@ -395,7 +488,8 @@ class VArray(VStruct):
     """
     Re-imagining of the VStruct VArray class to improve efficiency
     """
-    __slots__ = list(set(VStruct.__slots__ + ('_vs_elem_type', '_vs_elem_size', '_vs_elems')))
+    __slots__ = list(set(VStruct.__slots__ +
+        ('_vs_elem_type', '_vs_elem_size', '_vs_elems', '_vs_pcallbacks')))
 
     # _vs_fields and _vs_values are changed into properties so we need to remove
     # them from the __slots__
@@ -407,6 +501,7 @@ class VArray(VStruct):
 
     def __init__(self, elems, count=0):
         super().__init__()
+        self._vs_pcallbacks = {}
 
         if isinstance(elems, (list, tuple)):
             self._vsInitElems(elems)
@@ -497,12 +592,16 @@ class VArray(VStruct):
     def vsGetFields(self):
         return self.__iter__()
 
-    def _getFieldAndIndexByOffset(self, offset, names=None):
+    def _getFieldAndIndexByOffset(self, offset, names=None, size=0):
         """
         Modification of the standard VStruct vsGetFieldByOffset() function to
         allow for a faster search because the array elements have consistent
         sizes.
         """
+        if names is None:
+            names = []
+
+        # Identify the array index and the field-specific offset
         idx = offset // self._vs_elem_size
         foffset = idx * self._vs_elem_size
 
@@ -510,19 +609,13 @@ class VArray(VStruct):
             # Target offset not found
             raise VStructDataError()
 
-        fname = str(idx)
-        #field = self._vs_elems[idx]
-
         # The offset falls somewhere in this field
-        names.append(fname)
+        names.append(str(idx))
 
-        off = offset - foffset
-        #return names, field, idx, off
-        return names, self, idx, off
+        return names, self._vs_elems[idx], idx, offset-foffset
 
     def vsGetFieldByOffset(self, offset, names=None):
-        # we don't care about the internal array index
-        names, field, _, foffset = self._getFieldAndIndexByOffset(offset, names)
+        names, field, _, foffset = self._getFieldAndIndexByOffset(offset, names=names)
 
         # If foffset is not 0, we need to look into the field
         if foffset:
@@ -533,17 +626,68 @@ class VArray(VStruct):
     # A few functions defined by PeripheralRegisterSet to support parsing
     # into/emitting from arrays of VStructs that have complex subfields.
 
-    def _vsFireCallbacks(self, fname, *args, **kwargs):
-        """
-        Slight modification of the standard VStruct _vsFireCallbacks function
-        that handles extra args that can be passed to the callback functions
-        (such as for by_idx_<field> callbacks).
-        """
-        callback = getattr(self, 'pcb_%s' % fname, None)
-        if callback is not None:
-            callback(*args, **kwargs)
-        for callback in self._vs_pcallbacks.get(fname, []):
-            callback(self, *args, **kwargs)
+    def vsEmitFromOffset(self, offset, size):
+        data = bytearray()
+        try:
+            while len(data) < size:
+                _, field, _, foffset = self._getFieldAndIndexByOffset(offset+len(data), size=size-len(data))
+
+                if hasattr(field, 'vsEmitFromOffset'):
+                    data += field.vsEmitFromOffset(foffset, remaining)
+                elif not foffset:
+                    data += field.vsEmit()
+                else:
+                    if foffset >= len(field):
+                        # This offset is beyond the identified field
+                        raise VStructDataError()
+                    else:
+                        # We can't evenly emit a subfield so just stop now
+                        raise VStructAlignmentError()
+
+        except VSTRUCT_ERROR_TYPES as exc:
+            if 'data' in exc.kwargs:
+                exc.kwargs['data'] = data + exc.kwargs['data']
+            else:
+                exc.kwargs['data'] = data
+            raise exc
+
+        return data
+
+    def vsParseAtOffset(self, offset, data, data_offset=0):
+        written = 0
+        try:
+            while data_offset < len(data):
+                _, field, idx, foffset = self._getFieldAndIndexByOffset(offset, size=len(data)-data_offset)
+
+                if hasattr(field, 'vsParseAtOffset'):
+                    ret_offset = field.vsParseAtOffset(foffset, data, data_offset)
+                    written_len = ret_offset - foffset
+                elif not foffset:
+                    ret_offset = field.vsParse(data, offset=data_offset)
+                    written_len = ret_offset - data_offset
+                else:
+                    if foffset >= len(field):
+                        # This offset is beyond the identified field
+                        raise VStructDataError()
+                    else:
+                        # We can't parse into a subfield so just stop now
+                        raise VStructAlignmentError()
+
+                written += written_len
+                offset += written_len
+                data_offset = ret_offset
+
+                # If there is a "by_idx" callback, call it now
+                self._vsFireCallbacks('by_idx', idx=idx, foffset=foffset, size=written_len)
+
+        except VSTRUCT_ERROR_TYPES as exc:
+            if 'written' in exc.kwargs:
+                exc.kwargs['written'] += written
+            else:
+                exc.kwargs['written'] = written
+            raise exc
+
+        return offset
 
     def vsAddParseCallback(self, fieldname, callback):
         """
@@ -559,60 +703,18 @@ class VArray(VStruct):
         else:
             super().vsAddParseCallback(fieldname, callback)
 
-    def vsEmitFromOffset(self, offset, size):
-        data = bytearray()
-        try:
-            while len(data) < size:
-                _, field, idx, foffset = self._getFieldAndIndexByOffset(offset+len(data))
+    def _vsFireCallbacks(self, fname, *args, **kwargs):
+        """
+        Slight modification of the standard VStruct._vsFireCallbacks function
+        that handles extra args that can be passed to the callback functions
+        (such as for by_idx callbacks).
+        """
+        callback = getattr(self, 'pcb_%s' % fname, None)
+        if callback is not None:
+            callback(*args, **kwargs)
+        for callback in self._vs_pcallbacks.get(fname, []):
+            callback(self, *args, **kwargs)
 
-                if idx is not None:
-                    field = field[idx]
-
-                if foffset:
-                    if hasattr(field, 'vsEmitFromOffset'):
-                        data += field.vsEmitFromOffset(foffset, remaining)
-                    else:
-                        # We can't emit from this field so just return what
-                        # we've got
-                        raise VStructAlignmentError()
-                else:
-                    data += field.vsEmit()
-
-        except VSTRUCT_ERROR_TYPES as exc:
-            if 'data' in exc.kwargs:
-                exc.kwargs['data'] = data + exc.kwargs['data']
-            else:
-                exc.kwargs['data'] = data
-            raise exc
-
-        return data
-
-    def vsParseAtOffset(self, offset, data, data_offset=0):
-        written = 0
-        try:
-            while data_offset < len(data):
-                names, field, idx, foffset = self._getFieldAndIndexByOffset(offset, names)
-
-                # vsParse returns the input data offset + data parsed length, the
-                # data_offset may not be correlated with the target offset
-                ret_offset = self.vsParse(data, data_offset)
-
-                written_len = ret_offset - data_offset
-                written += written_len
-                offset += written_len
-                data_offset = ret_offset
-
-                # If there is a "by_idx" callback, call it now
-                self._vsFireCallbacks('by_idx', idx=idx, size=written_len)
-
-        except VSTRUCT_ERROR_TYPES as exc:
-            if 'written' in exc.kwargs:
-                exc.kwargs['written'] += written
-            else:
-                exc.kwargs['written'] = written
-            raise exc
-
-        return offset
 
 
 class VTuple(VArray):
@@ -686,11 +788,16 @@ class PeriphRegister(VBitField):
         if bigend is None:
             raise ValueError('Cannot set endianness of %s to %s' % (self.__class__.__name__, bigend))
 
-        self._vs_bigend = bigend
+        self._vs_bigend = bool(bigend)
 
         # Now go update all fields this class has
-        for _, value in self:
+        total_bits = 0
+        for name, value in self:
             self._vsUpdateValueEndian(value)
+            total_bits += value._vs_bitwidth
+
+        # Verify the size is up to date now also
+        self._vs_size =  (total_bits + 7) // 8
 
         # Now update the emit format
         self._vs_fmt = vstruct.primitives.num_fmts.get((self._vs_bigend, self._vs_size))
@@ -721,12 +828,11 @@ class PeriphRegister(VBitField):
         bitoff = sum(f._vs_bitwidth for _, f in self.vsGetFields())
 
         # Update this new field's bit position
-        if name[0] != '_':
-            value.vsSetBitPos(bitoff)
+        value.vsSetBitPos(bitoff)
 
         # Now add field
         super().vsAddField(name, value)
-        if name[0] != '_' and not isinstance(value, PlaceholderRegister):
+        if not isinstance(value, PlaceholderRegister):
             self._vs_defaults[name] = value.vsGetValue()
 
         # Update the size for this register
@@ -738,8 +844,7 @@ class PeriphRegister(VBitField):
 
         # Update all fields with the total bit width of this bitfield
         for fname, field in self.vsGetFields():
-            if fname[0] != '_':
-                field.vsSetBitFieldWidth(total_bitwidth)
+            field.vsSetBitFieldWidth(total_bitwidth)
 
     def vsOverrideValue(self, name, value):
         """
@@ -774,7 +879,7 @@ class PeriphRegister(VBitField):
 
         # If there are any fields that have their own reset function, call it
         # now
-        for name, value in self._vs_values.items():
+        for name, value in self:
             if name not in self._vs_defaults and hasattr(value, 'reset'):
                 value.reset(emu)
 
@@ -786,10 +891,14 @@ class PeriphRegister(VBitField):
         # Unfortunately we can't just call field.vsEmit() here because we need
         # to be able to mesh fields with unaligned start and end bits. Instead
         # continually add field values into one accumulated value
+        if not self._vs_fmt:
+            num_fields = len(list(self))
+            total_bits = sum(f._vs_bitwidth for _, f in self)
+            raise Exception('Cannot emit from %s without a format (fmt: %s, fields: %d, size: %d, bits: %d)' % (self.__class__.__name__, self._vs_fmt, num_fields, self._vs_size, total_bits))
+
         value = 0
         for fname, field in self.vsGetFields():
-            if fname[0] != '_':
-                value |= field.vsGetValue() << field._vs_shift
+            value |= field.vsGetValue() << field._vs_shift
 
         return struct.pack(self._vs_fmt, value)
 
@@ -806,9 +915,8 @@ class PeriphRegister(VBitField):
 
         value = struct.unpack_from(self._vs_fmt, data, offset)[0]
         for fname, field in self.vsGetFields():
-            if fname[0] != '_':
-                field.vsSetValue(value >> field._vs_shift)
-                self._vsFireCallbacks(fname)
+            field.vsSetValue(value >> field._vs_shift)
+            self._vsFireCallbacks(fname)
 
         return offset + self._vs_size
 
@@ -840,8 +948,7 @@ class PeriphRegSubFieldMixin:
                 # bits. Instead continually add field values into one
                 # accumulated value
 
-                if fname[0] != '_':
-                    value |= field.vsGetValue() << field._vs_shift
+                value |= field.vsGetValue() << field._vs_shift
 
                 emit_bitwidth += field._vs_bitwidth
                 if emit_bitwidth >= target_bitwidth:
@@ -877,8 +984,7 @@ class PeriphRegSubFieldMixin:
             elif field._vs_startbyte >= offset:
                 # Collect the fields to be parsed because we need to identify
                 # what the correct format conversion is.
-                if fname[0] != '_':
-                    fields_to_parse.append((fname, field))
+                fields_to_parse.append((fname, field))
                 parse_bitwidth += field._vs_bitwidth
 
         parse_size = (parse_bitwidth + 7) // 8
@@ -973,7 +1079,12 @@ class PeripheralRegisterSet(VStruct):
         """
         super().__init__()
 
-        self._vs_bigend = bigend
+        # Save the endianness so we can update all added fields, VBitField
+        # doesn't support the bigend parameter so we set it manually now.
+        if bigend is not None:
+            self.vsSetEndian(bigend)
+        else:
+            self._vs_bigend = None
 
         self._vs_field_offset = {}
 
@@ -999,7 +1110,7 @@ class PeripheralRegisterSet(VStruct):
         if bigend is None:
             raise ValueError('Cannot set endianness of %s to %s' % (self.__class__.__name__, bigend))
 
-        self._vs_bigend = bigend
+        self._vs_bigend = bool(bigend)
 
         # Now go update all fields this class has
         for _, value in self:
@@ -1060,20 +1171,7 @@ class PeripheralRegisterSet(VStruct):
                 prev_offset = self._vs_field_offset[prev_fname]
                 raise ValueError('Field %s@%d overlaps with previous field %s@%d' % (name, offset, prev_fname, prev_offset))
 
-            # To make emit/parse more efficient if the new field is an array add
-            # an entry for each valid offset
-            if isinstance(value, v_bytearray):
-                for elem_idx in range(0, len(value)):
-                    self._vs_field_by_offset[offset + elem_idx] = (name, elem_idx, value)
-
-            elif isinstance(value, VArray):
-                elem_size = len(value[0])
-                for elem_off in range(0, len(value), elem_size):
-                    elem_idx = elem_off // elem_size
-                    self._vs_field_by_offset[offset + elem_off] = (name, elem_idx, value)
-
-            else:
-                self._vs_field_by_offset[offset] = (name, None, value)
+            self._vs_field_by_offset[offset] = (name, value)
 
             end_offset = offset + len(value)
             prev_fname = name
@@ -1164,67 +1262,10 @@ class PeripheralRegisterSet(VStruct):
         max_fname_size = len(self._vs_values[max_fname])
         return max_foffset + max_fname_size
 
-    def _vsFireCallbacks(self, fname, *args, **kwargs):
-        """
-        Slight modification of the standard VStruct _vsFireCallbacks function
-        that handles extra args that can be passed to the callback functions
-        (such as for by_idx_<field> callbacks).
-        """
-        callback = getattr(self, 'pcb_%s' % fname, None)
-        if callback is not None:
-            callback(*args, **kwargs)
-        for callback in self._vs_pcallbacks.get(fname, []):
-            callback(self, *args, **kwargs)
+    # TODO: could speed things up some with direct callback lookups that instead
+    # of assigning callback functions to a name-based dictionary
 
-    def vsAddParseCallback(self, fieldname, callback):
-        """
-        Slight modification of the standard VStruct vsAddParseCallback function
-        to be aware of the by_idx_<field> callback convention.
-
-        Adding a callback named by_idx_fieldname will cause the associated
-        function to be called whenever an element of a VArray of v_bytearray
-        object is written to.
-
-        "by_idx" handlers will be called with 3 parameters compared to the
-        normal 1 parameter used in parse callback functions:
-
-            by_idx_fieldname_handler(thing, idx, size)
-
-        "thing" parameter is the VStruct object that the field is a member of
-        "idx"   is the index in the field that was modified
-        "size"  is the amount of data that is written, because multiple fields
-                may be written at the same time. If that happens then the "idx"
-                parameter will be the offset of the first element that was
-                modified.
-
-        Example from the FlexCAN peripheral for the "mb" field:
-            class FlexCAN(ExternalIOPeripheral):
-                def __init__(self, ...stuff...):
-                    self.registers.vsAddParseCallback('by_idx_mb', self.mbUpdate)
-
-                def mbUpdate(self, thing, idx, size):
-                    # check which index (offset) was updated
-                    # do stuff
-                    pass
-        """
-        # TODO: This could be sped up by directly associating the callbacks
-        # with the field offset so a field name lookup isn't necessary.
-        if fieldname[:7] == 'by_idx_':
-            fname = fieldname[7:]
-        else:
-            fname = fieldname
-
-        if self._vs_values.get(fname) is None:
-            raise Exception('Invalid Field: %s' % fname)
-
-        cblist = self._vs_pcallbacks.get(fieldname)
-        if cblist is None:
-            cblist = []
-            self._vs_pcallbacks[fieldname] = cblist
-
-        cblist.append(callback)
-
-    def _getFieldAndIndexByOffset(self, offset, names=None):
+    def _getFieldByOffset(self, offset, names=None, size=0):
         """
         Utility used to retrieve the name, index, and field of a field by
         offset.  Searches first in the _vs_field_by_offset array, if not found
@@ -1235,34 +1276,32 @@ class PeripheralRegisterSet(VStruct):
 
         match = self._vs_field_by_offset.get(offset)
         if match is not None:
-            fname, idx, field = match
+            fname, field = match
             names.append(fname)
-            return names, field, idx, 0
+            return names, field, 0
 
         oidx = bisect.bisect(self._vs_sorted_offsets, offset)
 
         # The >= offset will always be one index to the left of the returned
         # value
-        if oidx > 0 and oidx < len(self._vs_sorted_offsets):
-            foffset = self._vs_sorted_offsets[oidx - 1]
-            fname, idx, field = self._vs_field_by_offset[foffset]
-            if foffset >= len(field):
-                raise VStructDataError()
+        if oidx == 0 or oidx > len(self._vs_sorted_offsets):
+            # This object does not contain the requested offset
+            raise VStructDataError()
 
-            names.append(fname)
+        foffset = self._vs_sorted_offsets[oidx - 1]
+        fname, field = self._vs_field_by_offset[foffset]
+        # Confirm that the field offset + field length includes the target
+        # offset
+        if foffset + len(field) <= offset:
+            raise VStructDataError()
 
-            if idx is not None:
-                names.append(str(idx))
+        names.append(fname)
 
-            off = offset - foffset
-            return names, field, idx, off
-
-        # This object does not contain the requested offset
-        raise VStructDataError()
+        off = offset - foffset
+        return names, field, off
 
     def vsGetFieldByOffset(self, offset, names=None):
-        # we don't care about the internal array index
-        names, field, _, foffset = self._getFieldAndIndexByOffset(offset, names)
+        names, field, foffset = self._getFieldByOffset(offset, names=names)
 
         # If foffset is not 0, we need to look into the field
         if foffset:
@@ -1280,25 +1319,20 @@ class PeripheralRegisterSet(VStruct):
         try:
             while len(data) < size:
                 # As long as more data is requested, continue reading it
-                names, field, idx, foffset = self._getFieldAndIndexByOffset(offset + len(data))
+                names, field, foffset = self._getFieldByOffset(offset+len(data), size=size-len(data))
                 remaining = size - len(data)
 
-                if isinstance(field, v_bytearray):
-                    data += field._vs_value[idx:idx+remaining]
-
+                if hasattr(field, 'vsEmitFromOffset'):
+                    data += field.vsEmitFromOffset(foffset, remaining)
+                elif not foffset:
+                    data += field.vsEmit()
                 else:
-                    if idx is not None:
-                        field = field[idx]
-
-                    if foffset:
-                        if hasattr(field, 'vsEmitFromOffset'):
-                            data += field.vsEmitFromOffset(foffset, remaining)
-                        elif foffset >= len(field):
-                            raise VStructDataError()
-                        else:
-                            raise VStructAlignmentError()
+                    if foffset >= len(field):
+                        # This offset is beyond the identified field
+                        raise VStructDataError()
                     else:
-                        data += field.vsEmit()
+                        # We can't evenly emit a subfield so just stop now
+                        raise VStructAlignmentError()
 
         except VSTRUCT_ERROR_TYPES as exc:
             if 'data' in exc.kwargs:
@@ -1320,34 +1354,21 @@ class PeripheralRegisterSet(VStruct):
             while data_offset < len(data):
                 # As long as there is data to parse into a structure, find the
                 # next field and parse data into it
-                names, field, idx, foffset = self._getFieldAndIndexByOffset(offset)
+                names, field, foffset = self._getFieldByOffset(offset, size=len(data)-data_offset)
 
-                if isinstance(field, v_bytearray):
-                    # If this is a v_byetarray the bytes to parse can just be
-                    # written directly into the value at the right offset
-                    field._vs_value[idx:] = data[data_offset:]
-                    avail_len = len(field._vs_value) - idx
-                    written_len = min(avail_len, len(data) - data_offset)
-
-                else:
-                    if idx is not None:
-                        specific_field = field[idx]
-                    else:
-                        specific_field = field
-
-                    if foffset:
-                        if hasattr(specific_field, 'vsParseAtOffset'):
-                            ret_offset = specific_field.vsParseAtOffset(foffset, data, data_offset)
-                        elif foffset >= len(specific_field):
-                            raise VStructDataError()
-                        else:
-                            # We can't parse into a subfield so just stop now
-                            raise VStructAlignmentError()
-                    else:
-                        ret_offset = specific_field.vsParse(data, offset=data_offset)
-
-                    # Need this for by_idx_* callbacks
+                if hasattr(field, 'vsParseAtOffset'):
+                    ret_offset = field.vsParseAtOffset(foffset, data, data_offset)
+                    written_len = ret_offset - foffset
+                elif not foffset:
+                    ret_offset = field.vsParse(data, offset=data_offset)
                     written_len = ret_offset - data_offset
+                else:
+                    if foffset >= len(field):
+                        # This offset is beyond the identified field
+                        raise VStructDataError()
+                    else:
+                        # We can't parse into a subfield so just stop now
+                        raise VStructAlignmentError()
 
                 offset += written_len
                 data_offset += written_len
@@ -1355,16 +1376,7 @@ class PeripheralRegisterSet(VStruct):
                 # Update the count of how much data has been written
                 written += written_len
 
-                # It's possible for specific array elements to have callbacks,
-                # trigger those now if any are set
-                if idx is not None:
-                    field._vsFireCallbacks(idx)
-
-                    # Since this is an VArray (or v_bytearray) see if there is a
-                    # 'by_idx_<field>' callback defined and if so call it
-                    self._vsFireCallbacks('by_idx_%s' % names[0], idx=idx, size=written_len)
-
-                # Now fire the callbacks for this specific field
+                # Finally fire any parse callbacks
                 self._vsFireCallbacks(names[0])
 
         except VSTRUCT_ERROR_TYPES as exc:

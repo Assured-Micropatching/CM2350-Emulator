@@ -441,7 +441,7 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
         """
         A slower version of _mmio_read that automatically suppresses PPC read errors
         """
-        data = bytearra()
+        data = bytearray()
 
         # Try to read the entire memory range
         end = offset + size
@@ -552,6 +552,8 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
         there is a dma event associated with the supplied field then a DMA event
         will also be initiated.
         """
+        logger.debug('[%s] event %s = %s', self.devname, field, value)
+
         field_value = self.isrstatus.vsGetField(field)
         if value and field_value == 0:
             # Set the ISR status flag
@@ -589,6 +591,8 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
         there is a dma event associated with the supplied field then a DMA event
         will also be initiated.
         """
+        logger.debug('[%s] event %d = %s', self.devname, channel, value)
+
         field_value = self.isrstatus[channel].vsGetField(field)
         if value and field_value == 0:
             # Set the ISR status flag
@@ -628,6 +632,8 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
         there is a dma event associated with the supplied field then a DMA event
         will also be initiated.
         """
+        logger.debug('[%s] event %s[%d] = %s', self.devname, event, channel, value)
+
         # Check if the specified value is set in the target register or not
         reg = self.registers.vsGetField(self.isrstatus[event][channel])
         status = reg.vsGetValue()
@@ -784,8 +790,7 @@ class ExternalIOPeripheral(MMIOPeripheral):
             else:
                 # If the host IP address is empty default to localhost
                 if self._config['host'] is None:
-                    host = 'localhost'
-                    self._server_args = (host, port)
+                    self._server_args = ('localhost', self._config['port'])
                 else:
                     self._server_args = (self._config['host'], self._config['port'])
 

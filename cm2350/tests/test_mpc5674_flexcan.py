@@ -981,7 +981,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
                 expected_ticks = int(self.emu.can[dev].speed * tx_delay * self.emu._systime_scaling) & 0xFFFF
 
                 ts_offset = (mb * FLEXCAN_MBx_SIZE) + 2
-                timestamp = struct.unpack_from('>H', self.emu.can[dev].registers.mb, ts_offset)[0]
+                timestamp = struct.unpack_from('>H', self.emu.can[dev].registers.mb.value, ts_offset)[0]
 
                 self.assertAlmostEqual(timestamp, expected_ticks, delta=margin, msg=testmsg)
 
@@ -1007,7 +1007,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
                             flexcan.FLEXCAN_CODE_TX_INACTIVE, msg=testmsg)
 
                     ts_offset = (mb * FLEXCAN_MBx_SIZE) + 2
-                    timestamp = struct.unpack_from('>H', self.emu.can[dev].registers.mb, ts_offset)[0]
+                    timestamp = struct.unpack_from('>H', self.emu.can[dev].registers.mb.value, ts_offset)[0]
                     self.assertEqual(timestamp, 0, msg=testmsg)
                     ts_addr = baseaddr + FLEXCAN_MB_OFFSET + ts_offset
                     self.assertEqual(self.emu.readMemValue(ts_addr, 2), 0, msg=testmsg)
@@ -1119,7 +1119,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
                 expected_ticks = int(self.emu.can[dev].speed * rx_delay * self.emu._systime_scaling) & 0xFFFF
 
                 ts_offset = (mb * FLEXCAN_MBx_SIZE) + 2
-                timestamp = struct.unpack_from('>H', self.emu.can[dev].registers.mb, ts_offset)[0]
+                timestamp = struct.unpack_from('>H', self.emu.can[dev].registers.mb.value, ts_offset)[0]
                 self.assertAlmostEqual(timestamp, expected_ticks, delta=margin, msg=testmsg)
 
                 last_mb = mb
@@ -1622,7 +1622,7 @@ class MPC5674_FlexCAN_RealIO(MPC5674_Test):
             # Verify the received message data (this should match the message
             # that was transmitted from MB0
             mb1_idx = 1 * FLEXCAN_MBx_SIZE
-            rcvd_msg = flexcan.CanMsg.from_mb(self.emu.can[dev].registers.mb, offset=mb1_idx)
+            rcvd_msg = flexcan.CanMsg.from_mb(self.emu.can[dev].registers.mb.value, offset=mb1_idx)
             self.assertEqual(rcvd_msg, tx_msg, devname)
 
             # To mimic the way an ISR should work write to EOIR now
@@ -1700,7 +1700,7 @@ class MPC5674_FlexCAN_RealIO(MPC5674_Test):
             # Verify the received message data (this should match the message
             # that was transmitted from the client
             mb1_idx = 1 * FLEXCAN_MBx_SIZE
-            rcvd_msg = flexcan.CanMsg.from_mb(self.emu.can[dev].registers.mb, offset=mb1_idx)
+            rcvd_msg = flexcan.CanMsg.from_mb(self.emu.can[dev].registers.mb.value, offset=mb1_idx)
             self.assertEqual(rcvd_msg, rx_msg, devname)
 
             # To mimic the way an ISR should work write to EOIR now

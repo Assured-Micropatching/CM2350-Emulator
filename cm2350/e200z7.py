@@ -554,7 +554,6 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
             # do normal opcode parsing and execution
             pc = self.getProgramCounter()
             op = self.parseOpcode(pc)
-            print(hex(pc), op)
             # TODO: check MSR for FP (MSR_FP_MASK) and SPE (MSR_SPE_MASK)
             # support here?
             self.executeOpcode(op)

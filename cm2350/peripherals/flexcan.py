@@ -530,8 +530,8 @@ class FLEXCAN_REGISTERS(PeripheralRegisterSet):
         """
         super().reset(emu)
 
-        self.mb[:] = b'\x00' * (FLEXCAN_MAX_MB * FLEXCAN_MBx_SIZE)
-        self.rximr[:] = b'\x00' * (FLEXCAN_MAX_MB * FLEXCAN_RXIMRx_SIZE)
+        self.mb.vsSetValue(b'\x00' * (FLEXCAN_MAX_MB * FLEXCAN_MBx_SIZE))
+        self.rximr.vsSetValue(b'\x00' * (FLEXCAN_MAX_MB * FLEXCAN_RXIMRx_SIZE))
 
 
 class FlexCAN(ExternalIOPeripheral):
@@ -604,7 +604,7 @@ class FlexCAN(ExternalIOPeripheral):
         self.registers.vsAddParseCallback('iflag1', self.iflag1Update)
 
         # Handle writes to the mailbox registers
-        self.registers.vsAddParseCallback('by_idx_mb', self.mbUpdate)
+        self.registers.mb.vsAddParseCallback('by_idx', self.mbUpdate)
 
     def _getPeriphReg(self, offset, size):
         """
@@ -875,7 +875,7 @@ class FlexCAN(ExternalIOPeripheral):
                 msg = self._rx_fifo.pop(1)
                 self.normalRx(0, msg)
 
-    def mbUpdate(self, thing, idx, size):
+    def mbUpdate(self, thing, idx, size, **kwargs):
         """
         Processes all write updates to the MB memory region. When the CODE
         offset is updated, the following actions will be performed depending on
@@ -928,19 +928,19 @@ class FlexCAN(ExternalIOPeripheral):
         # Set the interrupt flag for this mailbox
         if mb == 0 and self.registers.mcr.fen:
             # Use the timestamp for when the message was received by the RxFIFO
-            msg.into_mb(self.registers.mb, offset=idx, code=0, timestamp=msg.timestamp)
+            msg.into_mb(self.registers.mb.value, offset=idx, code=0, timestamp=msg.timestamp)
             self.event('msg', 5, FLEXCAN_RxFIFO_MSG_AVAIL_MASK)
 
         elif mb < 32:
             # Set the code to indicate that a message has been received (this
             # isn't done for the RxFIFO received messages)
-            msg.into_mb(self.registers.mb, offset=idx, code=FLEXCAN_CODE_RX_FULL, timestamp=self._timer.get())
+            msg.into_mb(self.registers.mb.value, offset=idx, code=FLEXCAN_CODE_RX_FULL, timestamp=self._timer.get())
             self.event('msg', mb, FLEXCAN_IFLAG1_MASK[mb])
 
         else:
             # Set the code to indicate that a message has been received (this
             # isn't done for the RxFIFO received messages)
-            msg.into_mb(self.registers.mb, offset=idx, code=FLEXCAN_CODE_RX_FULL, timestamp=self._timer.get())
+            msg.into_mb(self.registers.mb.value, offset=idx, code=FLEXCAN_CODE_RX_FULL, timestamp=self._timer.get())
 
             self.event('msg', mb, FLEXCAN_IFLAG2_MASK[mb])
 
@@ -976,7 +976,7 @@ class FlexCAN(ExternalIOPeripheral):
 
         # create the object used for transmission
         idx = mb * FLEXCAN_MBx_SIZE
-        msg = CanMsg.from_mb(self.registers.mb, offset=idx)
+        msg = CanMsg.from_mb(self.registers.mb.value, offset=idx)
         code = self.getMBCode(mb)
 
         if code == FLEXCAN_CODE_TX_ACTIVE:
@@ -1016,7 +1016,7 @@ class FlexCAN(ExternalIOPeripheral):
         if self.mode == FLEXCAN_MODE.NORMAL:
             # Write the value of the TIMER register into the timer field of the
             # mailbox. The timer field starts at offset 2 and is 2 bytes long.
-            struct.pack_into('>H', self.registers.mb, idx+2, self._timer.get())
+            struct.pack_into('>H', self.registers.mb.value, idx+2, self._timer.get())
             self.transmit(msg)
 
             # Set the interrupt flag for this mailbox
@@ -1102,7 +1102,7 @@ class FlexCAN(ExternalIOPeripheral):
         ext_mask = mask_val & FLEXCAN_ID_MASK
 
         # the message ID starts at offset 4 and is 4 bytes long
-        ext_filt = e_bits.parsebytes(self.registers.mb, idx+4, 4, bigend=self.emu.getEndian())
+        ext_filt = self.registers.mb.parsebytes(idx+4, 4, bigend=self.emu.getEndian())
         ext_filt &= FLEXCAN_ID_MASK & ext_mask
         self._rtr_filters[1][mb] = ext_mask, ext_filt
 
@@ -1140,8 +1140,7 @@ class FlexCAN(ExternalIOPeripheral):
         #   PRI | 11-bit | 29-bit
         #   DATA0    ...     DATA3
         #   DATA4    ...     DATA7
-        #
-        ext_filt = e_bits.parsebytes(self.registers.mb, idx+4, 4, bigend=self.emu.getEndian())
+        ext_filt = self.registers.mb.parsebytes(idx+4, 4, bigend=self.emu.getEndian())
         # Don't forget to mask out the bits that we care about
         ext_filt &= FLEXCAN_ID_MASK & ext_mask
         self._rx_filters[1][mb] = ext_mask, ext_filt
@@ -1207,7 +1206,7 @@ class FlexCAN(ExternalIOPeripheral):
                     FLEXCAN_RxFIFO_FILTER_ID_SHIFTS[mode]))
 
             # There are 8 filters stored in the MB memory in MB6 and MB7
-            filters = struct.unpack_from('>8I', self.registers.mb, offset=6*FLEXCAN_MBx_SIZE)
+            filters = struct.unpack_from('>8I', self.registers.mb.value, offset=6*FLEXCAN_MBx_SIZE)
             for mb in range(8):
                 filt_val = filters[mb]
                 mask_val = self.getMaskForMB(mb)

@@ -658,7 +658,7 @@ class eQADC(ExternalIOPeripheral):
         # accessed and programmed
         self.adc = (ADC(self, 'ADC0'), ADC(self, 'ADC1'))
 
-        self.registers.vsAddParseCallback('by_idx_cfcr', self.cfcrUpdate)
+        self.registers.cfcr.vsAddParseCallback('by_idx', self.cfcrUpdate)
 
     def reset(self, emu):
         super().reset(emu)
@@ -756,7 +756,7 @@ class eQADC(ExternalIOPeripheral):
         # Return an empty bytes value to indicate that all data has been handled
         return b''
 
-    def cfcrUpdate(self, thing, idx, size):
+    def cfcrUpdate(self, thing, idx, size, **kwargs):
         # If the SSE flag is set update the SSS status indicator in the FISRx
         # register
         if self.registers.cfcr[idx].sse:

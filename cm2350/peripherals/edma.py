@@ -519,8 +519,8 @@ class eDMA(MMIOPeripheral):
         # Callbacks for registers
         self.registers.vsAddParseCallback('mcr', self.mcrUpdate)
         self.registers.vsAddParseCallback('esr', self.esrUpdate)
-        self.registers.vsAddParseCallback('by_idx_cpr', self.cprUpdate)
-        self.registers.vsAddParseCallback('by_idx_tcd', self.tcdUpdate)
+        self.registers.cpr.vsAddParseCallback('by_idx', self.cprUpdate)
+        self.registers.tcd.vsAddParseCallback('by_idx', self.tcdUpdate)
 
     def reset(self, emu):
         super().reset(emu)
@@ -749,7 +749,7 @@ class eDMA(MMIOPeripheral):
                 self.dae == 1 or self.doe == 1 or self.nce == 1 or \
                 self.sge == 1 or self.sbe == 1 or self.dbe == 1
 
-    def cprUpdate(self, thing, idx, size):
+    def cprUpdate(self, thing, idx, size, **kwargs):
         """
         Check for any global configuration errors:
             - channel priority configuration
@@ -767,15 +767,15 @@ class eDMA(MMIOPeripheral):
         if self.registers.cpr[idx].dpa:
             raise NotImplementedError('setting CPR[%d].DPA not yet supported'  % idx)
 
-    def tcdUpdate(self, thing, idx, size):
+    def tcdUpdate(self, thing, idx, foffset, size):
         """
         Processes all write updates to the TCD memory region. When the START
         field of the status is updated initiate a data transfer.
         """
         # Figure out which part of the TCD was just modified
-        field_offset = idx % EDMA_TCDx_SIZE
+        channel = idx
 
-        if EDMA_TCD_STATUS_OFF in range(field_offset, field_offset+size):
+        if EDMA_TCD_STATUS_OFF in range(foffset, foffset+size):
             channel = idx >> EDMA_TCDx_SIZE
 
             # If the DONE bit is set the E_SG and MAJOR.E_LINK bits must be 0

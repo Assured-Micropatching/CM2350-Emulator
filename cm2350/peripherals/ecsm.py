@@ -354,16 +354,11 @@ class ECSM(MMIOPeripheral):
         self._fr1nci = None
 
     def init(self, emu):
-        # Do the normal MMIOPeripheral things, except for calling reset()
-        logger.debug('init: %s module', self.devname)
-        self.emu = emu
+        super().init(emu)
 
-        # Normally a module's init function calls it's reset function.  In this
-        # case init is different so we can set the MRSR[POR] bit accurately
-        self.registers.reset(self.emu)
-
-        # MRSR[POR] should be 1 after initial power on
+        # MRSR[POR] should be 1 and MRSR[DIR] should be 0 after initial power on
         self.registers.mrsr.vsOverrideValue('por', 1)
+        self.registers.mrsr.vsOverrideValue('dir', 0)
 
     def reset(self, emu):
         super().reset(emu)

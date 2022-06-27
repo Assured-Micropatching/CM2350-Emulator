@@ -111,7 +111,6 @@ class e200INTC:
             logger.warning('not handling exception: %r', exception)
             return
 
-        raise Exception(exception)
         logger.debug('queuing exception: %r', exception)
         self.intqs[exception.prio].put(exception)
         self.exc_count += 1

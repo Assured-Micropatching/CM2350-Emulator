@@ -10,6 +10,24 @@ MMIO_LAST_REF = MMIO_BYTES_REF
 
 
 class ComplexMemoryMap(e_mem.MemoryObject):
+    def addMemoryMap(self, va, perms, fname, bytez, align=None):
+        '''
+        Add a memory map to this object...
+        Changes the data (bytez) to be a bytearray first to allow for in-place
+        modification of the memory map contents.
+        '''
+        if align:
+            curlen = len(bytez)
+            newlen = e_bits.align(curlen, align)
+            delta = newlen - curlen
+            bytez += b'\x00' * delta
+
+        msize = len(bytez)
+        mmap = (va, msize, perms, fname)
+        hlpr = [va, va+msize, mmap, bytearray(bytez)]
+        self._map_defs.append(hlpr)
+        return msize
+
     def addMMIO(self, va, msize, fname, mmio_read, mmio_write, mmio_bytes=None, mmio_perm=e_mem.MM_READ_WRITE):
         '''
         Add a MMIO map to this object...
@@ -53,7 +71,7 @@ class ComplexMemoryMap(e_mem.MemoryObject):
                 else:
                     # Standard byte-backed memory segments are assumed to allow
                     # 1-byte aligned memory access, so don't need checked
-                    mapdef[3] = mbytes[:offset] + bytez + mbytes[offset+len(bytez):]
+                    mbytes[offset:offset+len(bytez)] = bytez
                 return
 
         raise envi.SegmentationViolation(va)

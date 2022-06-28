@@ -93,7 +93,6 @@ class v_bits(vstruct.bitfield.v_bits):
             width (int): bit width of field
             value (int): default value
         """
-        self._vs_mask = e_bits.b_masks[width]
 
         # To mimic the __len__ behavior of the v_number class translate the
         # _vs_bitwidth into the number of bytes wide this object is.  This
@@ -101,9 +100,17 @@ class v_bits(vstruct.bitfield.v_bits):
         # round up to the nearest byte so will not produced correct packed
         # VArray behavior if the size is not a multiple of 8, but that should be
         # ok because this shouldn't be necessary very often.
-        self._vs_size = (width + 7) // 8
+
+        # Initialize _vs_size and _vs_mask so they exists
+        object.__setattr__(self, '_vs_size', (width + 7) // 8)
+        object.__setattr__(self, '_vs_mask', e_bits.b_masks[width])
 
         super().__init__(width)
+
+        # Set again because the vstruct.bitfield.v_bits initializer sets the
+        # wrong values
+        self._vs_size = (width + 7) // 8
+        self._vs_mask = e_bits.b_masks[width]
 
         self._vs_startbyte = None
         self._vs_startbit = None
@@ -183,11 +190,11 @@ class v_sbits(v_bits):
     This has to inherit from the v_bits class instead of v_snumber because the
     VBitField class specifically looks for v_bits when calculating field sizes.
     """
-    __slots__ = tuple(set(v_bits.__slots__ + ('_vs_mask',)))
+    __slots__ = tuple(set(v_bits.__slots__ + ('_vs_smask',)))
 
     def __init__(self, width, value=0, bigend=None):
         # Set a sign mask to make it easy to identify negative values
-        self._vs_mask = 2**(width-1)
+        self._vs_smask = 2**(width-1)
 
         super().__init__(width, value, bigend)
 
@@ -196,7 +203,7 @@ class v_sbits(v_bits):
         Helper function to return a properly converted signed integer based on
         this field's bitwidth.
         """
-        if value & self._vs_mask:
+        if value & self._vs_smask:
             return -((~value + 1) & self._vs_mask)
         else:
             return value & self._vs_mask
@@ -797,7 +804,7 @@ class PeriphRegister(VBitField):
             total_bits += value._vs_bitwidth
 
         # Verify the size is up to date now also
-        self._vs_size =  (total_bits + 7) // 8
+        self._vs_size = (total_bits + 7) // 8
 
         # Now update the emit format
         self._vs_fmt = vstruct.primitives.num_fmts.get((self._vs_bigend, self._vs_size))
@@ -1417,7 +1424,7 @@ class BitFieldSPR(PeriphRegister):
     register "pcb" callbacks to specific SPR bits such as the PowerPC e200z7
     HID0[TBEN] field.
     """
-    __slots__ = tuple(set(PeriphRegister.__slots__ + ('_reg', '_vs_length', '_fmt')))
+    __slots__ = tuple(set(PeriphRegister.__slots__ + ('_reg', '_vs_size', '_fmt')))
 
     def __init__(self, spridx, emu):
         """

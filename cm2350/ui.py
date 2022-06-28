@@ -354,10 +354,7 @@ class TestEmulator:
     def showPriRegisters(self, snapshot=SNAP_NORM):
         emu = self.emu
         print("\nRegisters:")
-        reggrps = emu.vw.arch.archGetRegisterGroups()
-        for name, gen_regs in reggrps:
-            if name == 'general':
-                break
+        gen_regs = emu.vw.arch.archGetRegisterGroups()['general']
 
         reg_table, meta_regs, PC_idx, SP_idx, reg_vals = emu.getRegisterInfo()
         reg_dict = { reg_table[i][0] : (reg_table[i][1], reg_vals[i]) for i in range(len(reg_table)) }

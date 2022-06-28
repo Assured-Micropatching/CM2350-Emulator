@@ -5,6 +5,8 @@ from ..ppc_vstructs import *
 from ..ppc_peripherals import *
 from ..ppc_xbar import *
 
+import envi.bits as e_bits
+
 __all__  = [
     'eDMA',
 ]
@@ -610,7 +612,7 @@ class eDMA(MMIOPeripheral):
             - SSBR:  set tcd[chan].start
             - CDSBR: clear tcd[chan].done
         """
-        if offset in EDMA_WRITE_ONLY_CONVENIENCE_REG_OFFSETS:
+        if offset in self._convenience_handlers:
             # The convenience registers should always read 0 and are all 1 byte
             # wide.
             return b'\x00'
@@ -641,39 +643,39 @@ class eDMA(MMIOPeripheral):
 
     def setERQR(self, channel):
         if channel >= EDMA_B_NUM_CHAN:
-            self.registers.erqrh.value |= EDMA_INT_MASKS[channel]
+            self.registers.erqrh |= EDMA_INT_MASKS[channel]
         else:
-            self.registers.erqrl.value |= EDMA_INT_MASKS[channel]
+            self.registers.erqrl |= EDMA_INT_MASKS[channel]
 
     def clearERQR(self, channel):
         if channel >= EDMA_B_NUM_CHAN:
-            self.registers.erqrh.value &= ~EDMA_INT_MASKS[channel]
+            self.registers.erqrh &= ~EDMA_INT_MASKS[channel]
         else:
-            self.registers.erqrl.value &= ~EDMA_INT_MASKS[channel]
+            self.registers.erqrl &= ~EDMA_INT_MASKS[channel]
 
     def setEEIR(self, channel):
         if channel >= EDMA_B_NUM_CHAN:
-            self.registers.eeirh.value |= EDMA_INT_MASKS[channel]
+            self.registers.eeirh |= EDMA_INT_MASKS[channel]
         else:
-            self.registers.eeirl.value |= EDMA_INT_MASKS[channel]
+            self.registers.eeirl |= EDMA_INT_MASKS[channel]
 
     def clearEEIR(self, channel):
         if channel >= EDMA_B_NUM_CHAN:
-            self.registers.eeirh.value &= ~EDMA_INT_MASKS[channel]
+            self.registers.eeirh &= ~EDMA_INT_MASKS[channel]
         else:
-            self.registers.eeirl.value &= ~EDMA_INT_MASKS[channel]
+            self.registers.eeirl &= ~EDMA_INT_MASKS[channel]
 
     def clearIRQR(self, channel):
         if channel >= EDMA_B_NUM_CHAN:
-            self.registers.irqrh.value &= ~EDMA_INT_MASKS[channel]
+            self.registers.irqrh &= ~EDMA_INT_MASKS[channel]
         else:
-            self.registers.irqrl.value &= ~EDMA_INT_MASKS[channel]
+            self.registers.irqrl &= ~EDMA_INT_MASKS[channel]
 
     def clearER(self, channel):
         if channel >= EDMA_B_NUM_CHAN:
-            self.registers.erh.value &= ~EDMA_INT_MASKS[channel]
+            self.registers.erh &= ~EDMA_INT_MASKS[channel]
         else:
-            self.registers.erl.value &= ~EDMA_INT_MASKS[channel]
+            self.registers.erl &= ~EDMA_INT_MASKS[channel]
 
     def setStart(self, channel):
         self.registers.tcd[channel].start = 1
@@ -683,15 +685,15 @@ class eDMA(MMIOPeripheral):
 
     def setHRS(self, channel):
         if channel >= EDMA_B_NUM_CHAN:
-            self.registers.hrsh.value |= EDMA_INT_MASKS[channel]
+            self.registers.hrsh |= EDMA_INT_MASKS[channel]
         else:
-            self.registers.hrsl.value |= EDMA_INT_MASKS[channel]
+            self.registers.hrsl |= EDMA_INT_MASKS[channel]
 
     def clearHRS(self, channel):
         if channel >= EDMA_B_NUM_CHAN:
-            self.registers.hrsh.value &= ~EDMA_INT_MASKS[channel]
+            self.registers.hrsh &= ~EDMA_INT_MASKS[channel]
         else:
-            self.registers.hrsl.value &= ~EDMA_INT_MASKS[channel]
+            self.registers.hrsl &= ~EDMA_INT_MASKS[channel]
 
     def mcrUpdate(self, thing):
         """
@@ -790,9 +792,9 @@ class eDMA(MMIOPeripheral):
 
     def isChannelEnabled(self, channel):
         if channel >= EDMA_B_NUM_CHAN:
-            return bool(self.registers.erqrh.value | EDMA_INT_MASKS[channel])
+            return bool(self.registers.erqrh | EDMA_INT_MASKS[channel])
         else:
-            return bool(self.registers.erqrl.value | EDMA_INT_MASKS[channel])
+            return bool(self.registers.erqrl | EDMA_INT_MASKS[channel])
 
     def dmaRequest(self, channel):
         """
@@ -962,8 +964,8 @@ class eDMA(MMIOPeripheral):
         config.tcd.active = 1
 
         logger.debug('[%s] 0x%08x[%d] -> 0x%08x[%d]', self.devname,
-                config.tcd.saddr, config.ssize.value,
-                config.tcd.daddr, config.dsize.value)
+                config.tcd.saddr, config.ssize,
+                config.tcd.daddr, config.dsize)
 
         data = bytearray()
         try:

@@ -127,9 +127,10 @@ class ExternalRAMBank:
 
 class EBI(MMIOPeripheral):
     '''
-    This is the External Bus Interface module.  This just provides a access to
-    a valid set of registers.  The configuration of the registers in this
-    peripheral don't impact the available external memory.  That requires the addi
+    This is the External Bus Interface module.  These registers change the base
+    address and size used to access external RAM.  This only affects the valid
+    physical address it does not modify any MMU entries to make external RAM be
+    accessible.
     '''
     def __init__(self, emu, mmio_addr):
         # need to hook a MMIO mmiodev at 0xFFFEC000 of size 0x4000

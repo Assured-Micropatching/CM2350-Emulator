@@ -640,7 +640,7 @@ class VArray(VStruct):
                 _, field, _, foffset = self._getFieldAndIndexByOffset(offset+len(data), size=size-len(data))
 
                 if hasattr(field, 'vsEmitFromOffset'):
-                    data += field.vsEmitFromOffset(foffset, remaining)
+                    data += field.vsEmitFromOffset(foffset, size - len(data))
                 elif not foffset:
                     data += field.vsEmit()
                 else:
@@ -944,7 +944,8 @@ class PeriphRegSubFieldMixin:
         value = 0
         emit_bitwidth = 0
         for fname, field in self.vsGetFields():
-            if field._vs_startbyte == offset and field._vs_startbit != 0:
+            if field._vs_startbyte == offset and field._vs_startbit != 0 and \
+                    emit_bitwidth == 0:
                 raise ValueError('Cannot start emitting data at field %s with non-byte aligned bit position: %d:%d - %d:%d' %
                         (fname, field._vs_startbyte, field._vs_startbit,
                             field._vs_endbyte, field._vs_endbit))
@@ -984,7 +985,8 @@ class PeriphRegSubFieldMixin:
         parse_bitwidth = 0
         fields_to_parse = []
         for fname, field in self.vsGetFields():
-            if field._vs_startbyte == offset and field._vs_startbit != 0:
+            if field._vs_startbyte == offset and field._vs_startbit != 0 and \
+                    parse_bitwidth == 0:
                 raise ValueError('Cannot start parsing data at field %s with non-byte aligned bit position: %d:%d - %d:%d' %
                         (fname, field._vs_startbyte, field._vs_startbit,
                             field._vs_endbyte, field._vs_endbit))
@@ -994,6 +996,9 @@ class PeriphRegSubFieldMixin:
                 fields_to_parse.append((fname, field))
                 parse_bitwidth += field._vs_bitwidth
 
+                if parse_bitwidth >= target_bitwidth:
+                    break
+
         parse_size = (parse_bitwidth + 7) // 8
         fmt = vstruct.primitives.num_fmts.get((self._vs_bigend, parse_size))
         value = struct.unpack_from(fmt, data, data_offset)[0]
@@ -1002,7 +1007,7 @@ class PeriphRegSubFieldMixin:
             field.vsSetValue(value >> field._vs_shift)
             self._vsFireCallbacks(fname)
 
-        return offset + self._vs_size
+        return offset + parse_size
 
 
 class ReadOnlyRegister(PeriphRegister):
@@ -1327,10 +1332,9 @@ class PeripheralRegisterSet(VStruct):
             while len(data) < size:
                 # As long as more data is requested, continue reading it
                 names, field, foffset = self._getFieldByOffset(offset+len(data), size=size-len(data))
-                remaining = size - len(data)
 
                 if hasattr(field, 'vsEmitFromOffset'):
-                    data += field.vsEmitFromOffset(foffset, remaining)
+                    data += field.vsEmitFromOffset(foffset, size - len(data))
                 elif not foffset:
                     data += field.vsEmit()
                 else:

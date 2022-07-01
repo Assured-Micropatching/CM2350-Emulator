@@ -419,6 +419,9 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         parser = argparse.ArgumentParser(prog=exename)
         parser.add_argument('-I', '--init-flash', action='store_true',
                             help='Copy binary flash image to configuration directory (-c)')
+        parser.add_argument('-N', '--no-backup', action='store_true',
+                            help='run without a flash backup file, flash writes will be lost')
+        # TODO: make a "clear" backup instead of just "no" backup?
         parser.add_argument('flash_image', nargs='?',
                             help='Binary flash image to load in the emulator')
 
@@ -690,6 +693,14 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         # If no firmware file is identified print an error now
         if not cfg['fwFilename'] and mode != 'test':
             logger.critical('No flash file provided, unable to load flash image')
+
+        # Lastly, if the --no-backup option was provided, remove the backup file
+        # name from the config for this run
+        if args.no_backup:
+            # Set to an empty string instead of None because otherwise
+            # retreiving this field through project.MPC5674.FLASH.backup throws
+            # an error
+            cfg['backup'] = ''
 
     def reset_ram(self):
         # Clear or initialize SRAM and external RAM

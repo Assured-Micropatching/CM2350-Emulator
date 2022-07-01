@@ -599,7 +599,7 @@ class VArray(VStruct):
     def vsGetFields(self):
         return self.__iter__()
 
-    def _getFieldAndIndexByOffset(self, offset, names=None, size=0):
+    def _getFieldAndIndexByOffset(self, offset, names=None):
         """
         Modification of the standard VStruct vsGetFieldByOffset() function to
         allow for a faster search because the array elements have consistent
@@ -637,7 +637,8 @@ class VArray(VStruct):
         data = bytearray()
         try:
             while len(data) < size:
-                _, field, _, foffset = self._getFieldAndIndexByOffset(offset+len(data), size=size-len(data))
+                names, field, idx, foffset = self._getFieldAndIndexByOffset(offset+len(data))
+                #print(names, field, idx, foffset)
 
                 if hasattr(field, 'vsEmitFromOffset'):
                     data += field.vsEmitFromOffset(foffset, size - len(data))
@@ -664,7 +665,8 @@ class VArray(VStruct):
         written = 0
         try:
             while data_offset < len(data):
-                _, field, idx, foffset = self._getFieldAndIndexByOffset(offset, size=len(data)-data_offset)
+                names, field, idx, foffset = self._getFieldAndIndexByOffset(offset)
+                #print(names, field, idx, foffset)
 
                 if hasattr(field, 'vsParseAtOffset'):
                     ret_offset = field.vsParseAtOffset(foffset, data, data_offset)
@@ -748,7 +750,7 @@ class PeriphRegister(VBitField):
     """
     __slots__ = tuple(set(VBitField.__slots__ +
         ('_vs_defaults', '_vs_elem_size', '_vs_elems', '_vs_bigend', '_vs_size',
-            '_vs_fmt')))
+            '_vs_fmt', '_vs_bitwidth')))
 
     def __init__(self, emu=None, name=None, bigend=None):
         """
@@ -767,6 +769,7 @@ class PeriphRegister(VBitField):
         self._vs_defaults = {}
 
         # Default the size to 0
+        self._vs_bitwidth = 0
         self._vs_size = 0
 
         # Save the endianness so we can update all added fields, VBitField
@@ -804,6 +807,7 @@ class PeriphRegister(VBitField):
             total_bits += value._vs_bitwidth
 
         # Verify the size is up to date now also
+        self._vs_bitwidth = total_bits
         self._vs_size = (total_bits + 7) // 8
 
         # Now update the emit format
@@ -831,11 +835,8 @@ class PeriphRegister(VBitField):
         if self._vs_bigend is not None:
             self._vsUpdateValueEndian(value)
 
-        # Calculate the current ending bit offset
-        bitoff = sum(f._vs_bitwidth for _, f in self.vsGetFields())
-
         # Update this new field's bit position
-        value.vsSetBitPos(bitoff)
+        value.vsSetBitPos(self._vs_bitwidth)
 
         # Now add field
         super().vsAddField(name, value)
@@ -843,15 +844,15 @@ class PeriphRegister(VBitField):
             self._vs_defaults[name] = value.vsGetValue()
 
         # Update the size for this register
-        total_bitwidth = bitoff + value._vs_bitwidth
-        self._vs_size = (total_bitwidth + 7) // 8
+        self._vs_bitwidth += value._vs_bitwidth
+        self._vs_size = (self._vs_bitwidth + 7) // 8
 
         # Now update the emit format
         self._vs_fmt = vstruct.primitives.num_fmts.get((self._vs_bigend, self._vs_size))
 
         # Update all fields with the total bit width of this bitfield
         for fname, field in self.vsGetFields():
-            field.vsSetBitFieldWidth(total_bitwidth)
+            field.vsSetBitFieldWidth(self._vs_bitwidth)
 
     def vsOverrideValue(self, name, value):
         """
@@ -940,27 +941,67 @@ class PeriphRegSubFieldMixin:
         and the normal VStruct.vsEmit() which doesn't require reading all
         fields in a VStruct object at the same time.
         """
+
+        # TODO: Not as fast as finding the right starting offset like
+        #       PeripheralRegisterSet, perhaps we should support a bitoffset
+        #       based lookup?
+
+        # Identify how many bits long the result is expected to be, and how much
+        # to adjust the field shift values based on the starting offset and
+        # target bitwidth
+        start_bitwidth = offset * 8
         target_bitwidth = size * 8
+        end_bitwidth = start_bitwidth + target_bitwidth
+        missing_bits = self._vs_bitwidth - (start_bitwidth + target_bitwidth)
+        #print('emitting', offset, self._vs_bitwidth, start_bitwidth, target_bitwidth, missing_bits)
+
         value = 0
         emit_bitwidth = 0
+        cur_bitwidth = 0
         for fname, field in self.vsGetFields():
-            if field._vs_startbyte == offset and field._vs_startbit != 0 and \
-                    emit_bitwidth == 0:
-                raise ValueError('Cannot start emitting data at field %s with non-byte aligned bit position: %d:%d - %d:%d' %
-                        (fname, field._vs_startbyte, field._vs_startbit,
-                            field._vs_endbyte, field._vs_endbit))
+            # Unfortunately we can't just call field.vsEmit() here because we
+            # need to be able to mesh fields with unaligned start and end
+            # bits. Instead continually add field values into one accumulated
+            # value
+            if start_bitwidth > cur_bitwidth and \
+                    start_bitwidth < cur_bitwidth + field._vs_bitwidth:
+                #print('adding [%d:%d] %s (%d) %d->%d' % (field._vs_startbyte, field._vs_startbit, fname, field.vsGetValue(), field._vs_shift, field._vs_shift - missing_bits))
+                # If the starting bit is in the middle of a field grab only the
+                # relevant bits
+                cut_bits = start_bitwidth - cur_bitwidth
+                width = field._vs_bitwidth - cut_bits
+                mask = e_bits.b_masks[width]
 
-            if field._vs_startbyte >= offset:
-                # Unfortunately we can't just call field.vsEmit() here because
-                # we need to be able to mesh fields with unaligned start and end
-                # bits. Instead continually add field values into one
-                # accumulated value
+                value |= (field.vsGetValue() & mask) << (field._vs_shift - missing_bits)
+                emit_bitwidth += width
 
-                value |= field.vsGetValue() << field._vs_shift
+            elif end_bitwidth > cur_bitwidth and \
+                    end_bitwidth < cur_bitwidth + field._vs_bitwidth:
+                #print('adding [%d:%d] %s (%d) %d->%d' % (field._vs_startbyte, field._vs_startbit, fname, field.vsGetValue(), field._vs_shift, field._vs_shift - missing_bits))
+                # If the ending bit is in the middle of a field grab only the
+                # relevant bits
+                cut_bits = field._vs_bitwidth - (target_bitwidth - emit_bitwidth)
+                width = field._vs_bitwidth - cut_bits
+                mask = e_bits.b_masks[width]
 
+                # The field also needs to be right shifted a few extra bits
+                # depending on how many are being left out of this field
+                value |= ((field.vsGetValue() >> cut_bits) & mask) << (field._vs_shift - missing_bits)
+                emit_bitwidth += width
+
+            elif field._vs_startbyte >= offset:
+                #print('adding [%d:%d] %s (%d) %d->%d' % (field._vs_startbyte, field._vs_startbit, fname, field.vsGetValue(), field._vs_shift, field._vs_shift - missing_bits))
+                # Grab the field value as-is but adjust the shift amount for the
+                # missing bits
+                value |= field.vsGetValue() << (field._vs_shift - missing_bits)
                 emit_bitwidth += field._vs_bitwidth
-                if emit_bitwidth >= target_bitwidth:
-                    break
+
+            #else:
+            #    print('skipping [%d:%d] %s (%d)' % (field._vs_startbyte, field._vs_startbit, fname, field.vsGetValue()))
+
+            cur_bitwidth += field._vs_bitwidth
+            if cur_bitwidth >= end_bitwidth:
+                break
 
         if emit_bitwidth:
             emit_size = (emit_bitwidth + 7) // 8
@@ -978,34 +1019,102 @@ class PeriphRegSubFieldMixin:
         and the normal VStruct.vsParse() which doesn't require writing all
         fields in a VStruct object at the same time.
         """
-        # TODO: Not as fast as finding the right starting offset like
-        #       PeripheralRegisterSet, perhaps we should support a bitoffset
-        #       based lookup?
-        target_bitwidth = (len(data) - data_offset) * 8
-        parse_bitwidth = 0
-        fields_to_parse = []
-        for fname, field in self.vsGetFields():
-            if field._vs_startbyte == offset and field._vs_startbit != 0 and \
-                    parse_bitwidth == 0:
-                raise ValueError('Cannot start parsing data at field %s with non-byte aligned bit position: %d:%d - %d:%d' %
-                        (fname, field._vs_startbyte, field._vs_startbit,
-                            field._vs_endbyte, field._vs_endbit))
-            elif field._vs_startbyte >= offset:
-                # Collect the fields to be parsed because we need to identify
-                # what the correct format conversion is.
-                fields_to_parse.append((fname, field))
-                parse_bitwidth += field._vs_bitwidth
+        # Figure out how much data can be parsed and get a value out so we can
+        # place the numbers into individual fields.
+        avail_data = len(data) - data_offset
+        avail_space = self._vs_size - offset
+        extra_data = max(avail_data - avail_space, 0)
+        parse_size = avail_data - extra_data
 
-                if parse_bitwidth >= target_bitwidth:
-                    break
-
-        parse_size = (parse_bitwidth + 7) // 8
         fmt = vstruct.primitives.num_fmts.get((self._vs_bigend, parse_size))
         value = struct.unpack_from(fmt, data, data_offset)[0]
 
-        for fname, field in fields_to_parse:
-            field.vsSetValue(value >> field._vs_shift)
-            self._vsFireCallbacks(fname)
+        # TODO: Not as fast as finding the right starting offset like
+        #       PeripheralRegisterSet, perhaps we should support a bitoffset
+        #       based lookup?
+
+        # Identify how many bits long the result is expected to be, and how much
+        # to adjust the field shift values based on the starting offset and
+        # target bitwidth
+        start_bitwidth = offset * 8
+        target_bitwidth = (len(data) - data_offset) * 8
+        end_bitwidth = start_bitwidth + target_bitwidth
+        missing_bits = self._vs_bitwidth - (start_bitwidth + target_bitwidth)
+        #print('parsing', offset, self._vs_bitwidth, start_bitwidth, target_bitwidth, missing_bits)
+
+        parse_bitwidth = 0
+        cur_bitwidth = 0
+        for fname, field in self.vsGetFields():
+            # Adjust the expected shift amount for the bits not in the provided
+            # data
+            shift = field._vs_shift - missing_bits
+
+            if start_bitwidth > cur_bitwidth and \
+                    start_bitwidth < cur_bitwidth + field._vs_bitwidth:
+                #print('adding [%d:%d] %s (%d) %d->%d' % (field._vs_startbyte, field._vs_startbit, fname, field.vsGetValue(), field._vs_shift, shift))
+                # If the starting bit is in the middle of a field update only
+                # the correct parts of the target field
+
+                cut_bits = start_bitwidth - cur_bitwidth
+                width = field._vs_bitwidth - cut_bits
+                mask = e_bits.b_masks[width]
+                #print(cut_bits, width, hex(mask))
+
+                # Mask off the bits that will not be changing
+                cur_value = field.vsGetValue() & ~mask
+
+                # grab the relevant bits and shift them into place for the
+                # updated field value
+                field_value = (value >> shift) & mask
+
+                # Combine the old and new parts
+                #print('setting %s 0x%x | 0x%x = 0x%x' % (fname, cur_value, field_value, cur_value | field_value))
+                field.vsSetValue(cur_value | field_value)
+                self._vsFireCallbacks(fname)
+
+                parse_bitwidth += width
+
+            elif end_bitwidth > cur_bitwidth and \
+                    end_bitwidth < cur_bitwidth + field._vs_bitwidth:
+                #print('adding [%d:%d] %s (%d) %d->%d' % (field._vs_startbyte, field._vs_startbit, fname, field.vsGetValue(), field._vs_shift, shift))
+                # If the ending bit is in the middle of a field update only
+                # the correct parts of the target field
+
+                cut_bits = cur_bitwidth + field._vs_bitwidth - end_bitwidth
+                width = field._vs_bitwidth - cut_bits
+                mask = e_bits.b_masks[width] << cut_bits
+                #print(cut_bits, width, hex(mask))
+
+                # Mask off the bits that will not be changing
+                cur_value = field.vsGetValue() & ~mask
+
+                # grab the relevant bits and shift them into place for the
+                # updated field value
+                field_value = (value >> (shift - cut_bits)) & mask
+
+                # Combine the old and new parts
+                #print('setting %s 0x%x | 0x%x = 0x%x' % (fname, field_value, cur_value, field_value | cur_value))
+                field.vsSetValue(field_value | cur_value)
+                self._vsFireCallbacks(fname)
+
+                parse_bitwidth += width
+
+            elif field._vs_startbyte >= offset:
+                #print('adding [%d:%d] %s (%d) %d->%d' % (field._vs_startbyte, field._vs_startbit, fname, field.vsGetValue(), field._vs_shift, field._vs_shift - missing_bits))
+                # Collect the fields to be parsed because we need to identify
+                # what the correct format conversion is.
+
+                #print('setting %s 0x%x' % (fname, (value >> shift) & field._vs_mask,))
+                field.vsSetValue(value >> shift)
+
+                parse_bitwidth += field._vs_bitwidth
+
+            #else:
+            #    print('skipping [%d:%d] %s (%d)' % (field._vs_startbyte, field._vs_startbit, fname, field.vsGetValue()))
+
+            cur_bitwidth += field._vs_bitwidth
+            if cur_bitwidth >= end_bitwidth:
+                break
 
         return offset + parse_size
 
@@ -1277,7 +1386,7 @@ class PeripheralRegisterSet(VStruct):
     # TODO: could speed things up some with direct callback lookups that instead
     # of assigning callback functions to a name-based dictionary
 
-    def _getFieldByOffset(self, offset, names=None, size=0):
+    def _getFieldByOffset(self, offset, names=None):
         """
         Utility used to retrieve the name, index, and field of a field by
         offset.  Searches first in the _vs_field_by_offset array, if not found
@@ -1331,7 +1440,8 @@ class PeripheralRegisterSet(VStruct):
         try:
             while len(data) < size:
                 # As long as more data is requested, continue reading it
-                names, field, foffset = self._getFieldByOffset(offset+len(data), size=size-len(data))
+                names, field, foffset = self._getFieldByOffset(offset+len(data))
+                #print(names, field, foffset)
 
                 if hasattr(field, 'vsEmitFromOffset'):
                     data += field.vsEmitFromOffset(foffset, size - len(data))
@@ -1365,7 +1475,8 @@ class PeripheralRegisterSet(VStruct):
             while data_offset < len(data):
                 # As long as there is data to parse into a structure, find the
                 # next field and parse data into it
-                names, field, foffset = self._getFieldByOffset(offset, size=len(data)-data_offset)
+                names, field, foffset = self._getFieldByOffset(offset)
+                #print(names, field, foffset)
 
                 if hasattr(field, 'vsParseAtOffset'):
                     ret_offset = field.vsParseAtOffset(foffset, data, data_offset)

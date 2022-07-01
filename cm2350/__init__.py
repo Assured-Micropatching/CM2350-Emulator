@@ -3,11 +3,6 @@ import os
 import sys
 import time
 
-path = os.path.dirname(os.path.abspath(__file__))
-internalpath = os.sep.join([os.path.abspath('.'), 'cm2350', 'internal'])
-if internalpath not in sys.path:
-    sys.path.insert(0, internalpath)
-
 import vivisect.cli as v_cli
 import envi.archs.ppc.emu as eape
 

@@ -165,6 +165,7 @@ from .peripherals.ecsm import ECSM
 from .peripherals.xbar import XBAR
 from .peripherals.pbridge import PBRIDGE
 from .peripherals.edma import eDMA
+from .peripherals.etpu2 import ETPU2, ETPU2Device
 
 
 __all__ = [
@@ -442,9 +443,6 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         # The backup file is assumed to be located in the "project directory"
         self.flash = FLASH(self)
 
-        # eTPU2 has a complex memory map like flash
-        #self.tpu = ETPU2(self)
-
         ########################################
 
         self.flash.setAddr(self, FlashDevice.FLASH_MAIN,     0x00000000)
@@ -473,10 +471,14 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         self.siu = SIU(self, 0xC3F90000)
         #self.mios = EMIOS(self, 0xC3FA0000)
         #self.pmc = PMC(self, 0xC3FBC000)
-        #self.tpu.setAddr(self, ETPU2Device.Registers, 0xC3FC0000)
-        #self.tpu.setAddr(self, ETPU2Device.ParamRAM,0xC3FC8000)
-        #self.tpu.setAddr(self, ETPU2Device.ParamRAMMirror, 0xC3FCC000)
-        #self.tpu.setAddr(self, ETPU2Device.CodeRAM, 0xC3FD0000)
+
+        # eTPU2 has a complex memory map similar to flash but has a standard set
+        # of peripheral registers
+        self.tpu = ETPU2(self, 0xC3FC0000)
+        self.tpu.setAddr(self, ETPU2Device.ParamRAM,0xC3FC8000)
+        self.tpu.setAddr(self, ETPU2Device.ParamRAMMirror, 0xC3FCC000)
+        self.tpu.setAddr(self, ETPU2Device.CodeRAM, 0xC3FD0000)
+
         #self.pit = PIT_RTI(self, 0xC3FF0000)
 
         ########################################

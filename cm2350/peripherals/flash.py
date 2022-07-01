@@ -7,7 +7,7 @@ import envi
 import envi.bits as e_bits
 import envi.memory as e_mem
 
-from .. import mmio, e200z7
+from .. import mmio
 from ..ppc_vstructs import *
 from ..intc_exc import MceDataReadBusError, MceWriteBusError
 
@@ -714,11 +714,11 @@ class FlashArray:
             # This shouldn't happen
             raise Exception('Invalid FLASH CONFIG register @ 0x%x: %r' % (va, vst))
 
-        logger.debug("0x%x:  %s[%s] read [%x:%r] (%s)", self.flashdev.emu.getProgramCounter(), self.__class__.__name__, self.name, va, size, val.hex())
+        logger.debug("0x%x:  %s[%s] read  [%x:%r] (%s)", self.flashdev.emu.getProgramCounter(), self.__class__.__name__, self.name, va, size, val.hex())
         return val
 
     def _mmio_write(self, va, offset, bytez):
-        logger.debug("0x%x:  %s[%s] [%x] = %s", self.flashdev.emu.getProgramCounter(), self.__class__.__name__, self.name, va, bytez.hex())
+        logger.debug("0x%x:  %s[%s] write [%x] = %s", self.flashdev.emu.getProgramCounter(), self.__class__.__name__, self.name, va, bytez.hex())
         try:
             vst = self._write_registers[offset//4]
         except IndexError:
@@ -1325,7 +1325,7 @@ class FLASH(mmio.MMIO_DEVICE):
 
     def _flash_read(self, va, offset, size):
         value = self.data[offset:offset+size]
-        #logger.debug("0x%x:  FLASH read [%x:%r] (%s)", self.emu.getProgramCounter(), offset, size, value.hex())
+        #logger.debug("0x%x:  FLASH read  [%x:%r] (%s)", self.emu.getProgramCounter(), offset, size, value.hex())
         return value
 
     def _flash_write(self, va, offset, bytez):
@@ -1346,7 +1346,7 @@ class FLASH(mmio.MMIO_DEVICE):
 
     def _shadow_A_read(self, va, offset, size):
         value = self.A.shadow[offset:offset+size]
-        logger.debug("0x%x:  ShadowFlash[A] read [%x:%r] (%s)", self.emu.getProgramCounter(), va, size, value.hex())
+        logger.debug("0x%x:  ShadowFlash[A] read  [%x:%r] (%s)", self.emu.getProgramCounter(), va, size, value.hex())
         return value
 
     def _shadow_A_write(self, va, offset, bytez):
@@ -1362,7 +1362,7 @@ class FLASH(mmio.MMIO_DEVICE):
 
     def _shadow_B_read(self, va, offset, size):
         value = self.B.shadow[offset:offset+size]
-        logger.debug("0x%x:  ShadowFlash[B] read [%x:%r] (%s)", self.emu.getProgramCounter(), va, size, value.hex())
+        logger.debug("0x%x:  ShadowFlash[B] read  [%x:%r] (%s)", self.emu.getProgramCounter(), va, size, value.hex())
         return value
 
     def _shadow_B_write(self, va, offset, bytez):

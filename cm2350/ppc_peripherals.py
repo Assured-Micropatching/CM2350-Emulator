@@ -341,9 +341,11 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
             src_fields = self.isrevents.keys()
             flag_reg = self.isrflags
 
+        #print('%s initializing sources from %s' % (self.devname, flag_reg))
         for field in src_fields:
             dirs_field = field + '_dirs'
-            if dirs_field in flag_reg:
+            #print(field, dirs_field)
+            if dirs_field in flag_reg._vs_fields:
                 self.dmaevents[field] = dirs_field
             else:
                 # Indicate that there is no corresponding DMA event for this
@@ -474,7 +476,7 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
 
         try:
             value = self._getPeriphReg(offset, size)
-            logger.debug("0x%x:  %s: read [%x:%r] (%s)", self.emu.getProgramCounter(), self.devname, va, size, value.hex())
+            logger.debug("0x%x:  %s: read  [%x:%r] (%s)", self.emu.getProgramCounter(), self.devname, va, size, value.hex())
             return value
 
         except NotImplementedError:

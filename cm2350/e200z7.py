@@ -540,6 +540,12 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         except queue.Empty:
             pass
 
+        # If there are any active DMA transfers, service them now
+        # TODO: Current implementation of this is very slow and adds about
+        # 1.3-ish seconds to the validate/SPI transmit loop?
+        for dma_chan in self.dma:
+            dma_chan.processActiveTransfers()
+
     def stepi(self):
         """
         First see if there are any incoming messages that need to be processed

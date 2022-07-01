@@ -7,6 +7,9 @@ from ..ppc_xbar import *
 
 import envi.bits as e_bits
 
+import logging
+logger = logging.getLogger(__name__)
+
 __all__  = [
     'eDMA',
 ]
@@ -396,36 +399,36 @@ class TCDConfig:
         self.tcd = tcd
 
         try:
-            self.ssize = EDMA_XFER_SIZE(tcd.ssize)
+            self.ssize = EDMA_XFER_SIZE_ALIGNMENT[EDMA_XFER_SIZE(tcd.ssize)]
         except:
             self.ssize = None
 
         try:
-            self.dsize = EDMA_XFER_SIZE(tcd.dsize)
+            self.dsize = EDMA_XFER_SIZE_ALIGNMENT[EDMA_XFER_SIZE(tcd.dsize)]
         except:
             self.dsize = None
 
-        self._get_nbytes()
+        self._get_nbytes(emlm)
         self._get_citer()
 
     def _get_nbytes(self, emlm):
         if emlm == 1:
-            if tcd.nbytes & EDMA_TCD_SMLOE_MASK or \
-                    tcd.nbytes & EDMA_TCD_DMLOE_MASK:
+            if self.tcd.nbytes & EDMA_TCD_SMLOE_MASK or \
+                    self.tcd.nbytes & EDMA_TCD_DMLOE_MASK:
                 # MLOFF is a signed field
-                if tcd.nbytes & EDMA_TCD_MLOFF_SIGN:
-                    self.mloff = -((~(tcd.nbytes & EDMA_TCD_DMLOE_MASK) >> EDMA_TCD_MLOFF_SHIFT) + 1)
+                if self.tcd.nbytes & EDMA_TCD_MLOFF_SIGN:
+                    self.mloff = -((~(self.tcd.nbytes & EDMA_TCD_DMLOE_MASK) >> EDMA_TCD_MLOFF_SHIFT) + 1)
                 else:
-                    self.mloff = (tcd.nbytes & EDMA_TCD_DMLOE_MASK) >> EDMA_TCD_MLOFF_SHIFT
+                    self.mloff = (self.tcd.nbytes & EDMA_TCD_DMLOE_MASK) >> EDMA_TCD_MLOFF_SHIFT
 
-                self.nbytes = tcd.nbytes & EDMA_TCD_MLOFF_NBYTES_MASK
+                self.nbytes = self.tcd.nbytes & EDMA_TCD_MLOFF_NBYTES_MASK
             else:
                 self.mloff = None
-                self.nbytes = tcd.nbytes & EDMA_TCD_NBYTES_MASK
+                self.nbytes = self.tcd.nbytes & EDMA_TCD_NBYTES_MASK
 
-        elif tcd.nbytes != 0:
+        elif self.tcd.nbytes != 0:
             self.mloff = None
-            self.nbytes = nbytes
+            self.nbytes = self.tcd.nbytes
 
         else:
             # If minor loop mapping is not enabled and nbytes has a value of 0
@@ -436,12 +439,12 @@ class TCDConfig:
             self.nbytes = 0x1_0000_0000
 
     def _get_citer(self):
-        if tcd._citer & EDMA_TCD_E_LINK_MASK:
-            self.linkch = (tcd.citer & EDMA_TCD_LINKCH_MASK) >> EDMA_TCD_LINKCH_SHIFT
-            self._citer = tcd.citer & EDMA_TCD_LINKCH_xITER_MASK
+        if self.tcd.citer & EDMA_TCD_E_LINK_MASK:
+            self.linkch = (self.tcd.citer & EDMA_TCD_LINKCH_MASK) >> EDMA_TCD_LINKCH_SHIFT
+            self._citer = self.tcd.citer & EDMA_TCD_LINKCH_xITER_MASK
         else:
             self.linkch = None
-            self._citer = tcd.citer & EDMA_TCD_xITER_MASK
+            self._citer = self.tcd.citer & EDMA_TCD_xITER_MASK
 
     @property
     def citer(self):
@@ -453,7 +456,7 @@ class TCDConfig:
         if self.tcd.citer & EDMA_TCD_E_LINK_MASK:
             self.tcd.citer = (self.tcd.citer & ~EDMA_TCD_LINKCH_xITER_MASK) | value
         else:
-            tcd.citer = value
+            self.tcd.citer = value
 
 
 class eDMA(MMIOPeripheral):
@@ -550,21 +553,29 @@ class eDMA(MMIOPeripheral):
         return [c for _, c in \
                 sorted(((cpr.chpri, c) for c, cpr in self.registers.cpr), reverse=True)]
 
-    def _get_next_channel(self):
+    def addPending(self, config):
+        self._pending[config.channel] = config
+
+    def getPending(self):
         """
         Return the next channel that has a pending transfer (if any)
         """
+        # TODO: add transfers to the pending list in priority order so we don't
+        # have to do these calculations each time, with the current
+        # implementation it adds about 1.3 seconds to each bootloader
+        # application verification/SPI transmit loop (as measured with the
+        # logging timestamps)
 
-        if self.registers.mcr.egra == 0:
+        if self.registers.mcr.erga == 0:
             # fixed group priority
             for group in self._fixed_group_pri:
                 try:
-                    if self.registers.mcr.egca == 0:
+                    if self.registers.mcr.erca == 0:
                         # fixed channel priority
-                        return next(c for c in self._fixed_channel_pri[group] if c in self._pending)
+                        return next(self._pending[c] for c in self._fixed_channel_pri[group] if c in self._pending)
                     else:
                         # round-robin channel priority
-                        return next(c for c in self._rr_channel_pri[group] if c in self._pending)
+                        return next(self._pending[c] for c in self._rr_channel_pri[group] if c in self._pending)
                 except StopIteration:
                     # Try the next group
                     pass
@@ -579,12 +590,12 @@ class eDMA(MMIOPeripheral):
             while self._rr_group_pri and channel is None:
                 group = self._rr_group_pri.pop(0)
                 try:
-                    if self.registers.mcr.egca == 0:
+                    if self.registers.mcr.erca == 0:
                         # fixed channel priority
-                        channel = next(c for c in self._fixed_channel_pri[group] if c in self._pending)
+                        channel = next(self._pending[c] for c in self._fixed_channel_pri[group] if c in self._pending)
                     else:
                         # round-robin channel priority
-                        channel = next(c for c in self._rr_channel_pri[group] if c in self._pending)
+                        channel = next(self._pending[c] for c in self._rr_channel_pri[group] if c in self._pending)
                 except StopIteration:
                     # Try the next group
                     pass
@@ -908,7 +919,7 @@ class eDMA(MMIOPeripheral):
             logger.debug('[%s] ignoring transfer for channel %d: DMA halted',
                     self.devname, channel)
         else:
-            config = verifyChannelConfig(self, channel)
+            config = self.verifyChannelConfig(channel)
             if config is None:
                 logger.debug('[%s] aborting transfer for channel %d: config error',
                         self.devname, channel)
@@ -917,15 +928,14 @@ class eDMA(MMIOPeripheral):
                         self.devname, channel)
 
                 # Save the current active configuration
-                self._pending[channel] = config
+                self.addPending(config)
 
     def processActiveTransfers(self):
         # Get the next transfer to process
         config = self._active
         if config is None:
             # Search for the next highest priority pending channel
-            channel = self._get_next_channel()
-            config = self._pending.get(channel)
+            config = self.getPending()
 
         # If no pending transfer was found, there is nothing to do
         if config is None:
@@ -951,11 +961,11 @@ class eDMA(MMIOPeripheral):
 
             # Check if scatter-gather is configured for this channel, if so
             # overwrite the current channel and re-start it
-            tcd = self.emu.readMemory(config.tcd.dlast_sga, EDMA_TCDx_SIZE)
-            addr = self.baseaddr + EDMA_TCDx_OFFSET + channel * EDMA_TCDx_SIZE
-            self.emu.writeMemory(addr, tcd)
-
-            self.startTransfer(config.channel)
+            if config.tcd.e_sg == 1:
+                tcd = self.emu.readMemory(config.tcd.dlast_sga, EDMA_TCDx_SIZE)
+                addr = self.baseaddr + EDMA_TCDx_OFFSET + channel * EDMA_TCDx_SIZE
+                self.emu.writeMemory(addr, tcd)
+                self.startTransfer(tcd.channel)
 
     def _process_major_loop(self, config):
         # Indicate that this channel is active
@@ -980,6 +990,11 @@ class eDMA(MMIOPeripheral):
             del self._pending[config.channel]
 
             return None
+
+        logger.debug("%s[%d:%d] [%x:%r] -> %s -> [%x:%r]", self.devname,
+                        config.channel, config.citer, config.tcd.saddr,
+                        config.ssize, data.hex(), config.tcd.daddr,
+                        config.dsize)
 
         try:
             for i in range(0, len(data), config.dsize):
@@ -1022,9 +1037,9 @@ class eDMA(MMIOPeripheral):
 
         else:
             # Adjust the source and destination addresses
-            config.tcd.saddr += tcd.slast
-            config.tcd.daddr += tcd.dlast_vga
-            config.tcd.citer = tcd.biter
+            config.tcd.saddr += config.tcd.slast
+            config.tcd.daddr += config.tcd.dlast_sga
+            config.tcd.citer = config.tcd.biter
 
             # Set the done flag
             config.tcd.done = 1

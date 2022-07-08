@@ -24,6 +24,8 @@ import envi.memory as e_mem
 from envi.archs.ppc.regs import REG_MCSR, REG_MSR, REG_TSR, REG_TCR, REG_HID0, REG_HID1, REG_TBU, REG_TB, REG_TBU_WO, REG_TBL_WO
 from .ppc_vstructs import BitFieldSPR, v_const, v_w1c, v_bits
 
+#import visgraph.pathcore as vg_path
+
 from . import emutimers, mmio, ppc_mmu, e200_intc
 from .const import *
 
@@ -240,6 +242,9 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         # class the PPC_e200z7 is designed so that the core vivisect workspace
         # emulator can be removed in the future to improve performance (at the
         # cost of analysis/inspection/live debug capabilities).
+        #
+        # TODO: CLI enabled logread/logwrite functionality?
+        #vimp_ppc_emu.PpcWorkspaceEmulator.__init__(self, vw, nostack=True, funconly=False, logread=True, logwrite=True)
         vimp_ppc_emu.PpcWorkspaceEmulator.__init__(self, vw, nostack=True, funconly=False)
 
         #PpcEmulationTime.__init__(self, 0.1)
@@ -365,6 +370,10 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         '''
         Data Read
         '''
+        #if self.logread:
+        #    rlog = vg_path.getNodeProp(self.curpath, 'readlog')
+        #    rlog.append((self.getProgramCounter(), va, size))
+
         ea = self.mmu.translateDataAddr(va)
         data = mmio.ComplexMemoryMap.readMemory(self, ea, size)
         self._checkReadCallbacks(ppc_xbar.XBAR_MASTER.CORE0, ea, data=data)
@@ -374,6 +383,10 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         '''
         Data Write
         '''
+        #if self.logwrite:
+        #    wlog = vg_path.getNodeProp(self.curpath, 'writelog')
+        #    wlog.append((self.getProgramCounter(), va, bytez))
+
         ea = self.mmu.translateDataAddr(va)
         mmio.ComplexMemoryMap.writeMemory(self, ea, bytez)
         self._checkWriteCallbacks(ppc_xbar.XBAR_MASTER.CORE0, ea, bytez)

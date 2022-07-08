@@ -130,17 +130,21 @@ class EQADC_MODE(enum.IntEnum):
     CONTINUOUS_RISING_EDGE  = 0b1101
     CONTINUOUS_ANY_EDGE     = 0b1110
 
-EQADC_SUPPORTED_MODES = (
-    EQADC_MODE.DISABLE,
-    EQADC_MODE.SINGLE_SW_TRIGGER,
-)
-
 EQADC_SINGLE_SCAN_TRIGGER_MODES = (
     EQADC_MODE.SINGLE_LOW_LEVEL,
     EQADC_MODE.SINGLE_HIGH_LEVEL,
     EQADC_MODE.SINGLE_FALLING_EDGE,
     EQADC_MODE.SINGLE_RISING_EDGE,
     EQADC_MODE.SINGLE_ANY_EDGE,
+)
+
+EQADC_CONTINUOUS_SCAN_TRIGGER_MODES = (
+    EQADC_MODE.CONTINUOUS_SW_TRIGGER,
+    EQADC_MODE.CONTINUOUS_LOW_LEVEL,
+    EQADC_MODE.CONTINUOUS_HIGH_LEVEL,
+    EQADC_MODE.CONTINUOUS_FALLING_EDGE,
+    EQADC_MODE.CONTINUOUS_RISING_EDGE,
+    EQADC_MODE.CONTINUOUS_ANY_EDGE,
 )
 
 # Based on the configured mode of each channel there is a 2-bit CFIFO status
@@ -159,8 +163,10 @@ EQADC_CFS_IDLE_MODES = (EQADC_MODE.DISABLE, EQADC_MODE.SINGLE_SW_TRIGGER,
         EQADC_MODE.SINGLE_LOW_LEVEL, EQADC_MODE.SINGLE_HIGH_LEVEL,
         EQADC_MODE.SINGLE_FALLING_EDGE, EQADC_MODE.SINGLE_RISING_EDGE,
         EQADC_MODE.SINGLE_ANY_EDGE)
+
 EQADC_CFS_WAIT_FOR_TRIGGER_MODES = (EQADC_MODE.CONTINUOUS_SW_TRIGGER,
-        EQADC_MODE.CONTINUOUS_LOW_LEVEL, EQADC_MODE.CONTINUOUS_HIGH_LEVEL, EQADC_MODE.CONTINUOUS_FALLING_EDGE, EQADC_MODE.CONTINUOUS_RISING_EDGE,
+        EQADC_MODE.CONTINUOUS_LOW_LEVEL, EQADC_MODE.CONTINUOUS_HIGH_LEVEL,
+        EQADC_MODE.CONTINUOUS_FALLING_EDGE, EQADC_MODE.CONTINUOUS_RISING_EDGE,
         EQADC_MODE.CONTINUOUS_ANY_EDGE)
 
 # Mapping of interrupt types based on the supporting EQADC peripherals and the
@@ -766,7 +772,7 @@ class eQADC(ExternalIOPeripheral):
         if self.registers.cfcr[idx].cfinv:
             self.registers.cfcr[idx].cfinv = 0
             # reset the CFIFO status
-            self.registers.fisr[idx].vsOverrideValuekj('cfctr', 0)
+            self.registers.fisr[idx].vsOverrideValue('cfctr', 0)
             self.registers.fisr[idx].vsOverrideValue('tnxtptr', 0)
             self.registers.fisr[idx].vsOverrideValue('rfctr', 0)
             self.registers.fisr[idx].vsOverrideValue('popnxtptr', 0)
@@ -793,25 +799,22 @@ class eQADC(ExternalIOPeripheral):
     def _update_cfsr(self, channel, triggered=False):
         mode = self.mode[channel]
         field = EQADC_CFS_FIELDS[channel]
-        if mode in EQADC_CFS_IDLE_MODES:
+        if mode in EQADC_CFS_WAIT_FOR_TRIGGER_MODES:
             self.registers.fisr[channel].vsOverrideValue('sss', 0)
-            self.registers.cfsr.vsOverrideValue(field, EQADC_CFS_MODE.IDLE)
-        elif triggered:
+            self.registers.cfsr.vsOverrideValue(field, EQADC_CFS_MODE.WAITING_FOR_TRIGGER)
+        elif mode in EQADC_CFS_IDLE_MODES and triggered:
             self.registers.fisr[channel].vsOverrideValue('sss', 1)
             self.registers.cfsr.vsOverrideValue(field, EQADC_CFS_MODE.TRIGGERED)
         else:
             self.registers.fisr[channel].vsOverrideValue('sss', 0)
-            self.registers.cfsr.vsOverrideValue(field, EQADC_CFS_MODE.WAITING_FOR_TRIGGER)
+            self.registers.cfsr.vsOverrideValue(field, EQADC_CFS_MODE.IDLE)
 
     def updateMode(self, channel):
         mode = EQADC_MODE(self.registers.cfcr[channel].mode)
 
-        if mode not in EQADC_SUPPORTED_MODES:
-            raise NotImplementedError('[%s] mode %s (%d) not supported' % (self.devname, mode.name, mode))
-
         # NOTE: Continuous or non-software triggered results should be generated
         # based on a periodic timer to mimic how long it takes hardware to
-        # generate an ADC result, for now only the SW triggered results are
+        # generate an ADC result.
 
         if self.mode[channel] != mode:
             self.mode[channel] = mode
@@ -857,26 +860,9 @@ class eQADC(ExternalIOPeripheral):
             self.registers.fisr[channel].vsOverrideValue('tnxtptr', max(fifo_size-1, 0))
             self.event(channel, 'cfff', fifo_size != max_fifo_size)
 
-    def popRFIFO(self, channel):
-        fifo_size = self.registers.fisr[channel].rfctr
-        if fifo_size > 0:
-            # The oldest message is always at index 0
-            data = self.rfifo[channel][:EQADC_RESULT_SIZE]
-            self.rfifo[channel][:-EQADC_RESULT_SIZE] = self.rfifo[channel][EQADC_RESULT_SIZE:]
-
-            # Increment the FISRx[RFCTR] field (FISRx[POPNXTPTR] is always 0)
-            fifo_size -= 1
-            self.registers.fisr[channel].vsOverrideValue('rfctr', fifo_size)
-            self.event(channel, 'rfdf', fifo_size != 0)
-
-        else:
-            data = b'\x00\x00\x00\x00'
-            logger.debug('%s[%d] (%s): No available data, returning 0x%s', self.devname, channel, self.mode[channel], data.hex())
-
-        return data
-
     def popCFIFO(self, channel):
         fifo_size = self.registers.fisr[channel].cfctr
+        data = None
         if fifo_size > 0:
             idx = self.registers.fisr[channel].tnxtptr * EQADC_CMD_SIZE
             data = self.cfifo[channel][idx:idx+EQADC_CMD_SIZE]
@@ -889,19 +875,45 @@ class eQADC(ExternalIOPeripheral):
             # any), so it should be fifo_size - 1
             self.registers.fisr[channel].vsOverrideValue('tnxtptr', max(fifo_size-1, 0))
 
-            # Now that data has been removed from the CFIFO indicate that it
-            # can be filled with more data.
+            # Indicate that the command fifo is no longer full
             self.event(channel, 'cfff', 1)
 
-            return data
+        return data
+
+    def popRFIFO(self, channel):
+        fifo_size = self.registers.fisr[channel].rfctr
+        if fifo_size > 0:
+            # The oldest message is always at index 0
+            data = self.rfifo[channel][:EQADC_RESULT_SIZE]
+            self.rfifo[channel][:-EQADC_RESULT_SIZE] = self.rfifo[channel][EQADC_RESULT_SIZE:]
+
+            # If this channel is in a continuous mode, populate the last entry
+            # in the queue with a new result, otherwise remove a result from the
+            # FIFO
+            if self.mode[channel] in EQADC_CONTINUOUS_SCAN_TRIGGER_MODES:
+                last_result = self.rfifo[channel][-(EQADC_RESULT_SIZE*2):-EQADC_RESULT_SIZE]
+                self.rfifo[channel][-EQADC_RESULT_SIZE:] = last_result
+
+            else:
+                # Increment FISRx[RFCTR] (FISRx[POPNXTPTR] is always 0 in our
+                # emulation)
+                fifo_size -= 1
+                self.registers.fisr[channel].vsOverrideValue('rfctr', fifo_size)
+
+            self.event(channel, 'rfdf', fifo_size != 0)
 
         else:
-            return None
+            # Create a placeholder value to read
+            data = b'\x00' * EQADC_RESULT_SIZE
+            logger.debug('%s[%d] (%s): No available data, returning 0x%s',
+                    self.devname, channel, self.mode[channel], data.hex())
+
+        return data
 
     def pushRFIFO(self, channel, data):
         # Add to the Rx FIFO (if it isn't full or disabled)
         fifo_size = self.registers.fisr[channel].rfctr
-        if fifo_size < EQADC_CFIFO_LEN:
+        if fifo_size < EQADC_RFIFO_LEN:
             # As long as the fifo_size is <= the Rx FIFO max (5) append the data
             # to the Rx FIFO.
             idx = fifo_size * EQADC_RESULT_SIZE
@@ -954,6 +966,15 @@ class eQADC(ExternalIOPeripheral):
 
                     logger.debug('%s: conversion result = 0x%s (cmd=%r, config=0x%x', self.devname, result.hex(), cmd, config)
                     self.pushRFIFO(cmd.tag, result)
+
+                    # TODO: technically "continuous" scans don't stop processing
+                    # when EOQ happens. For now if the mode is continuous and
+                    # the RFIFO is not full, fill it with copies of the last
+                    # result.
+                    if self.mode[channel] in EQADC_CONTINUOUS_SCAN_TRIGGER_MODES and cmd.eoq:
+                        while self.registers.fisr[channel].rfctr < EQADC_RFIFO_LEN:
+                            self.pushRFIFO(cmd.tag, result)
+
                 else:
                     logger.debug('%s: conversion %r result inhibited: 0x%x', self.devname, cmd, config)
             else:

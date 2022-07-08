@@ -165,7 +165,10 @@ from .peripherals.ecsm import ECSM
 from .peripherals.xbar import XBAR
 from .peripherals.pbridge import PBRIDGE
 from .peripherals.edma import eDMA
-from .peripherals.etpu2 import ETPU2, ETPU2Device
+from .peripherals.etpu2 import eTPU2
+from .peripherals.emios200 import eMIOS200
+from .peripherals.esci import eSCI
+from .peripherals.pit import PIT
 
 
 __all__ = [
@@ -235,18 +238,23 @@ class MPC5674_monitor(viv_imp_monitor.AnalysisMonitor):
             self.curfunc = endeip
             self.path.append(endeip)
             self.level += 1
-            gap = '  ' * self.level + str(self.level)
-            print(gap + " ====>> CALL  0x%x -> 0x%x (0x%x, 0x%x, 0x%x, 0x%x, 0x%x)" % (
-                op.va, endeip,
+            print("%s%d ====>> CALL  0x%x -> 0x%x (0x%x, 0x%x, 0x%x, 0x%x, 0x%x)" % (
+                '  '*self.level, self.level, op.va, endeip,
                 emu.getRegister(ppc_regs.REG_R3),
                 emu.getRegister(ppc_regs.REG_R4),
                 emu.getRegister(ppc_regs.REG_R5),
                 emu.getRegister(ppc_regs.REG_R6),
                 emu.getRegister(ppc_regs.REG_R7)))
 
-        elif op.iflags & envi.IF_RET:
-            gap = '  ' * self.level + str(self.level)
-            print(gap + " <<==== RET  0x%x <- 0x%x (0x%x)" % (endeip, op.va, emu.getRegister(ppc_regs.REG_R3)))
+        # If this is a conditional return, only print this information if
+        # the condition was met and the branch taken. The first branch
+        # option returned by getBranches() is the fall-through, so if PC !=
+        # first target
+        elif op.iflags & envi.IF_RET and \
+                ((not op.iflags & envi.IF_COND) or \
+                (op.iflags & envi.IF_COND and op.getBranches()[0][0] != endeip)):
+
+            print("%s%d <<==== RET  0x%x <- 0x%x (0x%x)" % ('  '*self.level, self.level, endeip, op.va, emu.getRegister(ppc_regs.REG_R3)))
             self.level -= 1
             self.path.pop()
             self.curfunc = self.path[-1]
@@ -469,17 +477,10 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         self.flash.setAddr(self, FlashDevice.FLASH_B_CONFIG, 0xC3F8C000)
 
         self.siu = SIU(self, 0xC3F90000)
-        #self.mios = EMIOS(self, 0xC3FA0000)
+        self.mios = eMIOS200(self, 0xC3FA0000)
         #self.pmc = PMC(self, 0xC3FBC000)
-
-        # eTPU2 has a complex memory map similar to flash but has a standard set
-        # of peripheral registers
-        self.tpu = ETPU2(self, 0xC3FC0000)
-        self.tpu.setAddr(self, ETPU2Device.ParamRAM,0xC3FC8000)
-        self.tpu.setAddr(self, ETPU2Device.ParamRAMMirror, 0xC3FCC000)
-        self.tpu.setAddr(self, ETPU2Device.CodeRAM, 0xC3FD0000)
-
-        #self.pit = PIT_RTI(self, 0xC3FF0000)
+        self.tpu = eTPU2(self, 0xC3FC0000)
+        self.pit = PIT(self, 0xC3FF0000)
 
         ########################################
         # PBRIDGE_B
@@ -515,11 +516,11 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
             DSPI('DSPI_C', self, 0xFFF98000),
             DSPI('DSPI_D', self, 0xFFF9C000),
         )
-        #self.sci = (
-        #    ESCI('eSCI_A', self, 0xFFFB0000),
-        #    ESCI('eSCI_B', self, 0xFFFB4000),
-        #    ESCI('eSCI_C', self, 0xFFFB8000),
-        #)
+        self.sci = (
+            eSCI('eSCI_A', self, 0xFFFB0000),
+            eSCI('eSCI_B', self, 0xFFFB4000),
+            eSCI('eSCI_C', self, 0xFFFB8000),
+        )
         self.can = (
             FlexCAN('FlexCAN_A', self, 0xFFFC0000),
             FlexCAN('FlexCAN_B', self, 0xFFFC4000),

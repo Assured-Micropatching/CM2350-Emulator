@@ -241,7 +241,7 @@ class TestEmulator:
         print("since start: %d instructions in %.3f secs: %.3f ops/sec" % \
                 (i, dtime, i/dtime))
 
-    def run(self, maxstep=None, follow=True, showafter=True, runTil=None, pause=True, silent=False, finish=0, tracedict=None, haltonerror=False):
+    def run(self, maxstep=None, follow=True, showafter=True, pause=True, silent=False, finish=0, tracedict=None, haltonerror=False):
         '''
         run() is the core "debugging" functionality for this emulation-helper.  it's goal is to
         provide a single-step interface somewhat like what you might get from a GDB experience.
@@ -321,12 +321,15 @@ class TestEmulator:
                 break
             try:
                 skip = skipop = False
-                i += 1
 
                 pc = emu.getProgramCounter()
-                if pc in (runTil, finish):
+                # If i is 0 don't break yet, this makes handling loops easier
+                # with the same command.
+                if pc == finish and i > 0:
                     print("PC reached 0x%x." % pc)
                     break
+
+                i += 1
 
                 op = emu.parseOpcode(pc)
                 self.op = op    # store it for later in case of post-mortem

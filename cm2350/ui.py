@@ -567,7 +567,7 @@ class TestEmulator:
                         self.dbgprint( " handler for call to (0x%x): %r" % (brva, handler))
                         if handler is not None:
                             handler(emu, op)
-                            skipop = True
+                            skip = True
 
                     # Special post/prehook handling for function call/return for
                     # functions that did not have a special call handler
@@ -614,8 +614,7 @@ class TestEmulator:
             except KeyboardInterrupt:
                 ### pause the emulation
                 emu.halt_time()
-
-                self.printStats(i)
+                print()
                 break
 
             except envi.SegmentationViolation:

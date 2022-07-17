@@ -199,12 +199,12 @@ class MPC5674_monitor(viv_imp_monitor.AnalysisMonitor):
         self.level = {None: 0}
 
     def prehook(self, emu, op, starteip):
-        if op.opcode == ppc_const.INS_MFSPR and op.opers[0].reg not in COMMON_SPRs:
+        if op.opcode == ppc_const.INS_MFSPR and op.opers[0].reg not in self.COMMON_SPRs:
             print('SPR read:  0x%x:   %s (0x%x) = %s (0x%x)', op.va,
                     emu.getRegisterName(op.opers[1].reg), emu.getOperValue(op, 1),
                     emu.getRegisterName(op.opers[0].reg), emu.getOperValue(op, 0))
             #self.spraccess.append((op, emu.getOperValue(op, 0), emu.getOperValue(op, 1)))
-        elif op.opcode == ppc_const.INS_MTSPR and op.opers[0].reg not in COMMON_SPRs:
+        elif op.opcode == ppc_const.INS_MTSPR and op.opers[0].reg not in self.COMMON_SPRs:
             print('SPR write: 0x%x:   %s (0x%x) = %s (0x%x)', op.va,
                     emu.getRegisterName(op.opers[0].reg), emu.getOperValue(op, 0),
                     emu.getRegisterName(op.opers[1].reg), emu.getOperValue(op, 1))
@@ -220,7 +220,10 @@ class MPC5674_monitor(viv_imp_monitor.AnalysisMonitor):
         self.ophist[op.mnem] = self.ophist.get(op.mnem, 0) + 1
 
         # Check if we've entered or exited an interrupt context self.int_context
-        cur_context = emu.mcu_intc.stack.get(0)
+        if emu.mcu_intc.stack:
+            cur_context = emu.mcu_intc.stack[0]
+        else:
+            cur_context = None
         if cur_context != self.int_context:
             self.int_context = cur_context
 

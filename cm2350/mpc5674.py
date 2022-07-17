@@ -178,9 +178,8 @@ __all__ = [
 
 
 ###  DEBUGGING ONLY:  Emulation Monitor
+COMMON_SPRs = (ppc_regs.REG_LR, ppc_regs.REG_XER, ppc_regs.REG_CR, ppc_regs.REG_CTR)
 class MPC5674_monitor(viv_imp_monitor.AnalysisMonitor):
-    COMMON_SPRs = (ppc_regs.REG_LR, ppc_regs.REG_XER, ppc_regs.REG_CR, ppc_regs.REG_CTR)
-
     def __init__(self, vw, fva=0):
         viv_imp_monitor.AnalysisMonitor.__init__(self, vw, fva)
         #self.vas = []
@@ -199,15 +198,15 @@ class MPC5674_monitor(viv_imp_monitor.AnalysisMonitor):
         self.level = {None: 0}
 
     def prehook(self, emu, op, starteip):
-        if op.opcode == ppc_const.INS_MFSPR and op.opers[0].reg not in self.COMMON_SPRs:
-            print('SPR read:  0x%x:   %s (0x%x) = %s (0x%x)', op.va,
-                    emu.getRegisterName(op.opers[1].reg), emu.getOperValue(op, 1),
-                    emu.getRegisterName(op.opers[0].reg), emu.getOperValue(op, 0))
+        if op.opcode == ppc_const.INS_MFSPR and op.opers[1].reg not in COMMON_SPRs:
+            print('SPR read:  0x%x:   %s (0x%x) = %s (0x%x)' % (
+                op.va, emu.getRegisterName(op.opers[0].reg), emu.getOperValue(op, 0),
+                emu.getRegisterName(op.opers[1].reg), emu.getOperValue(op, 1)))
             #self.spraccess.append((op, emu.getOperValue(op, 0), emu.getOperValue(op, 1)))
-        elif op.opcode == ppc_const.INS_MTSPR and op.opers[0].reg not in self.COMMON_SPRs:
-            print('SPR write: 0x%x:   %s (0x%x) = %s (0x%x)', op.va,
-                    emu.getRegisterName(op.opers[0].reg), emu.getOperValue(op, 0),
-                    emu.getRegisterName(op.opers[1].reg), emu.getOperValue(op, 1))
+        elif op.opcode == ppc_const.INS_MTSPR and op.opers[0].reg not in COMMON_SPRs:
+            print('SPR write: 0x%x:   %s (0x%x) = %s (0x%x)' % (
+                op.va, emu.getRegisterName(op.opers[0].reg), emu.getOperValue(op, 0),
+                emu.getRegisterName(op.opers[1].reg), emu.getOperValue(op, 1)))
             #self.spraccess.append((op, emu.getOperValue(op, 0), emu.getOperValue(op, 1)))
 
     def posthook(self, emu, op, endeip):

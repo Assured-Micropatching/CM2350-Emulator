@@ -63,7 +63,7 @@ class INTCException(Exception):
     __msrmask__ = None      # what bits are updated?  Don't affect anything outside this mask
     __maskable__ = True     # Indicating if an exception type is non-maskable by default or not
 
-    def __init__(self, msg=None, prio=None, maskable=None, **kwargs):
+    def __init__(self, msg=None, prio=None, maskable=None, cleanup=None, **kwargs):
         '''
         Initialize the Exception.
         '''
@@ -75,6 +75,9 @@ class INTCException(Exception):
         if maskable is None:
             maskable = self.__maskable__
         self.maskable = maskable
+
+        # optional cleanup function
+        self._cleanup_func = cleanup
 
         # store any add-ins we might want to include.  These may be helpful when setting flags/etc.
         self.kwargs = kwargs
@@ -126,6 +129,14 @@ class INTCException(Exception):
             mcar |= mcar_orval
             emu.setRegister(REG_MCAR, mcar)
 
+    def setCleanup(self, cleanup=None):
+        self._cleanup_func = cleanup
+
+    def doCleanup(self):
+        # If there are any cleanup functions registered, call them
+        if self._cleanup_func is not None:
+            self._cleanup_func()
+
     def __eq__(self, other):
         return (self.__class__ == other.__class__) and \
                 (vars(self) == vars(other))
@@ -134,10 +145,7 @@ class INTCException(Exception):
         return "%r(%r)" % (self.__class__,
                 ', '.join('%s=%s' % (k, hex(v) if isinstance(v, int) else repr(v)) for k, v in vars(self).items()))
 
-### Priority Exceptions (base for priority-based-queuing
 class StandardPrioException(INTCException):
-    __priority__ = INTC_STATE_NONCRIT
-
     # MSR[CE, ME, DE, RI] are not cleared
     __msrbits__ = 0x00000000
     __msrmask__ = 0x0406E034
@@ -149,7 +157,6 @@ class StandardPrioException(INTCException):
         super().setupContext(emu)
 
 class CriticalPrioException(INTCException):
-    __priority__ = INTC_STATE_CRIT
     __msrflag__ = MSR_CE_MASK
 
     # MSR[ME, DE, RI] are not cleared
@@ -176,24 +183,26 @@ class CriticalPrioException(INTCException):
             emu.setRegister(REG_MSR, msr)
 
 class DebugPrioException(INTCException):
-    __priority__ = INTC_STATE_DEBUG
+    __priority__ = INTC_LEVEL.DEBUG
 
 class GuestPrioException(INTCException):
-    __priority__ = INTC_STATE_GUEST
+    __priority__ = INTC_LEVEL.GUEST
 
 class MachineCheckPrioException(INTCException):
-    __priority__ = INTC_STATE_MACHINECHECK
+    __priority__ = INTC_LEVEL.MACHINE_CHECK
 
 class ResetException(INTCException):
-    __priority__ = INTC_STATE_MACHINECHECK
+    __priority__ = INTC_LEVEL.MACHINE_CHECK
     __ivor__ = EXC_RESET
     __maskable__ = False
 
 ### Base Exceptions (related to IVORs)
 class CriticalInputException(CriticalPrioException):
+    __priority__ = INTC_LEVEL.CRITICAL_INPUT
     __ivor__ = EXC_CRITICAL_INPUT
 
 class MachineCheckException(MachineCheckPrioException):
+    __priority__ = INTC_LEVEL.MACHINE_CHECK
     __ivor__ = EXC_MACHINE_CHECK
     __mcsrbits__ = None     # what bits get set in MCSR on setup?
     __mcsrmask__ = None     # what bits are updated?  Don't affect anything outside this mask
@@ -233,6 +242,7 @@ class MachineCheckException(MachineCheckPrioException):
             emu.setRegister(REG_MSR, msr)
 
 class DataStorageException(MachineCheckPrioException):
+    __priority__ = INTC_LEVEL.DATA_STORAGE
     __ivor__ = EXC_DATA_STORAGE
 
     # MSR[CE, ME, DE, RI] are not cleared
@@ -295,6 +305,7 @@ class DataStorageException(MachineCheckPrioException):
             emu.setRegister(REG_MSR, msr)
 
 class InstructionStorageException(MachineCheckPrioException):
+    __priority__ = INTC_LEVEL.INSTR_STORAGE
     __ivor__ = EXC_INSTR_STORAGE
 
     # MSR[CE, ME, DE, RI] are not cleared
@@ -335,6 +346,7 @@ class InstructionStorageException(MachineCheckPrioException):
             emu.setRegister(REG_MSR, msr)
 
 class ExternalException(StandardPrioException):
+    __priority__ = INTC_LEVEL.EXTERNAL_INPUT
     __ivor__ = EXC_EXTERNAL_INPUT
     __msrflag__ = MSR_EE_MASK
 
@@ -353,6 +365,7 @@ class ExternalException(StandardPrioException):
             return False
 
 class AlignmentException(StandardPrioException):
+    __priority__ = INTC_LEVEL.ALIGNMENT
     __ivor__ = EXC_ALIGNMENT
 
     def setupContext(self, emu):
@@ -383,6 +396,7 @@ class AlignmentException(StandardPrioException):
         super().setupContext(emu)
 
 class ProgramException(StandardPrioException):
+    __priority__ = INTC_LEVEL.PROGRAM
     __ivor__ = EXC_PROGRAM
 
     def setupContext(self, emu):
@@ -406,9 +420,11 @@ class ProgramException(StandardPrioException):
         super().setupContext(emu)
 
 class FloatUnavailableException(StandardPrioException):
+    __priority__ = INTC_LEVEL.FPU_UNAVAILABLE
     __ivor__ = EXC_FLOAT_UNAVAILABLE
 
 class SystemCallException(StandardPrioException):
+    __priority__ = INTC_LEVEL.SYSTEM_CALL
     __ivor__ = EXC_SYSTEM_CALL
 
     def setupContext(self, emu):
@@ -428,7 +444,8 @@ class SystemCallException(StandardPrioException):
         super().setupContext(emu)
 
 class APUnavailableException(MachineCheckPrioException):
-    __ivor__ = EXC_AP_UNAVAILABLE
+    __priority__ = INTC_LEVEL.FPU_UNAVAILABLE
+    __ivor__ = EXC_APU_UNAVAILABLE
 
     # MSR[CE, ME, DE, RI] are not cleared
     __msrbits__ = 0x00000000
@@ -451,6 +468,7 @@ class APUnavailableException(MachineCheckPrioException):
             emu.setRegister(REG_MSR, msr)
 
 class DecrementerException(StandardPrioException):
+    __priority__ = INTC_LEVEL.DECREMENTER
     __ivor__ = EXC_DECREMENTER
 
     def setupContext(self, emu):
@@ -464,7 +482,8 @@ class DecrementerException(StandardPrioException):
         INTCException.setupContext(self, emu)
 
 class FixedIntervalTimerException(StandardPrioException):
-    __ivor__ = EXC_FIXED_TIMER_INTERVAL
+    __priority__ = INTC_LEVEL.FIXED_INTERVAL_TIMER
+    __ivor__ = EXC_FIXED_INTERVAL_TIMER
 
     def setupContext(self, emu):
         # Set SRR0 (next instruction) and SRR1 (Current MSR)
@@ -477,9 +496,11 @@ class FixedIntervalTimerException(StandardPrioException):
         INTCException.setupContext(self, emu)
 
 class WatchdogTimerException(CriticalPrioException):
+    __priority__ = INTC_LEVEL.WATCHDOG_TIMER
     __ivor__ = EXC_WATCHDOG_TIMER
 
 class DataTlbException(StandardPrioException):
+    __priority__ = INTC_LEVEL.DATA_TLB_ERROR
     __ivor__ = EXC_DATA_TLB_ERROR
 
     def setupContext(self, emu):
@@ -510,6 +531,7 @@ class DataTlbException(StandardPrioException):
         super().setupContext(emu)
 
 class InstructionTlbException(StandardPrioException):
+    __priority__ = INTC_LEVEL.INSTR_TLB_ERROR
     __ivor__ = EXC_INSTR_TLB_ERROR
 
     def setupContext(self, emu):
@@ -521,6 +543,7 @@ class InstructionTlbException(StandardPrioException):
         super().setupContext(emu)
 
 class DebugException(DebugPrioException):
+    __priority__ = INTC_LEVEL.DEBUG
     __ivor__ = EXC_DEBUG
 
     # MSR[CE, EE, ME, RI] are not cleared
@@ -538,6 +561,7 @@ class DebugException(DebugPrioException):
         # or not
 
 class SpeEfpuUnavailableException(StandardPrioException):
+    __priority__ = INTC_LEVEL.FPU_UNAVAILABLE
     __ivor__ = EXC_SPE_EFPU_UNAVAILABLE
 
     def setupContext(self, emu):
@@ -557,6 +581,7 @@ class SpeEfpuUnavailableException(StandardPrioException):
         super().setupContext(emu)
 
 class EfpuDataException(StandardPrioException):
+    __priority__ = INTC_LEVEL.FPU_UNAVAILABLE
     __ivor__ = EXC_EFPU_DATA
 
     def setupContext(self, emu):
@@ -576,6 +601,7 @@ class EfpuDataException(StandardPrioException):
         super().setupContext(emu)
 
 class EfpuRoundException(StandardPrioException):
+    __priority__ = INTC_LEVEL.SYSTEM_CALL
     __ivor__ = EXC_EFPU_ROUND
 
     def setupContext(self, emu):
@@ -602,6 +628,7 @@ class EfpuRoundException(StandardPrioException):
         INTCException.setupContext(self, emu)
 
 class PerformanceException(StandardPrioException):
+    __priority__ = INTC_LEVEL.PERFORMANCE
     __ivor__ = EXC_PERFORMANCE
 
     def setupContext(self, emu):
@@ -623,42 +650,49 @@ class PerformanceException(StandardPrioException):
 
 
 class DoorbellException(StandardPrioException):
+    __priority__ = INTC_LEVEL.PROCESSOR_DOORBELL
     __ivor__ = EXC_DOORBELL
 
     def setupContext(self, emu):
         raise NotImplementedError()
 
 class DoorbellCritException(StandardPrioException):
+    __priority__ = INTC_LEVEL.PROCESSOR_DOORBELL
     __ivor__ = EXC_DOORBELL_CRITICAL
 
     def setupContext(self, emu):
         raise NotImplementedError()
 
 class GuestDoorbellException(StandardPrioException):
+    __priority__ = INTC_LEVEL.GUEST_DOORBELL
     __ivor__ = EXC_GUEST_DOORBELL
 
     def setupContext(self, emu):
         raise NotImplementedError()
 
 class GuestDoorbellCritException(StandardPrioException):
+    __priority__ = INTC_LEVEL.GUEST_DOORBELL
     __ivor__ = EXC_GUEST_DOORBELL_CRITICAL
 
     def setupContext(self, emu):
         raise NotImplementedError()
 
 class HypercallException(StandardPrioException):
+    __priority__ = INTC_LEVEL.SYSTEM_CALL
     __ivor__ = EXC_HYPERCALL
 
     def setupContext(self, emu):
         raise NotImplementedError()
 
 class HyperPrivException(StandardPrioException):
+    __priority__ = INTC_LEVEL.PROGRAM_PRIV
     __ivor__ = EXC_HYPERPRIV
 
     def setupContext(self, emu):
         raise NotImplementedError()
 
 class LRATException(StandardPrioException):
+    __priority__ = INTC_LEVEL.LRAT_ERROR
     __ivor__ = EXC_LRAT_ERROR
 
     def setupContext(self, emu):

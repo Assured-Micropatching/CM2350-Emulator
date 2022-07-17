@@ -358,9 +358,11 @@ class PpcMMU:
         mas0 = self.emu.getRegister(REG_MAS0)
         esel = (mas0 & MAS0_ESEL_MASK) >> MAS0_ESEL_SHIFT
 
-        logger.debug('MMU: read mapping %d: 0x%08x -> 0x%08x (%s VLE=%d)',
+        logger.debug('MMU: read mapping %d: 0x%08x -> 0x%08x (%s %s %s)',
                 esel, self._tlb[esel].rpn, self._tlb[esel].epn,
-                self._tlb[esel].size(), self._tlb[esel].vle)
+                self._tlb[esel].size(),
+                'VLE' if self._tlb[esel].vle else 'BookE',
+                self._tlb[esel].perm.name)
 
         mas1, mas2, mas3 = self._tlb[esel].read()
 
@@ -382,9 +384,11 @@ class PpcMMU:
 
         self._tlb[esel].write(mas1, mas2, mas3)
 
-        logger.debug('MMU: write mapping %d: 0x%08x -> 0x%08x (%s VLE=%d)',
+        logger.debug('MMU: write mapping %d: 0x%08x -> 0x%08x (%s %s %s)',
                 esel, self._tlb[esel].rpn, self._tlb[esel].epn,
-                self._tlb[esel].size(), self._tlb[esel].vle)
+                self._tlb[esel].size(),
+                'VLE' if self._tlb[esel].vle else 'BookE',
+                self._tlb[esel].perm.name)
 
     def i_tlbsx(self, op):
         '''
@@ -409,8 +413,9 @@ class PpcMMU:
         if entry is not None:
             mas1, mas2, mas3 = entry.read()
 
-            logger.debug('MMU: search found mapping %d: 0x%08x -> 0x%08x (%s VLE=%d)',
-                    entry.esel, entry.rpn, entry.epn, entry.size(), entry.vle)
+            logger.debug('MMU: search found mapping %d: 0x%08x -> 0x%08x (%s %s %s)',
+                    esel, entry.rpn, entry.epn, entry.size(),
+                    'VLE' if entry.vle else 'BookE', entry.perm.name)
 
             # Update MAS0 to indicate which entry this is
             mas0 = (1 << MAS0_TBSEL_SHIFT) | (entry.esel << MAS0_ESEL_SHIFT)
@@ -452,8 +457,9 @@ class PpcMMU:
             matching_entries = [e for e in self._tlb if ea & e.mask == e.epn & e.mask]
 
         for entry in matching_entries:
-            logger.debug('MMU: invalidating mapping %d: 0x%08x -> 0x%08x (%s VLE=%d)',
-                    entry.esel, entry.rpn, entry.epn, entry.size(), entry.vle)
+            logger.debug('MMU: invalidating mapping %d: 0x%08x -> 0x%08x (%s %s %s)',
+                    entry.esel, entry.rpn, entry.epn, entry.size(),
+                    'VLE' if entry.vle else 'BookE', entry.perm.name)
 
             entry.invalidate()
 
@@ -518,9 +524,11 @@ class PpcMMU:
         '''
         self._tlb[esel].config(valid, iprot, tid, ts, tsiz, epn, flags, rpn, user, perm)
 
-        logger.debug('MMU: configured mapping %d: 0x%08x -> 0x%08x (%s VLE=%d)',
+        logger.debug('MMU: configured mapping %d: 0x%08x -> 0x%08x (%s %s %s)',
                 esel, self._tlb[esel].rpn, self._tlb[esel].epn,
-                self._tlb[esel].size(), self._tlb[esel].vle)
+                self._tlb[esel].size(),
+                'VLE' if self._tlb[esel].vle else 'BookE',
+                self._tlb[esel].perm.name)
 
     def tlbMiss(self, va, ts, tid):
         # Per "10.6.5 TLB miss exception update" (e200z759CRM.pdf page 570):

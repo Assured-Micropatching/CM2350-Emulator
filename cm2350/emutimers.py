@@ -73,6 +73,10 @@ class EmuTimer:
         # default values may be
         if freq is not None:
             self.freq = freq
+        elif self.freq is None:
+            # If no frequency was provided when the timer was created or in this
+            # start function, use the current timebase frequency
+            self.freq = self._emutime._systemFreq
 
         if period is not None:
             self.period = period
@@ -156,9 +160,15 @@ class EmuTimer:
 
     def __lt__(self, other):
         '''
-        comparison function so a list of timers can easily be sorted
+        comparison function so a list of timers can easily be sorted. Timers
+        that aren't running get moved to the end of the list.
         '''
-        return self.running() and self.target < other.target
+        if not self.running():
+            return False
+        elif not other.running():
+            return True
+
+        return self.target < other.target
 
     def __eq__(self, other):
         '''
@@ -346,7 +356,10 @@ class EmulationTime:
         The system clock frequency is only required to determine the number of
         clock ticks that have elapsed while the system has been running.
         '''
-        self._systemFreq = freq
+        if self.hid0.sel_tbclk:
+            self._systemFreq = self.fmpll.extal
+        else:
+            self._systemFreq = self.siu.f_periph()
 
     def getSystemFreq(self):
         '''

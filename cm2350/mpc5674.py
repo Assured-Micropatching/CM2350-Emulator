@@ -180,6 +180,8 @@ __all__ = [
 ###  DEBUGGING ONLY:  Emulation Monitor
 from envi.archs.ppc.regs import REG_LR, REG_XER, REG_CR, REG_CTR
 class MPC5674_monitor(viv_imp_monitor.AnalysisMonitor):
+    COMMON_SPRs = (REG_LR, REG_XER, REG_CR, REG_CTR)
+
     def __init__(self, vw, fva=0):
         viv_imp_monitor.AnalysisMonitor.__init__(self, vw, fva)
         self.vas = []
@@ -194,21 +196,17 @@ class MPC5674_monitor(viv_imp_monitor.AnalysisMonitor):
         self.level = 0
 
     def prehook(self, emu, op, starteip):
-        #print("prehook: 0x%x: %r" % (starteip, op))
-        if any(emu.getOperAddr(op, i) == 0x40010214 for i in range(len(op.opers))):
-            repropers = ', '.join('[0x%x] 0x%x' % (emu.getOperAddr(op, i), emu.getOperValue(op, i)) if op.opers[i].isDeref() \
-                    else hex(emu.getOperValue(op, i)) for i in range(len(op.opers)))
-            print("===============0x40010214 accessed!!!===== 0x%x:  %r (%r)" % (op.va, op, repropers))
-            #raw_input("===============0x40010214 accessed!!!===== 0x%x:  %r (%r)" % (op.va, op, repropers))
+        if op.opcode == ppc_const.INS_MFSPR and op.opers[0].reg not in COMMON_SPRs:
+            print('SPR read:  0x%x:   %s (0x%x) = %s (0x%x)', op.va,
+                    emu.getRegisterName(op.opers[1].reg), emu.getOperValue(op, 1),
+                    emu.getRegisterName(op.opers[0].reg), emu.getOperValue(op, 0))
+            self.spraccess.append((op, emu.getOperValue(op, 0), emu.getOperValue(op, 1)))
+        elif op.opcode == ppc_const.INS_MTSPR and op.opers[0].reg not in COMMON_SPRs:
+            print('SPR write: 0x%x:   %s (0x%x) = %s (0x%x)', op.va,
+                    emu.getRegisterName(op.opers[0].reg), emu.getOperValue(op, 0),
+                    emu.getRegisterName(op.opers[1].reg), emu.getOperValue(op, 1))
+            self.spraccess.append((op, emu.getOperValue(op, 0), emu.getOperValue(op, 1)))
 
-    '''
-        if op.iflags & envi.IF_CALL:
-            print("cAll!")
-            self.calls.append((op, emu.getProgramCounter()))
-
-        if op.mnem in (ppc_const.INS_MTSPR, ppc_const.INS_MFSPR):
-            self.spraccess.append(op)
-    '''
     def posthook(self, emu, op, endeip):
         #print("posthook: 0x%x: %r" % (starteip, op))
         # store all opcodes
@@ -250,7 +248,7 @@ class MPC5674_monitor(viv_imp_monitor.AnalysisMonitor):
         # the condition was met and the branch taken. The first branch
         # option returned by getBranches() is the fall-through, so if PC !=
         # first target
-        elif op.iflags & envi.IF_RET and \
+        elif (op.iflags & envi.IF_RET and not op.iflags & ppc_const.IF_RFI) and \
                 ((not op.iflags & envi.IF_COND) or \
                 (op.iflags & envi.IF_COND and op.getBranches()[0][0] != endeip)):
 
@@ -259,16 +257,9 @@ class MPC5674_monitor(viv_imp_monitor.AnalysisMonitor):
             self.path.pop()
             self.curfunc = self.path[-1]
 
-        if op.opcode in (ppc_const.INS_MTSPR, ppc_const.INS_MFSPR):
-            isCommon = False
-            for oper in op.opers:
-                if oper.isReg() and oper.reg in (REG_LR, REG_XER, REG_CR, REG_CTR):
-                    isCommon = True
-            if not isCommon:
-                logger.warning('SPR access: 0x%x: %r   (0x%x, 0x%x)', op.va, op, \
-                        emu.getOperValue(op, 0), \
-                        emu.getOperValue(op, 1))
-                self.spraccess.append((op, emu.getOperValue(op, 0), emu.getOperValue(op, 1)))
+        # If this is an RFI don't affect the path
+        elif op.iflags & ppc_const.IF_RFI:
+            print("%s%d ====== RFI  0x%x <- 0x%x" % ('  '*self.level, self.level, endeip, op.va))
 
     def apicall(self, emu, op, pc, api, argv):
         print("call!")
@@ -305,6 +296,8 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
                     # SRAM size depends on the specific MPC5674 part in use
                     'size': 0,
                     'addr': 0x40000000,
+                    # Indicates how much of the ram is preserved during resets
+                    'standby_size': 0x8000,
                 },
                 'FlexCAN_A': {
                     'host': None,
@@ -373,6 +366,7 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
                 'SRAM': {
                     'size': 'Amount of SRAM available (differs depending on specific MPC5674 version)',
                     'addr': 'Physical address of SRAM',
+                    'standby_size': 'Size of SRAM that is preserved across device resets',
                 },
                 'FlexCAN_A': {
                     'host': 'Host IP address for FlexCAN_A IO server',
@@ -705,27 +699,17 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
             # an error
             cfg['backup'] = ''
 
-    def reset_ram(self):
+    def reset(self):
         # Clear or initialize SRAM and external RAM
         size = self.vw.config.project.MPC5674.SRAM.size
         addr = self.vw.config.project.MPC5674.SRAM.addr
-        if size and addr:
-            for i in range(len(self._map_defs)):
-                mva, mmaxva, mmap, _ = self._map_defs[i]
-                if mva == addr:
-                    logger.debug("reset: clearing 0x%x bytes SRAM at BASE: 0x%x", size, addr)
-                    # Each map entry is a tuple so we must replace the entire
-                    # entry
-                    self._map_defs[i] = (mva, mmaxva, mmap, b'\0' * size)
-                    break
-            else:
-               # The initial SRAM memory block must be created
-                logger.debug("reset: Initializing 0x%x bytes SRAM at BASE: 0x%x", size, addr)
-                self.addMemoryMap(addr, e_mem.MM_RWX, 'SRAM', b'\0' * size)
+        standby_size = self.vw.config.project.MPC5674.SRAM.standby_size
 
-    def reset(self):
-        # Clear RAM
-        self.reset_ram()
+        start = addr + standby_size
+        end = addr + size
+        logger.debug("reset: clearing SRAM 0x%08x - 0x%08x",
+                addr + standby_size, addr + size)
+        self.writeMemory(start, b'\x00' * (end - start))
 
         # Reset the e200z7 core
         self.reset_core()
@@ -785,7 +769,15 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
             self.flash.load_complete()
 
     def init_core(self):
-        self.reset_ram()
+        # Create the initial RAM data (it isn't all cleared out during reset)
+        size = self.vw.config.project.MPC5674.SRAM.size
+        addr = self.vw.config.project.MPC5674.SRAM.addr
+
+        # The initial SRAM memory block must be created
+        logger.debug("reset: Initializing SRAM 0x%08x - 0x%08x",
+                addr, addr + size)
+        self.addMemoryMap(addr, e_mem.MM_RWX, 'SRAM', b'\x00' * size)
+
         e200z7.PPC_e200z7.init_core(self)
 
 

@@ -792,7 +792,6 @@ class TestEmulator:
 
             except KeyboardInterrupt:
                 ### pause the emulation
-                emu.halt()
                 print()
                 break
 
@@ -804,10 +803,11 @@ class TestEmulator:
             except:
                 import sys
                 sys.excepthook(*sys.exc_info())
-                if haltonerror: break
+                if haltonerror:
+                    break
 
+        emu.halt()
         self.printStats(i)
-
 
     def dbgprint(self, *args, **kwargs):
         if self.verbose:

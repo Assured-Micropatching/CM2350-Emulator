@@ -2,6 +2,7 @@ import queue
 import logging
 import threading
 
+import envi.bits as e_bits
 from envi.archs.ppc import regs as ppcregs
 
 from ..ppc_vstructs import *

@@ -1006,7 +1006,21 @@ class PeriphRegSubFieldMixin:
         if emit_bitwidth:
             emit_size = (emit_bitwidth + 7) // 8
             fmt = vstruct.primitives.num_fmts.get((self._vs_bigend, emit_size))
-            return struct.pack(fmt, value)
+            if fmt:
+                return struct.pack(fmt, value)
+            else:
+                # If the format is None pack the number byte-by-byte. This is
+                # slow but this case is really only likely to occur during
+                # debugging or not often.
+                emit_data = bytearray()
+                if self._vs_bigend:
+                    for shift in reversed(range(0, emit_size*8, 8)):
+                        emit_data.append((value >> shift) & 0xFF)
+                else:
+                    for shift in range(0, emit_size*8, 8):
+                        emit_data.append((value >> shift) & 0xFF)
+                return emit_data
+
         else:
             # If the target offset was not found, then this field doesn't have
             # the requested data

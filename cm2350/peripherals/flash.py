@@ -664,6 +664,7 @@ class FlashArray:
         # If the value being written is 0xA1A11111 set the LMLR[LME] bit
         if data == b'\xA1\xA1\x11\x11':
             self.lmlr.vsOverrideValue('lme', 1)
+            logger.debug("%s[%s] low/mid blocks unlocked for writing", self.__class__.__name__, self.name)
         elif self.lmlr.lme == 1:
             # If the LMLR[LME] bit is set then the lock fields can be modified
             self.lmlr.vsParse(data)
@@ -672,6 +673,7 @@ class FlashArray:
         # If the value being written is 0xB2B22222 set the HLR[HBE] bit
         if data == b'\xB2\xB2\x22\x22':
             self.hlr.vsOverrideValue('hbe', 1)
+            logger.debug("%s[%s] high blocks unlocked for writing", self.__class__.__name__, self.name)
         elif self.hlr.hbe == 1:
             # If the HLR[HBE] bit is set then the lock field can be modified
             self.hlr.vsParse(data)
@@ -680,6 +682,7 @@ class FlashArray:
         # If the value being written is 0xC3C33333 set the SLMLR[SLE] bit
         if data == b'\xC3\xC3\x33\x33':
             self.slmlr.vsOverrideValue('sle', 1)
+            logger.debug("%s[%s] shadow blocks unlocked for writing", self.__class__.__name__, self.name)
         elif self.slmlr.sle == 1:
             # If the SLMLR[SLE] bit is set then the lock fields can be modified
             self.slmlr.vsParse(data)
@@ -816,6 +819,8 @@ class FlashArray:
 
             # Ensure that the block has can be modified
             if self.checkBlockWritable(block):
+                logger.debug("%s[%s] programming %s @ 0x%08x (%d bytes)",
+                        self.__class__.__name__, self.name, block.name, offset, len(data))
                 if block.value[0] == FlashBlockType.HIGH:
                     # high blocks are interleaved every 16 bytes. So and write
                     # the data in 16-byte chunks.
@@ -832,12 +837,13 @@ class FlashArray:
                         flash_offset += 16
 
                     self.flashdev.save(device, offset, size*2)
-                else:
-                    if device == FlashDevice.FLASH_MAIN:
-                        self.flashdev.data[offset:offset+size] = data
-                    else:
-                        self.shadow[offset:offset+size] = data
 
+                elif device == FlashDevice.FLASH_MAIN:
+                    self.flashdev.data[offset:offset+size] = data
+                    self.flashdev.save(device, offset, size)
+
+                else:
+                    self.shadow[offset:offset+size] = data
                     self.flashdev.save(device, offset, size)
 
             else:
@@ -861,6 +867,8 @@ class FlashArray:
 
                 # Ensure that the block has can be modified
                 if self.checkBlockWritable(block):
+                    logger.debug("%s[%s] erasing %s (%d bytes)",
+                            self.__class__.__name__, self.name, block.name, size)
 
                     if block.value[0] == FlashBlockType.HIGH:
                         # high blocks are interleaved every 16 bytes. So just
@@ -880,34 +888,65 @@ class FlashArray:
                             flash_offset += 16
 
                         self.flashdev.save(device, offset, size*2)
-                    else:
-                        if device == FlashDevice.FLASH_MAIN:
-                            self.flashdev.data[offset:offset+size] = _genErasedBytes(size)
-                        else:
-                            self.shadow[offset:offset+size] = _genErasedBytes(size)
 
+                    elif device == FlashDevice.FLASH_MAIN:
+                        self.flashdev.data[offset:offset+size] = _genErasedBytes(size)
                         self.flashdev.save(device, offset, size)
+
+                    else:
+                        self.shadow[offset:offset+size] = _genErasedBytes(size)
+                        self.flashdev.save(device, offset, size)
+
                 else:
                     # It isn't clear from the documentation what should happen if a
                     # block wasn't selected?
                     logger.error('[%s]%s flash erase failed, block %s locked',
-                            self.name, device.name, block.name)
+                            self.__class__.__name__, self.name, block.name)
 
             # Regardless of how well things went clear out the saved write
             # information
             self._write_data = None
 
     def write(self, block, offset, bytez):
+        if not self.checkBlockWritable(block):
+            logger.debug('[%s]%s ignoring write to block %s, not writable',
+                    self.__class__.__name__, self.name, block.name)
+            return
+
         # If this is the first write create the buffer holding the data to
         # be written
-        size = self._block_map[block][2]
+        device, block_offset, size = self._block_map[block]
         if self._write_data is None:
+            # If this block is being programmed, copy the current block's data,
+            # and then save the initial data that is being written.  If this
+            # block is being erased then the write is just used to identify
+            # (confirm?) which block is being modified and no data needs to be
+            # saved.
             if self.mcr.pgm:
-                # If this block is being programmed, save the initial data that
-                # is being written.  If this block is being erased then the
-                # write is just used to identify (confirm?) which block is being
-                # modified and no data needs to be saved.
-                self._write_data = (block, bytearray(_genErasedBytes(size)))
+                logger.debug('[%s]%s copying block %s data for programming',
+                        self.__class__.__name__, self.name, block.name)
+
+                if block.value[0] == FlashBlockType.HIGH:
+                    # high blocks are interleaved every 16 bytes. So copy every
+                    # other 16-byte chunk.
+                    #
+                    # TODO: It seems like there should be a better way
+                    if self.device == FlashDevice.FLASH_B_CONFIG:
+                        block_offset |= 0x00000010
+
+                    block_data = bytearray()
+                    for i in range(0, size, 16):
+                        start = flash_offset + i
+                        block_data += self.flashdev.data[start:start+16]
+                        flash_offset += 16
+
+                elif device == FlashDevice.FLASH_MAIN:
+                    block_data = self.flashdev.data[block_offset:block_offset+size]
+
+                else:
+                    block_data = self.shadow[block_offset:block_offset+size]
+
+                self._write_data = (block, block_data)
 
             elif self.mcr.ers:
                 # If the shadow block is selected, set the MCR[PEAS] bit
@@ -926,7 +965,7 @@ class FlashArray:
             # being written.  If this block is being erased then the write is
             # just used to identify (confirm?) which block is being modified and
             # no data needs to be saved.
-            end = offset + size
+            end = offset + len(bytez)
             self._write_data[1][offset:end] = bytez
 
         # TODO: Should an exception be produced if write is attempted and not

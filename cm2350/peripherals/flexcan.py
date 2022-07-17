@@ -1337,7 +1337,7 @@ class FlexCAN(ExternalIOPeripheral):
 
         # CAN bus clocks are typically calculated by breaking a clock into a
         # "time quantum", and the specifying the number of "time quantums"
-        # (which I will label as "tq" because "time quantum sounds stupid) that
+        # (which I will label as "tq" because "time quantum" sounds stupid) that
         # make up the following portions of a single CAN bit:
         # - SYNC: 1 tq
         # - PROPSEG (propagation time): 0 to 7 tq + 1

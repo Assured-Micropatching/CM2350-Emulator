@@ -107,7 +107,7 @@ class PpcEmulationTime(emutimers.EmulationTime):
     # inheritance.
     slots = list(set(emutimers.EmulationTime.slots + ['_tb_offset']))
 
-    def __init__(self, systime_scaling=1.0):
+    def __init__(self, systime_scaling=0.001):
         super().__init__(systime_scaling)
 
         # The time base can be written to which is supposed to reset the point
@@ -332,19 +332,19 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
             self.watchdog.start()
 
             # Trigger the watchdog exception
-            self.emu.queueException(intc_exc.WatchdogTimerException())
+            self.queueException(intc_exc.WatchdogTimerException())
 
         elif self.tcr.wrc:
             # Any value in TCR[WRC] when TSR[ENW] and TSR[WIS] are set causes a
             # reset to happen
-            self.emu.queueException(intc_exc.ResetException())
+            self.queueException(intc_exc.ResetException())
 
     def _mcuFITHandler(self):
         # Indicate that a fixed-interval timer event has occured
         self.tsr.vsOverrideValue('fis', 1)
 
         # Trigger the fixed-interval timer exception
-        self.emu.queueException(intc_exc.FixedIntervalTimerException())
+        self.queueException(intc_exc.FixedIntervalTimerException())
 
     def _mcuDECHandler(self):
         # Indicate that a decrementer event has occured
@@ -352,10 +352,12 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
 
         # If automatic reload is enabled (TCR[ARE]), load DEC from DECAR
         if self.tcr.are:
-            self.setRegister(REG_DEC, self.getRegister(REG_DECAR))
+            value = self.getRegister(REG_DECAR)
+            logger.debug('Reloading DEC from DECAR: 0x%08x', value)
+            self.setRegister(REG_DEC, value)
 
         # Trigger the decrementer exception
-        self.emu.queueException(intc_exc.DecrementerException())
+        self.queueException(intc_exc.DecrementerException())
 
 
     def _startMCUWDT(self):

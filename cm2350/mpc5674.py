@@ -146,7 +146,7 @@ import vivisect.impemu.monitor as viv_imp_monitor
 
 from . import project
 from . import e200z7
-from .intc_exc import AlignmentException, MceWriteBusError, MceDataReadBusError
+from .intc_exc import *
 
 # Peripherals
 from .peripherals.bam import BAM
@@ -178,34 +178,37 @@ __all__ = [
 
 
 ###  DEBUGGING ONLY:  Emulation Monitor
-from envi.archs.ppc.regs import REG_LR, REG_XER, REG_CR, REG_CTR
 class MPC5674_monitor(viv_imp_monitor.AnalysisMonitor):
-    COMMON_SPRs = (REG_LR, REG_XER, REG_CR, REG_CTR)
+    COMMON_SPRs = (ppc_regs.REG_LR, ppc_regs.REG_XER, ppc_regs.REG_CR, ppc_regs.REG_CTR)
 
     def __init__(self, vw, fva=0):
         viv_imp_monitor.AnalysisMonitor.__init__(self, vw, fva)
-        self.vas = []
-        self.ops = []
+        #self.vas = []
+        #self.ops = []
         self.ophist = {}
         self.calls = []
         self.funccalls = {}
-        self.spraccess = []
-        self.curfunc = 0
         self.curfuncdata = {}
-        self.path = [0]
-        self.level = 0
+        #self.spraccess = []
+
+        self.int_context = None
+
+        # All dependant on the current interrupt context
+        self.curfunc = {None: 0}
+        self.path = {None: [0]}
+        self.level = {None: 0}
 
     def prehook(self, emu, op, starteip):
         if op.opcode == ppc_const.INS_MFSPR and op.opers[0].reg not in COMMON_SPRs:
             print('SPR read:  0x%x:   %s (0x%x) = %s (0x%x)', op.va,
                     emu.getRegisterName(op.opers[1].reg), emu.getOperValue(op, 1),
                     emu.getRegisterName(op.opers[0].reg), emu.getOperValue(op, 0))
-            self.spraccess.append((op, emu.getOperValue(op, 0), emu.getOperValue(op, 1)))
+            #self.spraccess.append((op, emu.getOperValue(op, 0), emu.getOperValue(op, 1)))
         elif op.opcode == ppc_const.INS_MTSPR and op.opers[0].reg not in COMMON_SPRs:
             print('SPR write: 0x%x:   %s (0x%x) = %s (0x%x)', op.va,
                     emu.getRegisterName(op.opers[0].reg), emu.getOperValue(op, 0),
                     emu.getRegisterName(op.opers[1].reg), emu.getOperValue(op, 1))
-            self.spraccess.append((op, emu.getOperValue(op, 0), emu.getOperValue(op, 1)))
+            #self.spraccess.append((op, emu.getOperValue(op, 0), emu.getOperValue(op, 1)))
 
     def posthook(self, emu, op, endeip):
         #print("posthook: 0x%x: %r" % (starteip, op))
@@ -213,31 +216,72 @@ class MPC5674_monitor(viv_imp_monitor.AnalysisMonitor):
 
         #self.ops.append(op)
 
+        # track instruction counts
+        self.ophist[op.mnem] = self.ophist.get(op.mnem, 0) + 1
+
+        # Check if we've entered or exited an interrupt context self.int_context
+        cur_context = emu.mcu_intc.stack.get(0)
+        if cur_context != self.int_context:
+            self.int_context = cur_context
+
+            if cur_context is not None:
+                # The first instruction of the interrupt handler is the address
+                # of the instruction that was just executed
+                count = self.funccalls.get(op.va, 0) + 1
+                self.funccalls[op.va] = count
+
+                # Start new context-based entries for this interrupt handler
+                self.curfunc[cur_context] = op.va
+                self.path[cur_context] = [op.va]
+                self.level[cur_context] = 1
+
+                if isinstance(cur_context, MachineCheckException):
+                    xrr0 = emu.getRegister(ppc_regs.REG_MCSRR0)
+                    xrr1 = emu.getRegister(ppc_regs.REG_MCSRR1)
+                    xrr0_name = 'MCSRR0'
+                    xrr1_name = 'MCSRR1'
+                elif isinstance(cur_context, (StandardPrioException, MachineCheckPrioException)):
+                    # standard and non-MCE machine check priority level
+                    # exceptions use SRR0/SRR1
+                    xrr0 = emu.getRegister(ppc_regs.REG_SRR0)
+                    xrr1 = emu.getRegister(ppc_regs.REG_SRR1)
+                    xrr0_name = 'SRR0'
+                    xrr1_name = 'SRR1'
+                elif isinstance(cur_context, CriticalPrioException):
+                    xrr0 = emu.getRegister(ppc_regs.REG_CSRR0)
+                    xrr1 = emu.getRegister(ppc_regs.REG_CSRR1)
+                    xrr0_name = 'CSRR0'
+                    xrr1_name = 'CSRR1'
+                else:
+                    raise Exception('Unknown exception context %s' % repr(cur_context))
+
+                print("%s%d ****** 0x%x  INT  0x%x -> 0x%x (MSR: 0x%x  MCAR: 0x%x  ESR: 0x%x  %s: 0x%x  %s: 0x%" % (
+                    '  '*self.level[self.int_context], self.level[self.int_context],
+                    xrr0, op.va, endeip, emu.getRegister(ppc_regs.REG_MSR),
+                    emu.getRegister(ppc_regs.REG_MCAR), emu.getRegister(ppc_regs.REG_ESR),
+                    xrr0_name, xrr0, xrr1_name, xrr1))
+
         # store opcode in the correct function container
-        cfdata = self.curfuncdata.get(self.curfunc)
+        cfdata = self.curfuncdata.get(self.curfunc[self.int_context])
         if cfdata is None:
             cfdata = {'ops': []}
-            self.curfuncdata[self.curfunc] = cfdata
+            self.curfuncdata[self.curfunc[self.int_context]] = cfdata
 
         if op.va not in cfdata['ops']:
             cfdata['ops'].append(op.va)
 
-        # track instruction counts
-        ophist = self.ophist.get(op.mnem, 0)
-        ophist += 1
-        self.ophist[op.mnem] = ophist
-
         if op.iflags & envi.IF_CALL:
-            self.calls.append((self.curfunc, op.va, endeip))
+            self.calls.append((self.curfunc[self.int_context], op.va, endeip))
 
             count = self.funccalls.get(endeip, 0) + 1
             self.funccalls[endeip] = count
 
-            self.curfunc = endeip
-            self.path.append(endeip)
-            self.level += 1
-            print("%s%d ====>> CALL  0x%x -> 0x%x (0x%x, 0x%x, 0x%x, 0x%x, 0x%x)" % (
-                '  '*self.level, self.level, op.va, endeip,
+            self.curfunc[self.int_context] = endeip
+            self.path[self.int_context].append(endeip)
+            self.level[self.int_context] += 1
+            print("%s%d ====>> CALL 0x%x -> 0x%x (0x%x, 0x%x, 0x%x, 0x%x, 0x%x)" % (
+                '  '*self.level[self.int_context], self.level[self.int_context],
+                op.va, endeip,
                 emu.getRegister(ppc_regs.REG_R3),
                 emu.getRegister(ppc_regs.REG_R4),
                 emu.getRegister(ppc_regs.REG_R5),
@@ -252,14 +296,24 @@ class MPC5674_monitor(viv_imp_monitor.AnalysisMonitor):
                 ((not op.iflags & envi.IF_COND) or \
                 (op.iflags & envi.IF_COND and op.getBranches()[0][0] != endeip)):
 
-            print("%s%d <<==== RET  0x%x <- 0x%x (0x%x)" % ('  '*self.level, self.level, endeip, op.va, emu.getRegister(ppc_regs.REG_R3)))
-            self.level -= 1
-            self.path.pop()
-            self.curfunc = self.path[-1]
+            print("%s%d <<==== RET  0x%x <- 0x%x (0x%x)" % (
+                '  '*self.level[self.int_context], self.level[self.int_context],
+                endeip, op.va,
+                emu.getRegister(ppc_regs.REG_R3)))
 
-        # If this is an RFI don't affect the path
+            self.level[self.int_context] -= 1
+            self.path[self.int_context].pop()
+            self.curfunc[self.int_context] = self.path[self.int_context][-1]
+
         elif op.iflags & ppc_const.IF_RFI:
-            print("%s%d ====== RFI  0x%x <- 0x%x" % ('  '*self.level, self.level, endeip, op.va))
+            print("%s%d ****** 0x%x RFI  0x%x" % (
+                '  '*self.level[self.int_context], self.level[self.int_context],
+                endeip, op.va))
+
+            # Clean up the interrupt context path
+            del self.curfunc[self.int_context]
+            del self.path[self.int_context]
+            del self.level[self.int_context]
 
     def apicall(self, emu, op, pc, api, argv):
         print("call!")

@@ -571,26 +571,34 @@ class TestEmulator:
 
                     # Special post/prehook handling for function call/return for
                     # functions that did not have a special call handler
-                    if follow and not skip and op.iflags & (envi.IF_CALL | envi.IF_RET):
-                        # use the emulator to execute the call
-                        starteip = emu.getProgramCounter()
-                        if hasattr(emu, 'emumon') and emu.emumon is not None:
-                            emu.emumon.prehook(emu, op, starteip)
+                    #if follow and not skip and op.iflags & (envi.IF_CALL | envi.IF_RET):
+                    #    # use the emulator to execute the call
+                    #    starteip = emu.getProgramCounter()
+                    #    if hasattr(emu, 'emumon') and emu.emumon is not None:
+                    #        emu.emumon.prehook(emu, op, starteip)
 
-                        emu.executeOpcode(op)
-                        endeip = emu.getProgramCounter()
-                        i += 1
-                        if hasattr(emu, 'emumon') and emu.emumon is not None:
-                            emu.emumon.posthook(emu, op, endeip)
+                    #    #emu.executeOpcode(op)
+                    #    emu.stepi()
 
-                        self.dbgprint("starteip: 0x%x, endeip: 0x%x  -> %s" % (starteip, endeip, emu.vw.getName(endeip)))
-                        if hasattr(emu, 'curpath'):
-                            vg_path.getNodeProp(emu.curpath, 'valist').append(starteip)
-                        skip = True
+                    #    endeip = emu.getProgramCounter()
+                    #    i += 1
+                    #    if hasattr(emu, 'emumon') and emu.emumon is not None:
+                    #        emu.emumon.posthook(emu, op, endeip)
+
+                    #    self.dbgprint("starteip: 0x%x, endeip: 0x%x  -> %s" % (starteip, endeip, emu.vw.getName(endeip)))
+                    #    if hasattr(emu, 'curpath'):
+                    #        vg_path.getNodeProp(emu.curpath, 'valist').append(starteip)
+                    #    skip = True
 
                 # if not already emulated a call, execute the instruction here...
                 if not skip and not skipop:
+                    #if hasattr(emu, 'emumon') and emu.emumon is not None:
+                    starteip = emu.getProgramCounter()
+                    emu.emumon.prehook(emu, op, starteip)
                     emu.stepi()
+                    i += 1
+                    endeip = emu.getProgramCounter()
+                    emu.emumon.posthook(emu, op, endeip)
 
                     # print the updated latest stuff....
                     if showafter:

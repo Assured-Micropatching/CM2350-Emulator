@@ -226,6 +226,13 @@ class MPC5674_monitor(viv_imp_monitor.AnalysisMonitor):
 
         if cur_context != self.int_context:
             if cur_context not in self.curfunc:
+                # if the current context isn't in the current function set yet,
+                # then this is a new interrupt context.  In this case the
+                # instruction passed into this hook is incorrect.  Get the
+                # actual instruction executed from the emulator
+                interrupted_op = op
+                op = emu._cur_instr[0]
+
                 # Start new context-based entries for this interrupt handler
                 self.curfunc[cur_context] = op.va
                 self.path[cur_context] = [op.va]

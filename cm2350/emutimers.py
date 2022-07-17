@@ -76,7 +76,7 @@ class EmuTimer:
         elif self.freq is None:
             # If no frequency was provided when the timer was created or in this
             # start function, use the current timebase frequency
-            self.freq = self._emutime._systemFreq
+            self.freq = self._emutime.getSystemFreq()
 
         if period is not None:
             self.period = period
@@ -87,7 +87,8 @@ class EmuTimer:
             # at the specified frequency
             duration = self.period / self.freq
             self.target = now + duration
-            logger.debug('[%s] %s timer started: %s @ %s Hz == %s', now, self.name, self.period, self.freq, duration)
+            logger.debug('[%s] %s timer started: %s @ %s Hz == %s',
+                    now, self.name, self.period, self.freq, duration)
         else:
             # If either frequency or period is 0 then ensure that the timer is
             # not running
@@ -366,6 +367,12 @@ class EmulationTime:
         Returns the configured system clock frequency.
         '''
         return self._systemFreq
+
+    def getSystemScaling(self):
+        '''
+        Returns the configured scaling factor for the emulation clock.
+        '''
+        return self._systime_scaling
 
     def systime(self):
         '''

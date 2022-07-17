@@ -556,6 +556,10 @@ class eDMA(MMIOPeripheral):
     def addPending(self, config):
         self._pending[config.channel] = config
 
+        # Because there are pending DMA transfers, ensure that the
+        # "processActiveTransfers" function is queued for extra processing
+        self.emu.extra_processing.put(self.processActiveTransfers)
+
     def getPending(self):
         """
         Return the next channel that has a pending transfer (if any)
@@ -949,7 +953,11 @@ class eDMA(MMIOPeripheral):
                     config.citer != 0 and self.registers.mcr.clm == 1:
                 logger.debug('[%s] re-activating current transfer for current channel %d',
                              self.devname, channel)
+
+                # Requeue this function for future extra processing
                 self._active = config
+                self.emu.extra_processing.put(self.processActiveTransfers)
+
             else:
                 logger.debug('[%s] starting linked transfer %d for current channel %d',
                              self.devname, linkch, channel)

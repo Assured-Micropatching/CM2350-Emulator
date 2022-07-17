@@ -216,7 +216,7 @@ class EBI(MMIOPeripheral):
                 old_start = self.bank_config[bank].addr
                 old_end = old_start + self.bank_config[bank].size
                 logger.debug('%s[%d] removing old memory map 0x%x - 0x%x', self.devname, bank, old_start, old_end)
-                self.emu.delMemoryMap(addr)
+                self.emu.delMemoryMap(old_start)
 
         self.bank_config[bank].update(addr, size, valid)
 

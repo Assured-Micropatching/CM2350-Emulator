@@ -153,8 +153,7 @@ class e200INTC:
                 for callback in self._callbacks.get(type(newexc), []):
                     callback(newexc)
 
-                logger.debug('PC: 0x%08x (%r)', self.emu.getProgramCounter(), newexc)
-                logger.debug('NEWPC: %r', newpc)
+                logger.debug('PC: 0x%08x (%r) NEWPC: 0x%08x', self.emu.getProgramCounter(), newexc, newpc)
                 self.emu.setProgramCounter(newpc)
 
                 # change self.curlvl

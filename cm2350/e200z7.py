@@ -350,15 +350,15 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         # Indicate that a decrementer event has occured
         self.tsr.vsOverrideValue('dis', 1)
 
+        # Trigger the decrementer exception, unless there already is one pending
+        if not self.isExceptionActive(intc_exc.DecrementerException):
+            self.queueException(intc_exc.DecrementerException())
+
         # If automatic reload is enabled (TCR[ARE]), load DEC from DECAR
         if self.tcr.are:
             value = self.getRegister(REG_DECAR)
             logger.debug('Reloading DEC from DECAR: 0x%08x', value)
             self.setRegister(REG_DEC, value)
-
-        # Trigger the decrementer exception
-        self.queueException(intc_exc.DecrementerException())
-
 
     def _startMCUWDT(self):
         # The watchdog period is determined by the TCR[WP] and TCR[WPEXT] values
@@ -379,7 +379,19 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         self.mcu_fit.start(period=e_bits.b_mask[63 - fit_bit])
 
     def _startMCUDEC(self):
-        self.mcu_dec.start(period=self.getRegister(REG_DEC))
+        # If there is a queued or active decrementer exception already, attach a
+        # cleanup function to it to start start the timer again.  The real
+        # processor would just do this immediately but because of variations in
+        # how long it may take to execute the handler we have to do it this way
+        # for now.
+        try:
+            exc = next(self.findPendingException(intc_exc.DecrementerException))
+            # There is an active or pending decremeter exception, attach this
+            # function as a cleanup function.
+            exc.setCleanup(self._startMCUDEC)
+        except StopIteration:
+            # There is no active decrementer exception, so start the timer
+            self.mcu_dec.start(period=self.getRegister(REG_DEC))
 
     def _tcrWIEUpdate(self, tcr):
         if self.tcr.wie and self.systimeRunning():
@@ -764,10 +776,13 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
                 self.queueException(exc)
 
     def queueException(self, exception):
-        '''
-        redirect exceptions to the MCU exception handler
-        '''
         self.mcu_intc.queueException(exception)
+
+    def isExceptionActive(self, exctype):
+        return self.mcu_intc.isExceptionActive(exctype)
+
+    def findPendingException(self, exctype):
+        return self.mcu_intc.findPendingException(exctype)
 
     def dmaRequest(self, request):
         logger.debug('DMA request for %s (%s)', request.name, request.value)

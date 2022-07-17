@@ -107,7 +107,7 @@ class PpcEmulationTime(emutimers.EmulationTime):
     # inheritance.
     slots = list(set(emutimers.EmulationTime.slots + ['_tb_offset']))
 
-    def __init__(self, systime_scaling=0.001):
+    def __init__(self, systime_scaling=0.01):
         super().__init__(systime_scaling)
 
         # The time base can be written to which is supposed to reset the point

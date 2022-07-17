@@ -152,7 +152,7 @@ class e200INTC:
 
         # Indicate if there are any other pending interrupts that can be
         # processed at the current level
-        self.hasInterrupt = self.curlvl > self.pending[0].prio
+        self.hasInterrupt = self.pending and self.curlvl > self.pending[0].prio
 
     def addCallback(self, exception, callback):
         if exception not in self._callbacks_ext:
@@ -205,10 +205,10 @@ class e200INTC:
 
         # Now execute any exception cleanup functions that may be attached to
         # this exception
-        oldexec.doCleanup()
+        oldexc.doCleanup()
 
         # Check if there are any pending exceptions that can be processed
-        self.hasInterrupt = self.curlvl > self.pending[0].prio
+        self.hasInterrupt = self.pending and self.curlvl > self.pending[0].prio
 
     def isExceptionActive(self, exctype):
         return any(isinstance(e, exctype) for e in self.stack) or \

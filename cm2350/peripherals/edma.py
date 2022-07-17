@@ -2,7 +2,7 @@ import enum
 
 from ..intc_src import INTC_EVENT
 from ..ppc_vstructs import *
-from ..ppc_peripherals import *
+from ..ppc_peripherals import PPC_MAX_READ_SIZE, MMIOPeripheral
 from ..ppc_xbar import *
 
 import envi.bits as e_bits
@@ -655,6 +655,29 @@ class eDMA(MMIOPeripheral):
                 handler(chan)
         else:
             super()._setPeriphReg(offset, data)
+
+    def _mmio_read(self, va, offset, size):
+        """
+        Standard MMIOPeripheral._mmio_read() function with the log comments
+        removed to reduce clutter when running in interactive mode and the
+        firmware is idling.
+        """
+        if size > PPC_MAX_READ_SIZE:
+            # Assume that this is not a value being changed by emulated
+            # instructions
+            # TODO: this seems inefficient, but should be good enough for now
+            return self._slow_mmio_read(va, offset, size)
+
+        try:
+            return self._getPeriphReg(offset, size)
+
+        except (MceDataReadBusError, AlignmentException) as exc:
+            # Add in the correct machine state information to this exception
+            exc.kwargs.update({
+                'va': va,
+                'pc': self.emu.getProgramCounter(),
+            })
+            raise exc
 
     def setERQR(self, channel):
         if channel >= EDMA_B_NUM_CHAN:

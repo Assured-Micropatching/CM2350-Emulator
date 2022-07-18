@@ -99,6 +99,12 @@ class TCR(BitFieldSPR):
         self._pad0 = v_bits(13)
 
 
+class MCSR(BitFieldSPR):
+    def __init__(self, emu):
+        super().__init__(REG_MCSR, emu)
+        self.flags = v_w1c(32)
+
+
 class PpcEmulationTime(emutimers.EmulationTime):
     '''
     PowerPC specific emulator time and timer handling.
@@ -267,6 +273,8 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         self.hid0.vsAddParseCallback('tben', self._hid0TBUpdate)
 
         self.hid1 = HID1(self)
+
+        self.mcsr = MCSR(self)
 
         # Create the MMU peripheral and then redirect the TLB instruction
         # handlers to the MMU

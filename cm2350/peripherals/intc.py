@@ -34,10 +34,6 @@ INTC_SSCIR_SRC = (
     INTC_SRC.INTC_SW_7,
 )
 
-# multiply the interrupt source number by this constant to get the hardware
-# vector offset
-INTC_HWVEC_OFFSET_SIZE  = 0x10
-
 # peripheral register offsets
 INTC_MCR_OFFSET         = 0x0000
 INTC_CPR_OFFSET         = 0x0008
@@ -266,7 +262,7 @@ class INTC(MMIOPeripheral):
 
         # Use the current exception's source to calculate INTVEC
         vtba = (self.vtba << INTC_IACKR_VTBA_SHIFT[vtes]) & INTC_IACKR_VTBA_MASK[vtes]
-        intvec = (intsrc * INTC_HWVEC_OFFSET_SIZE) << INTC_IACKR_INTVEC_SHIFT[vtes]
+        intvec = intsrc << INTC_IACKR_INTVEC_SHIFT[vtes]
         self._iackr = vtba | intvec
 
         if self.registers.mcr.hven:

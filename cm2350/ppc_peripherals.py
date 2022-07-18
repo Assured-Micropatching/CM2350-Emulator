@@ -661,7 +661,7 @@ def _recvData(sock):
     data = sock.recv(4)
     if len(data) < 4:
         # If no data is received, assume this is an error and exit
-        logger.info('Incomplete data received %d bytes: %r', len(data), data)
+        logger.debug('Incomplete data received %d bytes: %r', len(data), data)
         raise OSError()
     size = struct.unpack('>I', data)[0]
 
@@ -890,28 +890,7 @@ class ExternalIOPeripheral(MMIOPeripheral):
         """
         Handle all one-time initialization that needs to be done
         """
-        # If analysis-only mode is enabled don't create sockets and attempt to
-        # do network things
-        if self._server_args is not None:
-            # Create the server socket to listen for client connections, this
-            # should persist across emulator resets
-            # TODO: support IPv6 (AF_INET6)?
-            self._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self._server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self._server.bind(self._server_args)
-            self._server.listen(0)
-
-        super().init(emu)
-
-    def reset(self, emu):
-        """
-        Handle reset (and initial power up) of the peripheral
-        """
-        # Ensure that the thread is not currently running, and that the
-        # main-to-IO thread socket pair has been cleaned up
-        self.stop()
-
-        # (re-)create the socket pair that will be used for the peripheral
+        # create the socket pair that will be used for the peripheral
         # functions run in the main thread to send output data to the IO
         # thread It'd be a lot more convenient to just use a queue for this
         # but if we did that we couldn't use select() in the IO thread to
@@ -925,10 +904,19 @@ class ExternalIOPeripheral(MMIOPeripheral):
         self._io_thread_tx_sock.connect(io_addr)
         self._io_thread_rx_sock, _ = self._io_thread_sock.accept()
 
-        # Create the server thread for this peripheral if the server args are
-        # defined.
+        # If analysis-only mode is enabled don't create sockets and attempt to
+        # do network things
         if self._server_args is not None:
-            # Now (re-)create the IO thread
+            # Create the server socket to listen for client connections, this
+            # should persist across emulator resets
+            # TODO: support IPv6 (AF_INET6)?
+            self._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self._server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self._server.bind(self._server_args)
+            self._server.listen(0)
+
+            # Create the server thread for this peripheral if the server args
+            # are defined.
             args = {
                 'name': '%s-IO' % self.devname,
                 'target': self._io_handler,
@@ -949,13 +937,15 @@ class ExternalIOPeripheral(MMIOPeripheral):
             self._io_thread = threading.Thread(**args)
             self._io_thread.start()
 
+        super().init(emu)
+
     def transmit(self, obj):
         """
         To be used by peripheral when queuing message for transmit. This
         function should be customized to handle any peripheral register
         modifications necessary when transmit happens.
         """
-        logger.debug('%s: TRANSMIT %r', self.devname, obj)
+        logger.info('%s: TRANSMIT %r', self.devname, obj)
         _sendObj(self._io_thread_tx_sock, obj)
 
     def getTransmittedObjs(self):
@@ -982,7 +972,7 @@ class ExternalIOPeripheral(MMIOPeripheral):
         Can also be used by a peripheral to force receive values (such as if
         the peripheral should receive messages it transmits).
         """
-        logger.debug('%s: RECEIVE %r', self.devname, obj)
+        logger.info('%s: RECEIVE %r', self.devname, obj)
         self.emu.putIO(self.devname, obj)
 
     def processReceivedData(self, obj):
@@ -1034,7 +1024,7 @@ class ExternalIOPeripheral(MMIOPeripheral):
                         # If an OSError happens while receiving from the
                         # internal main-to-IO thread socket it means this thread
                         # should exit
-                        logger.info('Lost connection to main thread, exiting', exc_info=1)
+                        logger.warning('Lost connection to main thread, exiting', exc_info=1)
                         return
 
                 elif sock == self._server:
@@ -1052,7 +1042,7 @@ class ExternalIOPeripheral(MMIOPeripheral):
                         # If an OSError occurs while receiving from a client
                         # thread, the client has disconnected, remove the socket
                         # from the list of inputs to receive data from
-                        logger.info('client sock %r disconnected', sock, exc_info=1)
+                        logger.debug('client sock %r disconnected', sock, exc_info=1)
                         self._clients.remove(sock)
                         inputs.remove(sock)
 

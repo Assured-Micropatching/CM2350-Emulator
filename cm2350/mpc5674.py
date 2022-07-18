@@ -224,6 +224,15 @@ class MPC5674_monitor(viv_imp_monitor.AnalysisMonitor):
         else:
             cur_context = None
 
+        # Watch for resets
+        if op.va == emu.bam.rchw.entry_point:
+            self.curfunc = {None: 0}
+            self.path = {None: [0]}
+            self.level = {None: 0}
+
+            print("%s%d ###### RESET  0x%x" % (
+                '  '*self.level[self.int_context], self.level[self.int_context], op.va))
+
         if cur_context != self.int_context:
             if cur_context not in self.curfunc:
                 # if the current context isn't in the current function set yet,
@@ -768,6 +777,8 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
             cfg['backup'] = ''
 
     def reset(self):
+        logger.info("RESET")
+
         # Clear or initialize SRAM and external RAM
         size = self.vw.config.project.MPC5674.SRAM.size
         addr = self.vw.config.project.MPC5674.SRAM.addr
@@ -837,12 +848,14 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
             self.flash.load_complete()
 
     def init_core(self):
+        logger.info('INIT')
+
         # Create the initial RAM data (it isn't all cleared out during reset)
         size = self.vw.config.project.MPC5674.SRAM.size
         addr = self.vw.config.project.MPC5674.SRAM.addr
 
         # The initial SRAM memory block must be created
-        logger.debug("reset: Initializing SRAM 0x%08x - 0x%08x",
+        logger.debug("init: Initializing SRAM 0x%08x - 0x%08x",
                 addr, addr + size)
         self.addMemoryMap(addr, e_mem.MM_RWX, 'SRAM', b'\x00' * size)
 

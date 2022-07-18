@@ -165,7 +165,8 @@ class CriticalPrioException(INTCException):
 
     def setupContext(self, emu):
         # Set CSRR0 (next instruction) and CSRR1 (Current MSR)
-        emu.setRegister(REG_CSRR0, emu._cur_instr[2])
+        #emu.setRegister(REG_CSRR0, emu._cur_instr[2])
+        emu.setRegister(REG_CSRR0, emu.getProgramCounter())
         emu.setRegister(REG_CSRR1, emu.getRegister(REG_MSR))
 
         # Call the INTCException setupContext() function instead of
@@ -473,7 +474,8 @@ class DecrementerException(StandardPrioException):
 
     def setupContext(self, emu):
         # Set SRR0 (next instruction) and SRR1 (Current MSR)
-        emu.setRegister(REG_SRR0, emu._cur_instr[2])
+        #emu.setRegister(REG_SRR0, emu._cur_instr[2])
+        emu.setRegister(REG_SRR0, emu.getProgramCounter())
         emu.setRegister(REG_SRR1, emu.getRegister(REG_MSR))
 
         # Call the INTCException setupContext() function instead of
@@ -487,7 +489,8 @@ class FixedIntervalTimerException(StandardPrioException):
 
     def setupContext(self, emu):
         # Set SRR0 (next instruction) and SRR1 (Current MSR)
-        emu.setRegister(REG_SRR0, emu._cur_instr[2])
+        #emu.setRegister(REG_SRR0, emu._cur_instr[2])
+        emu.setRegister(REG_SRR0, emu.getProgramCounter())
         emu.setRegister(REG_SRR1, emu.getRegister(REG_MSR))
 
         # Call the INTCException setupContext() function instead of
@@ -619,7 +622,8 @@ class EfpuRoundException(StandardPrioException):
         emu.setRegister(REG_ESR, esr_val)
 
         # Set SRR0 (next instruction) and SRR1 (Current MSR)
-        emu.setRegister(REG_SRR0, emu._cur_instr[2])
+        #emu.setRegister(REG_SRR0, emu._cur_instr[2])
+        emu.setRegister(REG_SRR0, emu.getProgramCounter())
         emu.setRegister(REG_SRR1, emu.getRegister(REG_MSR))
 
         # Call the INTCException setupContext() function instead of
@@ -633,7 +637,8 @@ class PerformanceException(StandardPrioException):
 
     def setupContext(self, emu):
         # Set SRR0 (next instruction) and SRR1 (Current MSR)
-        emu.setRegister(REG_SRR0, emu._cur_instr[2])
+        #emu.setRegister(REG_SRR0, emu._cur_instr[2])
+        emu.setRegister(REG_SRR0, emu.getProgramCounter())
         emu.setRegister(REG_SRR1, emu.getRegister(REG_MSR))
 
         # Call the INTCException setupContext() function instead of

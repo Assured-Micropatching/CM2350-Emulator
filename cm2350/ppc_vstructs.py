@@ -906,7 +906,7 @@ class PeriphRegister(VBitField):
 
         value = 0
         for fname, field in self.vsGetFields():
-            value |= field.vsGetValue() << field._vs_shift
+            value |= (field.vsGetValue() & field._vs_mask) << field._vs_shift
 
         return struct.pack(self._vs_fmt, value)
 
@@ -927,6 +927,33 @@ class PeriphRegister(VBitField):
             self._vsFireCallbacks(fname)
 
         return offset + self._vs_size
+
+    def vsGetPrintInfo(self, offset=0, indent=0, top=True):
+        """
+        Adapted version of the VBitField.vsGetPrintInfo() function that prints
+        the proper subfield offsets rather than just 0.
+        """
+        ret = []
+        if top:
+            ret.append((offset, indent, self._vs_name, self))
+
+        indent += 1
+        bitoff = 0
+        for fname,field in self.vsGetFields():
+            # use vsSetBitWidth(0) to disable fields
+            if field._vs_bitwidth == 0:
+                continue
+            bw = field._vs_bitwidth
+            if bw > 1:
+                bitname = '%s[%d:%d]' % (fname,bitoff,bitoff + bw - 1)
+            else:
+                bitname = '%s[%d]' % (fname,bitoff)
+            off = offset + (bitoff // 8)
+            ret.append( (off, indent, bitname, field) )
+            bitoff += field._vs_bitwidth
+
+        return ret
+
 
 
 class PeriphRegSubFieldMixin:
@@ -1543,6 +1570,28 @@ class PeripheralRegisterSet(VStruct):
                 for _, elem in value:
                     if hasattr(elem, 'reset') and callable(elem.reset):
                         elem.reset(emu)
+
+    def vsGetPrintInfo(self, offset=0, indent=0, top=True):
+        """
+        Adapted version of the VStruct.vsGetPrintInfo() function that prints
+        the proper field offsets rather than just their storage offset.
+        """
+        ret = []
+        if top:
+            ret.append((offset, indent, self._vs_name, self))
+        indent += 1
+        for fname in self._vs_fields:
+            x = self._vs_values.get(fname)
+            off = self._vs_field_offset[fname]
+            if isinstance(x, VStruct):
+                ret.append((off, indent, fname, x))
+                ret.extend(x.vsGetPrintInfo(offset=off, indent=indent, top=False))
+            else:
+                ret.append((off, indent, fname, x))
+        # returns (offset, indent, fieldname, field_instance)
+        return ret
+
+
 
 
 class BitFieldSPR(PeriphRegister):

@@ -381,7 +381,7 @@ class TestEmulator:
                     extra = self.getNameRefs(op)
 
                     opbytes = emu.readMemory(pc,len(op))
-                    print("%.4x\t%20s\t%s\t%s"%(pc,hexlify(opbytes),mcanv.strval, extra))
+                    print("%.4x\t%20s\t%s\t%s"%(pc,hexlify(opbytes).decode(),mcanv.strval, extra))
 
                     print("---------")
                     prompt = "q<enter> - exit, eval code to execute, 'skip' an instruction, 'b'ranch, 'go [+]#' to va or +# instrs or enter to continue: "

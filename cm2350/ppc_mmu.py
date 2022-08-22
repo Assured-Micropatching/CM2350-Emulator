@@ -414,7 +414,7 @@ class PpcMMU:
             mas1, mas2, mas3 = entry.read()
 
             logger.debug('MMU: search found mapping %d: 0x%08x -> 0x%08x (%s %s %s)',
-                    esel, entry.rpn, entry.epn, entry.size(),
+                    entry.esel, entry.rpn, entry.epn, entry.size(),
                     'VLE' if entry.vle else 'BookE', entry.perm.name)
 
             # Update MAS0 to indicate which entry this is

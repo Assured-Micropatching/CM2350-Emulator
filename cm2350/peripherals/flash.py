@@ -908,7 +908,7 @@ class FlashArray:
             self._write_data = None
 
     def write(self, block, offset, bytez):
-        if not self.checkBlockWritable(block):
+        if not self.checkBlockWritable(block) and not self.mcr.ers:
             logger.debug('[%s]%s ignoring write to block %s, not writable',
                     self.__class__.__name__, self.name, block.name)
             return
@@ -936,9 +936,9 @@ class FlashArray:
 
                     block_data = bytearray()
                     for i in range(0, size, 16):
-                        start = flash_offset + i
+                        start = block_offset + i
                         block_data += self.flashdev.data[start:start+16]
-                        flash_offset += 16
+                        block_offset += 16
 
                 elif device == FlashDevice.FLASH_MAIN:
                     block_data = self.flashdev.data[block_offset:block_offset+size]

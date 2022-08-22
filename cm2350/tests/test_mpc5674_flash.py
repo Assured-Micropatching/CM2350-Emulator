@@ -735,6 +735,7 @@ class MPC5674_Flash_Test(MPC5674_Test):
         interlock_val = random.randint(0x00000001, 0xFFFFFFFE)
 
         # Interlock write
+        logger.debug('writing interlock [0x%08x] = 0x%08x', interlock_addr, interlock_val)
         self.emu.writeMemValue(interlock_addr, interlock_val, 4)
 
         # Now set the MCR[EHV] (bit 29) to initiate the erase
@@ -748,12 +749,12 @@ class MPC5674_Flash_Test(MPC5674_Test):
         for addr in range(start, end, 32):
             # The first 16 bytes of each 32 byte chunk being compared should be
             # erased.
-            self.assertEqual(self.emu.readMemory(addr, 16), erased_chunk)
-            self.assertEqual(self.emu.flash.data[addr:addr+16], erased_chunk)
+            self.assertEqual(self.emu.readMemory(addr, 16), erased_chunk, msg=hex(addr))
+            self.assertEqual(self.emu.flash.data[addr:addr+16], erased_chunk, msg=hex(addr))
 
             # Second 16 bytes should not be erased since they belong to array B
-            self.assertEqual(self.emu.readMemory(addr+16, 16), unerased_chunk)
-            self.assertEqual(self.emu.flash.data[addr+16:addr+32], unerased_chunk)
+            self.assertEqual(self.emu.readMemory(addr+16, 16), unerased_chunk, msg=hex(addr+16))
+            self.assertEqual(self.emu.flash.data[addr+16:addr+32], unerased_chunk, msg=hex(addr+16))
 
     def test_flash_erase_locked(self):
         # Change Shadow A, B and main flash to be all 0x00's

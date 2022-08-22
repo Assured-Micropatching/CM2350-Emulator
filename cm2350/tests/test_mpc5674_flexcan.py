@@ -350,6 +350,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
 
         # CAN A
         self.emu.can[0]._timer.start()
+        time.sleep(0.1)
         self.assertNotEqual(self.emu.readMemory(test_addrs[0], 4), b'\x00\x00\x00\x00')
         self.assertNotEqual(self.emu.readMemValue(test_addrs[0], 4), 0x00000000)
 
@@ -366,6 +367,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
 
         # CAN B
         self.emu.can[1]._timer.start()
+        time.sleep(0.1)
         self.assertNotEqual(self.emu.readMemory(test_addrs[1], 4), b'\x00\x00\x00\x00')
         self.assertNotEqual(self.emu.readMemValue(test_addrs[1], 4), 0x00000000)
 
@@ -382,6 +384,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
 
         # CAN C
         self.emu.can[2]._timer.start()
+        time.sleep(0.1)
         self.assertNotEqual(self.emu.readMemory(test_addrs[2], 4), b'\x00\x00\x00\x00')
         self.assertNotEqual(self.emu.readMemValue(test_addrs[2], 4), 0x00000000)
 
@@ -398,6 +401,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
 
         # CAN D
         self.emu.can[3]._timer.start()
+        time.sleep(0.1)
         self.assertNotEqual(self.emu.readMemory(test_addrs[3], 4), b'\x00\x00\x00\x00')
         self.assertNotEqual(self.emu.readMemValue(test_addrs[3], 4), 0x00000000)
 
@@ -1550,7 +1554,7 @@ class MPC5674_FlexCAN_RealIO(MPC5674_Test):
             self.emu.stepi()
             cur_pc = pc + 4
             self.assertEqual(self.emu.getProgramCounter(), cur_pc, devname)
-            self.assertEqual(self.emu.mcu_intc.exc_count, 0, devname)
+            self.assertEqual(len(self.emu.mcu_intc.pending), 0, devname)
             self.assertEqual(self.emu.intc._cur_exc, None, devname)
 
             # Confirm that INTC CPR is 0
@@ -1567,8 +1571,7 @@ class MPC5674_FlexCAN_RealIO(MPC5674_Test):
             # after the first instruction in the handler
             self.emu.stepi()
             self.assertEqual(self.emu.getProgramCounter(), mb0_handler_addr, devname)
-            # TODO: is exc_count tracking what I thought it was?
-            self.assertEqual(self.emu.mcu_intc.exc_count, 1, devname)
+            self.assertEqual(len(self.emu.mcu_intc.pending), 1, devname)
             self.assertEqual(self.emu.intc._cur_exc, mb0_int, devname)
 
             # Because we are using hardware vectoring the INTC CPR should
@@ -1596,7 +1599,7 @@ class MPC5674_FlexCAN_RealIO(MPC5674_Test):
             self.emu.stepi()
             self.assertEqual(self.emu.getProgramCounter(), cur_pc, devname)
             # The loopback Rx interrupt should be pending now
-            self.assertEqual(self.emu.mcu_intc.exc_count, 1, devname)
+            self.assertEqual(len(self.emu.mcu_intc.pending), 1, devname)
             # But it is not yet being processed
             self.assertEqual(self.emu.intc._cur_exc, None, devname)
 
@@ -1606,7 +1609,7 @@ class MPC5674_FlexCAN_RealIO(MPC5674_Test):
             self.assertEqual(self.emu.getProgramCounter(), mb1_handler_addr, devname)
             # Now that the external interrupt is being processed there is no
             # longer 1 pending PPC Exception
-            self.assertEqual(self.emu.mcu_intc.exc_count, 0, devname)
+            self.assertEqual(len(self.emu.mcu_intc.pending), 0, devname)
             self.assertEqual(self.emu.intc._cur_exc, mb1_int, devname)
 
             # Confirm INTC CPR is now the MB1 priority
@@ -1635,7 +1638,7 @@ class MPC5674_FlexCAN_RealIO(MPC5674_Test):
             # to the previous PC
             self.emu.stepi()
             self.assertEqual(self.emu.getProgramCounter(), cur_pc, devname)
-            self.assertEqual(self.emu.mcu_intc.exc_count, 0, devname)
+            self.assertEqual(len(self.emu.mcu_intc.pending), 0, devname)
             self.assertEqual(self.emu.intc._cur_exc, None, devname)
 
             # Ensure that this message was correctly received by the client
@@ -1674,7 +1677,7 @@ class MPC5674_FlexCAN_RealIO(MPC5674_Test):
                 # which means that the exception count is still 0
                 # TODO: this may be 0 or 1 depending on if the exception is
                 # queued yet
-                #self.assertEqual(self.emu.mcu_intc.exc_count, 0, devname)
+                #self.assertEqual(len(self.emu.mcu_intc.pending), 0, devname)
                 self.assertEqual(self.emu.intc._cur_exc, None, devname)
 
                 # one more instruction
@@ -1684,7 +1687,7 @@ class MPC5674_FlexCAN_RealIO(MPC5674_Test):
             self.assertEqual(self.emu.getProgramCounter(), mb1_handler_addr, devname)
             # Now that the external interrupt is being processed there is no
             # longer 1 pending PPC Exception
-            self.assertEqual(self.emu.mcu_intc.exc_count, 0, devname)
+            self.assertEqual(len(self.emu.mcu_intc.pending), 0, devname)
             self.assertEqual(self.emu.intc._cur_exc, mb1_int, devname)
 
             # Confirm INTC CPR is now the MB1 priority
@@ -1713,7 +1716,7 @@ class MPC5674_FlexCAN_RealIO(MPC5674_Test):
             # to the previous PC
             self.emu.stepi()
             self.assertEqual(self.emu.getProgramCounter(), cur_pc, devname)
-            self.assertEqual(self.emu.mcu_intc.exc_count, 0, devname)
+            self.assertEqual(len(self.emu.mcu_intc.pending), 0, devname)
             self.assertEqual(self.emu.intc._cur_exc, None, devname)
 
             client.close()

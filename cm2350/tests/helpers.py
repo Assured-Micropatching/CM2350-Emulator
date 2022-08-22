@@ -78,7 +78,10 @@ class MPC5674_Test(unittest.TestCase):
         self.emu.enableTimebase(start_paused=self._start_timebase_paused)
 
     def _getPendingExceptions(self):
-        return self.emu.mcu_intc.pending[:]
+        # Remove all the exceptions in the pending list
+        pending = self.emu.mcu_intc.pending
+        self.emu.mcu_intc.pending = []
+        return pending
 
     def tearDown(self):
         # Ensure that there are no unprocessed exceptions

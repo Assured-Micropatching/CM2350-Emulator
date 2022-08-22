@@ -1,9 +1,11 @@
 import enum
 
+from ..intc_exc import AlignmentException, MceWriteBusError, MceDataReadBusError
 from ..intc_src import INTC_EVENT
 from ..ppc_vstructs import *
 from ..ppc_peripherals import PPC_MAX_READ_SIZE, MMIOPeripheral
 from ..ppc_xbar import *
+
 
 import envi.bits as e_bits
 
@@ -19,7 +21,7 @@ EDMA_MCR_OFFSET     = 0x0000
 EDMA_ESR_OFFSET     = 0x0004
 EDMA_ERQRH_OFFSET   = 0x0008
 EDMA_ERQRL_OFFSET   = 0x000C
-EDMA_EEIRLH_OFFSET  = 0x0010
+EDMA_EEIRH_OFFSET   = 0x0010
 EDMA_EEIRL_OFFSET   = 0x0014
 EDMA_SERQR_OFFSET   = 0x0018
 EDMA_CERQR_OFFSET   = 0x0019
@@ -212,7 +214,7 @@ class EDMA_A_REGISTERS(PeripheralRegisterSet):
         self.esr    = (EDMA_ESR_OFFSET,    EDMA_x_ESR())
         self.erqrh  = (EDMA_ERQRH_OFFSET,  v_bits(32))
         self.erqrl  = (EDMA_ERQRL_OFFSET,  v_bits(32))
-        self.eeirh  = (EDMA_EEIRLH_OFFSET, v_bits(32))
+        self.eeirh  = (EDMA_EEIRH_OFFSET,  v_bits(32))
         self.eeirl  = (EDMA_EEIRL_OFFSET,  v_bits(32))
         self.irqrh  = (EDMA_IRQRH_OFFSET,  v_bits(32))
         self.irqrl  = (EDMA_IRQRL_OFFSET,  v_bits(32))

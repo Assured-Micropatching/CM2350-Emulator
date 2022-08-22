@@ -212,7 +212,7 @@ CM2350_DEFAULT_CONFIG = {
                 'shadowBOffset': 0,
                 'backup': 'backup.flash'
             },
-            'SRAM': {'addr': 1073741824, 'size': 262144},
+            'SRAM': {'addr': 1073741824, 'size': 262144, 'standby_size': 32768},
             'FlexCAN_A': {'host': None, 'port': None},
             'FlexCAN_B': {'host': None, 'port': None},
             'FlexCAN_C': {'host': None, 'port': None},

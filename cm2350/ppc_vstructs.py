@@ -25,6 +25,7 @@ __all__ = [
     'VStructDataError',
     'VStructReadOnlyError',
     'VStructWriteOnlyError',
+    'VStructUnimplementedError',
 
     # New VStruct types
     'v_bits',
@@ -69,11 +70,18 @@ class VStructWriteOnlyError(TypeError):
         self.kwargs = kwargs
 
 
-VSTRUCT_ERROR_TYPES = (
+class VStructUnimplementedError(NotImplementedError):
+    def __init__(self, message=None, **kwargs):
+        super().__init__(message)
+        self.kwargs = kwargs
+
+
+VSTRUCT_ADD_DATA_ERROR_TYPES = (
     VStructAlignmentError,
     VStructDataError,
     VStructReadOnlyError,
     VStructWriteOnlyError,
+    VStructUnimplementedError,
 )
 
 
@@ -638,7 +646,6 @@ class VArray(VStruct):
         try:
             while len(data) < size:
                 names, field, idx, foffset = self._getFieldAndIndexByOffset(offset+len(data))
-                #print(names, field, idx, foffset)
 
                 if hasattr(field, 'vsEmitFromOffset'):
                     data += field.vsEmitFromOffset(foffset, size - len(data))
@@ -652,11 +659,9 @@ class VArray(VStruct):
                         # We can't evenly emit a subfield so just stop now
                         raise VStructAlignmentError()
 
-        except VSTRUCT_ERROR_TYPES as exc:
-            if 'data' in exc.kwargs:
-                exc.kwargs['data'] = data + exc.kwargs['data']
-            else:
-                exc.kwargs['data'] = data
+        except VSTRUCT_ADD_DATA_ERROR_TYPES as exc:
+            # Ensure that the amount of data read is recorded in the exception
+            exc.kwargs['data'] = data
             raise exc
 
         return data
@@ -666,7 +671,6 @@ class VArray(VStruct):
         try:
             while data_offset < len(data):
                 names, field, idx, foffset = self._getFieldAndIndexByOffset(offset)
-                #print(names, field, idx, foffset)
 
                 if hasattr(field, 'vsParseAtOffset'):
                     ret_offset = field.vsParseAtOffset(foffset, data, data_offset)
@@ -679,7 +683,8 @@ class VArray(VStruct):
                         # This offset is beyond the identified field
                         raise VStructDataError()
                     else:
-                        # We can't parse into a subfield so just stop now
+                        # We can't parse into a subfield so just stop now, but
+                        # track how much data has been parsed
                         raise VStructAlignmentError()
 
                 written += written_len
@@ -689,11 +694,9 @@ class VArray(VStruct):
                 # If there is a "by_idx" callback, call it now
                 self._vsFireCallbacks('by_idx', idx=idx, foffset=foffset, size=written_len)
 
-        except VSTRUCT_ERROR_TYPES as exc:
-            if 'written' in exc.kwargs:
-                exc.kwargs['written'] += written
-            else:
-                exc.kwargs['written'] = written
+        except VSTRUCT_ADD_DATA_ERROR_TYPES as exc:
+            # Ensure that the amount of data parsed is recorded in the exception
+            exc.kwargs['data'] = data[data_offset-written:data_offset]
             raise exc
 
         return offset
@@ -738,10 +741,10 @@ class PlaceholderRegister(v_const):
     or written to using the standard VStruct vsEmit or vsParse functions.
     """
     def vsParse(self, data, offset=0):
-        raise NotImplementedError('%s not implemented' % self.__class__.__name__)
+        raise VStructUnimplementedError('%s not implemented' % self.__class__.__name__)
 
     def vsEmit(self):
-        raise NotImplementedError('%s not implemented' % self.__class__.__name__)
+        raise VStructUnimplementedError('%s not implemented' % self.__class__.__name__)
 
 
 class PeriphRegister(VBitField):
@@ -980,7 +983,6 @@ class PeriphRegSubFieldMixin:
         target_bitwidth = size * 8
         end_bitwidth = start_bitwidth + target_bitwidth
         missing_bits = self._vs_bitwidth - (start_bitwidth + target_bitwidth)
-        #print('emitting', offset, self._vs_bitwidth, start_bitwidth, target_bitwidth, missing_bits)
 
         value = 0
         emit_bitwidth = 0
@@ -992,7 +994,6 @@ class PeriphRegSubFieldMixin:
             # value
             if start_bitwidth > cur_bitwidth and \
                     start_bitwidth < cur_bitwidth + field._vs_bitwidth:
-                #print('adding [%d:%d] %s (%d) %d->%d' % (field._vs_startbyte, field._vs_startbit, fname, field.vsGetValue(), field._vs_shift, field._vs_shift - missing_bits))
                 # If the starting bit is in the middle of a field grab only the
                 # relevant bits
                 cut_bits = start_bitwidth - cur_bitwidth
@@ -1004,7 +1005,6 @@ class PeriphRegSubFieldMixin:
 
             elif end_bitwidth > cur_bitwidth and \
                     end_bitwidth < cur_bitwidth + field._vs_bitwidth:
-                #print('adding [%d:%d] %s (%d) %d->%d' % (field._vs_startbyte, field._vs_startbit, fname, field.vsGetValue(), field._vs_shift, field._vs_shift - missing_bits))
                 # If the ending bit is in the middle of a field grab only the
                 # relevant bits
                 cut_bits = field._vs_bitwidth - (target_bitwidth - emit_bitwidth)
@@ -1017,14 +1017,10 @@ class PeriphRegSubFieldMixin:
                 emit_bitwidth += width
 
             elif field._vs_startbyte >= offset:
-                #print('adding [%d:%d] %s (%d) %d->%d' % (field._vs_startbyte, field._vs_startbit, fname, field.vsGetValue(), field._vs_shift, field._vs_shift - missing_bits))
                 # Grab the field value as-is but adjust the shift amount for the
                 # missing bits
                 value |= field.vsGetValue() << (field._vs_shift - missing_bits)
                 emit_bitwidth += field._vs_bitwidth
-
-            #else:
-            #    print('skipping [%d:%d] %s (%d)' % (field._vs_startbyte, field._vs_startbit, fname, field.vsGetValue()))
 
             cur_bitwidth += field._vs_bitwidth
             if cur_bitwidth >= end_bitwidth:
@@ -1051,7 +1047,7 @@ class PeriphRegSubFieldMixin:
         else:
             # If the target offset was not found, then this field doesn't have
             # the requested data
-            raise VStructDataError(data=b'')
+            raise VStructDataError()
 
     def vsParseAtOffset(self, offset, data, data_offset=0):
         """
@@ -1081,7 +1077,6 @@ class PeriphRegSubFieldMixin:
         target_bitwidth = (len(data) - data_offset) * 8
         end_bitwidth = start_bitwidth + target_bitwidth
         missing_bits = self._vs_bitwidth - (start_bitwidth + target_bitwidth)
-        #print('parsing', offset, self._vs_bitwidth, start_bitwidth, target_bitwidth, missing_bits)
 
         parse_bitwidth = 0
         cur_bitwidth = 0
@@ -1092,14 +1087,12 @@ class PeriphRegSubFieldMixin:
 
             if start_bitwidth > cur_bitwidth and \
                     start_bitwidth < cur_bitwidth + field._vs_bitwidth:
-                #print('adding [%d:%d] %s (%d) %d->%d' % (field._vs_startbyte, field._vs_startbit, fname, field.vsGetValue(), field._vs_shift, shift))
                 # If the starting bit is in the middle of a field update only
                 # the correct parts of the target field
 
                 cut_bits = start_bitwidth - cur_bitwidth
                 width = field._vs_bitwidth - cut_bits
                 mask = e_bits.b_masks[width]
-                #print(cut_bits, width, hex(mask))
 
                 # Mask off the bits that will not be changing
                 cur_value = field.vsGetValue() & ~mask
@@ -1109,7 +1102,6 @@ class PeriphRegSubFieldMixin:
                 field_value = (value >> shift) & mask
 
                 # Combine the old and new parts
-                #print('setting %s 0x%x | 0x%x = 0x%x' % (fname, cur_value, field_value, cur_value | field_value))
                 field.vsSetValue(cur_value | field_value)
                 self._vsFireCallbacks(fname)
 
@@ -1117,14 +1109,12 @@ class PeriphRegSubFieldMixin:
 
             elif end_bitwidth > cur_bitwidth and \
                     end_bitwidth < cur_bitwidth + field._vs_bitwidth:
-                #print('adding [%d:%d] %s (%d) %d->%d' % (field._vs_startbyte, field._vs_startbit, fname, field.vsGetValue(), field._vs_shift, shift))
                 # If the ending bit is in the middle of a field update only
                 # the correct parts of the target field
 
                 cut_bits = cur_bitwidth + field._vs_bitwidth - end_bitwidth
                 width = field._vs_bitwidth - cut_bits
                 mask = e_bits.b_masks[width] << cut_bits
-                #print(cut_bits, width, hex(mask))
 
                 # Mask off the bits that will not be changing
                 cur_value = field.vsGetValue() & ~mask
@@ -1134,24 +1124,18 @@ class PeriphRegSubFieldMixin:
                 field_value = (value >> (shift - cut_bits)) & mask
 
                 # Combine the old and new parts
-                #print('setting %s 0x%x | 0x%x = 0x%x' % (fname, field_value, cur_value, field_value | cur_value))
                 field.vsSetValue(field_value | cur_value)
                 self._vsFireCallbacks(fname)
 
                 parse_bitwidth += width
 
             elif field._vs_startbyte >= offset:
-                #print('adding [%d:%d] %s (%d) %d->%d' % (field._vs_startbyte, field._vs_startbit, fname, field.vsGetValue(), field._vs_shift, field._vs_shift - missing_bits))
                 # Collect the fields to be parsed because we need to identify
                 # what the correct format conversion is.
 
-                #print('setting %s 0x%x' % (fname, (value >> shift) & field._vs_mask,))
                 field.vsSetValue(value >> shift)
 
                 parse_bitwidth += field._vs_bitwidth
-
-            #else:
-            #    print('skipping [%d:%d] %s (%d)' % (field._vs_startbyte, field._vs_startbit, fname, field.vsGetValue()))
 
             cur_bitwidth += field._vs_bitwidth
             if cur_bitwidth >= end_bitwidth:
@@ -1448,14 +1432,14 @@ class PeripheralRegisterSet(VStruct):
         # value
         if oidx == 0 or oidx > len(self._vs_sorted_offsets):
             # This object does not contain the requested offset
-            raise VStructDataError()
+            raise VStructDataError(data=b'')
 
         foffset = self._vs_sorted_offsets[oidx - 1]
         fname, field = self._vs_field_by_offset[foffset]
         # Confirm that the field offset + field length includes the target
         # offset
         if foffset + len(field) <= offset:
-            raise VStructDataError()
+            raise VStructDataError(data=b'')
 
         names.append(fname)
 
@@ -1482,7 +1466,6 @@ class PeripheralRegisterSet(VStruct):
             while len(data) < size:
                 # As long as more data is requested, continue reading it
                 names, field, foffset = self._getFieldByOffset(offset+len(data))
-                #print(names, field, foffset)
 
                 if hasattr(field, 'vsEmitFromOffset'):
                     data += field.vsEmitFromOffset(foffset, size - len(data))
@@ -1496,11 +1479,9 @@ class PeripheralRegisterSet(VStruct):
                         # We can't evenly emit a subfield so just stop now
                         raise VStructAlignmentError()
 
-        except VSTRUCT_ERROR_TYPES as exc:
-            if 'data' in exc.kwargs:
-                exc.kwargs['data'] = data + exc.kwargs['data']
-            else:
-                exc.kwargs['data'] = data
+        except VSTRUCT_ADD_DATA_ERROR_TYPES as exc:
+            # Ensure that the amount of data read is recorded in the exception
+            exc.kwargs['data'] = data
             raise exc
 
         return data
@@ -1517,7 +1498,6 @@ class PeripheralRegisterSet(VStruct):
                 # As long as there is data to parse into a structure, find the
                 # next field and parse data into it
                 names, field, foffset = self._getFieldByOffset(offset)
-                #print(names, field, foffset)
 
                 if hasattr(field, 'vsParseAtOffset'):
                     ret_offset = field.vsParseAtOffset(foffset, data, data_offset)
@@ -1542,11 +1522,9 @@ class PeripheralRegisterSet(VStruct):
                 # Finally fire any parse callbacks
                 self._vsFireCallbacks(names[0])
 
-        except VSTRUCT_ERROR_TYPES as exc:
-            if 'written' in exc.kwargs:
-                exc.kwargs['written'] += written
-            else:
-                exc.kwargs['written'] = written
+        except VSTRUCT_ADD_DATA_ERROR_TYPES as exc:
+            # Ensure that the amount of data parsed is recorded in the exception
+            exc.kwargs['data'] = data[data_offset-written:data_offset] + exc.kwargs.get('data', b'')
             raise exc
 
         return offset

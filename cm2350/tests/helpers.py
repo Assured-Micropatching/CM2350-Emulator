@@ -10,7 +10,7 @@ import envi.archs.ppc.spr as eaps
 import envi.archs.ppc.regs as eapr
 import envi.archs.ppc.const as eapc
 
-from .. import CM2350, intc_exc
+from .. import CM2350, intc_exc, ppc_vstructs
 
 import logging
 logger = logging.getLogger(__name__)
@@ -115,8 +115,8 @@ class MPC5674_Test(unittest.TestCase):
         return test_pc
 
     def get_random_val(self, size):
-        val = random.getrandbits(size * 8)
-        val_bytes = e_bits.buildbytes(val, size, self.emu.getEndian())
+        val_bytes = os.urandom(size)
+        val = e_bits.parsebytes(val_bytes, 0, size, bigend=self.emu.getEndian())
         return (val, val_bytes)
 
     def get_random_flash_addr_and_data(self):
@@ -125,7 +125,7 @@ class MPC5674_Test(unittest.TestCase):
 
         # Determine write size and generate some data
         size = random.choice((1, 2, 4))
-        value = random.getrandbits(size * 8)
+        value, _ = self.get_random_val(size)
 
         return (addr, value, size)
 
@@ -135,62 +135,134 @@ class MPC5674_Test(unittest.TestCase):
 
         # Determine write size and generate some data
         size = random.choice((1, 2, 4))
-        value = random.getrandbits(size * 8)
+        value, _ = self.get_random_val(size)
 
         return (addr, value, size)
 
-    def validate_invalid_read(self, addr, size):
+    def validate_invalid_read(self, addr, size, data=None, msg=None):
         '''
         For testing addresses that raise a bus error on read
         '''
-        pc = self.get_random_pc()
-        self.emu.setProgramCounter(pc)
+        pc = self.set_random_pc()
 
-        msg = 'invalid read from 0x%x' % (addr)
+        if data is None:
+            data = b''
+
+        if msg is None:
+            msg = 'invalid read from 0x%x' % (addr)
+        else:
+            msg = 'invalid read from 0x%x (%s)' % (addr, msg)
+
         with self.assertRaises(intc_exc.MceDataReadBusError, msg=msg) as cm:
             self.emu.readMemValue(addr, size)
 
-        args = {
-            'va': addr,
-            'pc': pc,
-            'data': b'',
-        }
-        self.assertEqual(cm.exception.kwargs, args)
+        self.assertEqual(cm.exception.kwargs['va'], addr, msg=msg)
+        self.assertEqual(cm.exception.kwargs['pc'], pc, msg=msg)
+        self.assertEqual(cm.exception.kwargs['data'], data, msg=msg)
 
-    def validate_invalid_write(self, addr, size, msg=None):
+    def validate_unaligned_read(self, addr, size, data=None, msg=None):
+        '''
+        For testing addresses that raise an alignment error on read
+        '''
+        pc = self.set_random_pc()
+
+        if data is None:
+            data = b''
+
+        if msg is None:
+            msg = 'unaligned read from 0x%x' % (addr)
+        else:
+            msg = 'unaligned read from 0x%x (%s)' % (addr, msg)
+
+        with self.assertRaises(intc_exc.AlignmentException, msg=msg) as cm:
+            self.emu.readMemValue(addr, size)
+
+        self.assertEqual(cm.exception.kwargs['va'], addr, msg=msg)
+        self.assertEqual(cm.exception.kwargs['pc'], pc, msg=msg)
+        self.assertEqual(cm.exception.kwargs['data'], data, msg=msg)
+
+    def validate_invalid_write(self, addr, size, written=0, msg=None):
         '''
         For testing addresses that raise a bus error on write (like read-only
         memory locations)
         '''
-        value, value_bytes = self.get_random_val(size)
+        pc = self.set_random_pc()
 
-        pc = self.get_random_pc()
-        self.emu.setProgramCounter(pc)
+        value, value_bytes = self.get_random_val(size)
+        print(hex(value), value_bytes.hex(), self.emu.getEndian())
 
         if msg is None:
-            msg = 'invalid write of 0x%x to 0x%x' % (value, addr)
+            msg = 'unaligned write of 0x%s to 0x%x' % (value_bytes.hex(), addr)
         else:
-            msg = 'invalid write of 0x%x to 0x%x (%s)' % (value, addr, msg)
+            msg = 'unaligned write of 0x%s to 0x%x (%s)' % (value_bytes.hex(), addr, msg)
 
         with self.assertRaises(intc_exc.MceWriteBusError, msg=msg) as cm:
             self.emu.writeMemValue(addr, value, size)
 
-        args = {
-            'va': addr,
-            'pc': pc,
-            'data': value_bytes,
-            'written': 0,
-        }
-        self.assertEqual(cm.exception.kwargs, args)
+        import traceback
+        traceback.print_exception(cm.exception)
 
-    def validate_invalid_addr(self, addr, size):
+        self.assertEqual(cm.exception.kwargs['va'], addr, msg=msg)
+        self.assertEqual(cm.exception.kwargs['pc'], pc, msg=msg)
+        self.assertEqual(cm.exception.kwargs['data'], value_bytes[:written], msg=msg)
+
+    def validate_unaligned_write(self, addr, size=0, data=None, written=0, msg=None):
+        '''
+        For testing addresses that raise an unaligned on write.
+        '''
+        pc = self.set_random_pc()
+
+        assert size or data
+
+        if data is None:
+            data = os.urandom(size)
+
+        if msg is None:
+            msg = 'invalid write of 0x%s to 0x%x' % (data.hex(), addr)
+        else:
+            msg = 'invalid write of 0x%s to 0x%x (%s)' % (data.hex(), addr, msg)
+
+        with self.assertRaises(intc_exc.AlignmentException, msg=msg) as cm:
+            self.emu.writeMemory(addr, data)
+
+        self.assertEqual(cm.exception.kwargs['va'], addr, msg=msg)
+        self.assertEqual(cm.exception.kwargs['pc'], pc, msg=msg)
+        self.assertEqual(cm.exception.kwargs['data'], data[:written], msg=msg)
+
+    def validate_invalid_addr(self, addr, size, msg=None):
         '''
         "Invalid" has multiple meanings for the SIU, this function tests that
         addresses within the SIU range produce bus errors for both reads and
         writes
         '''
-        self.validate_invalid_read(addr, size)
-        self.validate_invalid_write(addr, size)
+        self.validate_invalid_read(addr, size, msg=msg)
+        self.validate_invalid_write(addr, size, msg=msg)
+
+    def validate_unimplemented_addrs(self, addr, size):
+        '''
+        Confirm that the unimplemented register range raises
+        VStructUnimplementedError
+        '''
+        pc = self.set_random_pc()
+
+        msg = 'Read unimplemented memory @ 0x%08x' % addr
+        with self.assertRaises(ppc_vstructs.VStructUnimplementedError, msg=msg) as cm:
+            self.emu.readMemValue(addr, size)
+
+        self.assertEqual(cm.exception.kwargs['pc'], pc)
+        self.assertEqual(cm.exception.kwargs['va'], addr)
+        self.assertEqual(cm.exception.kwargs['data'], b'')
+        self.assertEqual(cm.exception.kwargs['size'], size)
+
+        val, val_bytes = self.get_random_val(size)
+        msg = 'Write unimplemented memory @ 0x%08x' % addr
+        with self.assertRaises(ppc_vstructs.VStructUnimplementedError, msg=msg) as cm:
+            self.emu.writeMemValue(addr, val, size)
+
+        self.assertEqual(cm.exception.kwargs['pc'], pc)
+        self.assertEqual(cm.exception.kwargs['va'], addr)
+        self.assertEqual(cm.exception.kwargs['data'], b'')
+        self.assertEqual(cm.exception.kwargs['size'], size)
 
     def get_spr_num(self, reg):
         regname = self.emu.getRegisterName(reg)

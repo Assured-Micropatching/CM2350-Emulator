@@ -858,21 +858,9 @@ class MPC5674_SIU_Test(MPC5674_Test):
 
         # Read PCR 213 with odd size, this should generate an ALIGNMENT
         # exception (reading 5 bytes from a 2-byte aligned offset)
-        pc = self.get_random_pc()
-        self.emu.setProgramCounter(pc)
-
-        # Expected data that will have been raed to generate the error
+        # Expected data that will have been read before generating the error
         align_err_data = struct.pack('>HHH', pcr213_val, pcr214_val, 0)
-
-        with self.assertRaises(intc_exc.AlignmentException) as cm:
-            self.emu.readMemory(pcr213_addr, 5)
-
-        args = {
-            'va': pcr213_addr,
-            'pc': pc,
-            'data': align_err_data,
-        }
-        self.assertEqual(cm.exception.kwargs, args)
+        self.validate_unaligned_read(pcr213_addr, 5, data=align_err_data)
 
         # Read PCRs 213 and 214 together
         # Read PCRs 214 and 215 together
@@ -904,18 +892,7 @@ class MPC5674_SIU_Test(MPC5674_Test):
         )
 
         for addr, size, read_data in test_vals:
-            pc = self.set_random_pc()
-
-            msg = 'reading %d bytes from 0x%x' % (size, addr)
-            with self.assertRaises(intc_exc.AlignmentException, msg=msg) as cm:
-                self.emu.readMemory(addr, size)
-
-            args = {
-                'va': addr,
-                'pc': pc,
-                'data': read_data,
-            }
-            self.assertEqual(cm.exception.kwargs, args, msg=msg)
+            self.validate_unaligned_read(addr, size, data=read_data)
 
     def test_siu_unaligned_write(self):
         pcr_range, size = SIU_PCR
@@ -933,21 +910,7 @@ class MPC5674_SIU_Test(MPC5674_Test):
             (base + (215 * size),     5, 4),
         )
         for addr, size, written in test_vals:
-            pc = self.set_random_pc()
-
-            data = os.urandom(size)
-
-            msg = 'writing %s to 0x%x' % (data.hex(), addr)
-            with self.assertRaises(intc_exc.AlignmentException, msg=msg) as cm:
-                self.emu.writeMemory(addr, data)
-
-            args = {
-                'va': addr,
-                'pc': pc,
-                'data': data,
-                'written': written,
-            }
-            self.assertEqual(cm.exception.kwargs, args, msg=msg)
+            self.validate_unaligned_write(addr, size=size, written=written)
 
     # GPIO tests
 
@@ -972,7 +935,7 @@ class MPC5674_SIU_Test(MPC5674_Test):
                 # Attempting to write to the read locations should produce an
                 # error
                 msg = 'GPDI(%d) write' % pin
-                self.validate_invalid_write(test['addr'], test['align'], msg)
+                self.validate_invalid_write(test['addr'], test['align'], msg=msg)
 
             # If this GPIO is able to act as an input change the pin_value
             # to be the opposite of the default value and verify that the
@@ -1648,20 +1611,7 @@ class MPC5674_SIU_Test(MPC5674_Test):
         # NotImplementedErrors
         addr_range, size = SIU_PERIPH
         for addr in addr_range:
-            pc = self.set_random_pc()
-            read_errmsg = '0x%x:  %s: BAD READ [%x:%d]' % (pc, 'SIU', addr, size)
-            msg = 'Read unimplemented memory @ 0x%08x' % addr
-            with self.assertRaises(NotImplementedError, msg=msg) as cm:
-                self.emu.readMemValue(addr, size)
-            self.assertEqual(str(cm.exception), read_errmsg)
-
-            pc = self.set_random_pc()
-            val, val_bytes = self.get_random_val(size)
-            msg = 'Write unimplemented memory @ 0x%08x' % addr
-            write_errmsg = '0x%x:  %s: BAD WRITE [%x:%r]' % (pc, 'SIU', addr, val_bytes)
-            with self.assertRaises(NotImplementedError, msg=msg) as cm:
-                self.emu.writeMemValue(addr, val, size)
-            self.assertEqual(str(cm.exception), write_errmsg)
+            self.validate_unimplemented_addrs(addr, size)
 
     def test_siu_external_gpio(self):
         # Ensure that the default GPIO values can be read by all valid input

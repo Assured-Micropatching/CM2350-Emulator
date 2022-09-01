@@ -286,45 +286,8 @@ class MPC5674_WDT_Test(MPC5674_Test):
         # Test min invalid, max invalid and a few in between
         test_addrs = [start, stop] + [random.randrange(start, stop, 4) for i in range(3)]
 
-        # Values to write for each test
-        test_vals = [random.getrandbits(32) for i in range(len(test_addrs))]
-
-        for test_addr, test_val in zip(test_addrs, test_vals):
-            # Pretend these reads and writes are happening from a random
-            # instruction
-            test_pc = self.get_random_pc()
-            self.emu.setProgramCounter(test_pc)
-
-            # Before the test is run the list of pending exceptions should be
-            # empty
-            self.assertEqual(self._getPendingExceptions(), [])
-
-            # Ensure that reading the test address creates a pending
-            # MceDataReadBusError (the correct specific MCE variation)
-            msg = 'invalid read from 0x%x' % test_addr
-            with self.assertRaises(intc_exc.MceDataReadBusError, msg=msg) as cm:
-                self.emu.readMemory(test_addr, 4)
-
-            args = {
-                'va': test_addr,
-                'pc': test_pc,
-                'data': b'',
-            }
-            self.assertEqual(cm.exception.kwargs, args, msg=msg)
-
-            # Ensure that writing the test address creates a pending
-            # MceDataReadBusError (the correct specific MCE variation)
-            msg = 'invalid write of 0x%x to 0x%x' % (test_val, test_addr)
-            with self.assertRaises(intc_exc.MceWriteBusError, msg=msg) as cm:
-                self.emu.writeMemValue(test_addr, test_val, 4)
-
-            args = {
-                'va': test_addr,
-                'data': e_bits.buildbytes(test_val, 4, self.emu.getEndian()),
-                'pc': test_pc,
-                'written': 0,
-            }
-            self.assertEqual(cm.exception.kwargs, args, msg=msg)
+        for test_addr in test_addrs:
+            self.validate_invalid_addr(test_addr, 4)
 
     def test_swt_ro_reg_writes_sysreset(self):
         # Writes to read-only registers should generate Bus Errors or resets
@@ -350,7 +313,9 @@ class MPC5674_WDT_Test(MPC5674_Test):
         self.assertEqual(self.emu.swt.registers.mcr.hlk, 0)
         self.assertEqual(self.emu.swt.locked(), False)
 
-        test_vals = [random.getrandbits(32) for i in range(len(unlocked_ro_regs))]
+        # Writes to any of the "unlocked" addresses should cause a reset now
+        test_vals = [random.getrandbits(32) for i in
+                     range(len(unlocked_ro_regs))]
         for test_addr, test_val in zip(unlocked_ro_regs, test_vals):
             # Pretend these reads and writes are happening from a random
             # instruction
@@ -373,7 +338,8 @@ class MPC5674_WDT_Test(MPC5674_Test):
         self.assertEqual(self.emu.swt.registers.mcr.slk, 1)
         self.assertEqual(self.emu.swt.locked(), True)
 
-        test_vals = [random.getrandbits(32) for i in range(len(unlocked_ro_regs))]
+        test_vals = [random.getrandbits(32) for i in
+                     range(len(unlocked_ro_regs))]
         for test_addr, test_val in zip(unlocked_ro_regs, test_vals):
             # Pretend these reads and writes are happening from a random
             # instruction
@@ -408,27 +374,8 @@ class MPC5674_WDT_Test(MPC5674_Test):
         self.assertEqual(self.emu.swt.registers.mcr.hlk, 0)
         self.assertEqual(self.emu.swt.locked(), False)
 
-        test_vals = [random.getrandbits(32) for i in range(len(unlocked_ro_regs))]
-        for test_addr, test_val in zip(unlocked_ro_regs, test_vals):
-            # Pretend these reads and writes are happening from a random
-            # instruction
-            test_pc = self.get_random_pc()
-            self.emu.setProgramCounter(test_pc)
-
-            # Should be no pending exceptions by default
-            self.assertEqual(self._getPendingExceptions(), [])
-
-            msg = 'invalid write of 0x%x to 0x%x' % (test_val, test_addr)
-            with self.assertRaises(intc_exc.MceWriteBusError, msg=msg) as cm:
-                self.emu.writeMemValue(test_addr, test_val, 4)
-
-            args = {
-                'va': test_addr,
-                'data': e_bits.buildbytes(test_val, 4, self.emu.getEndian()),
-                'pc': test_pc,
-                'written': 0,
-            }
-            self.assertEqual(cm.exception.kwargs, args, msg=msg)
+        for test_addr in unlocked_ro_regs:
+            self.validate_invalid_write(test_addr, 4)
 
         # Lock the SWT and try again
         lock_swt_val = clear_ria_val | 0x00000010
@@ -438,27 +385,8 @@ class MPC5674_WDT_Test(MPC5674_Test):
         self.assertEqual(self.emu.swt.registers.mcr.slk, 1)
         self.assertEqual(self.emu.swt.locked(), True)
 
-        test_vals = [random.getrandbits(32) for i in range(len(unlocked_ro_regs))]
-        for test_addr, test_val in zip(unlocked_ro_regs, test_vals):
-            # Pretend these reads and writes are happening from a random
-            # instruction
-            test_pc = self.get_random_pc()
-            self.emu.setProgramCounter(test_pc)
-
-            # Should be no pending exceptions by default
-            self.assertEqual(self._getPendingExceptions(), [])
-
-            msg = 'invalid write of 0x%x to 0x%x' % (test_val, test_addr)
-            with self.assertRaises(intc_exc.MceWriteBusError, msg=msg) as cm:
-                self.emu.writeMemValue(test_addr, test_val, 4)
-
-            args = {
-                'va': test_addr,
-                'data': e_bits.buildbytes(test_val, 4, self.emu.getEndian()),
-                'pc': test_pc,
-                'written': 0,
-            }
-            self.assertEqual(cm.exception.kwargs, args, msg=msg)
+        for test_addr in unlocked_ro_regs:
+            self.validate_invalid_write(test_addr, 4)
 
     def test_swt_softlock(self):
         # Enable the watchdog

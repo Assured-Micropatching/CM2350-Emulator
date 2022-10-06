@@ -1,10 +1,17 @@
+import os
+import random
+import struct
+import unittest
 
+from cm2350 import intc_exc
 import envi.bits as e_bits
 
 from .helpers import MPC5674_Test
 
+import logging
+logger = logging.getLogger(__name__)
 
-FLEXCAN_DEVICES = (
+EDMA_DEVICES = (
     ('eDMA_A', 0XFFF44000),
     ('eDMA_B', 0XFFF54000),
 )
@@ -36,14 +43,181 @@ EDMA_TCDx_OFFSET    = 0x1000
 
 EDMA_MCR_DEFAULT    = (0x0000E400, 0x00000400)
 
+EDMA_MCR_HALT_FLAG  = 0x00000020
+
+
+SIZE_MAP = {
+    1:  0,
+    2:  1,
+    4:  2,
+    8:  3,
+    32: 5,
+}
+
+
+def get_xfer_vals(emu, saddr=None, ssize=None, daddr=None, dsize=None, nbytes=None, biter=None):
+    # Number of bytes to be transferred
+    if ssize is None:
+        ssize = random.choice([1, 2, 4, 8, 32])
+    if dsize is None:
+        dsize = random.choice([1, 2, 4, 8, 32])
+
+    if nbytes is None:
+        # Make the number of bytes to transfer between 2 and 10 times the
+        # maximum size to transfer
+        if dsize > ssize:
+            nbytes = dsize * random.randint(2, 10)
+        else:
+            nbytes = ssize * random.randint(2, 10)
+
+    if biter is None:
+        # A reasonable amount of major loops
+        biter = random.randrange(1, 5)
+
+    # The source and destination address needs to be nbytes * (biter + 1) bytes
+    # away from the end of the memory range
+    mem_end_offset = nbytes * (biter + 1)
+
+    if saddr is None:
+        start, stop = random.choice(emu.ram_mmaps)
+        saddr = random.randrange(start, stop - mem_end_offset)
+
+        # Adjust saddr to be valid given ssize
+        saddr -= (saddr % ssize)
+
+    if daddr is None:
+        start, stop = random.choice(emu.ram_mmaps)
+        if saddr in range(start, stop):
+            # Split the possible destination addresses by mem_end_offset*10
+            # around the saddr
+            buffer = mem_end_offset * 10
+            if saddr > stop - buffer:
+                stop = saddr - buffer
+            elif saddr < start + buffer:
+                start = saddr + buffer
+            else:
+                start, stop = random.choice([
+                    (start, saddr - buffer),
+                    (saddr + buffer, stop),
+                ])
+        daddr = random.randrange(start, stop - mem_end_offset)
+
+        # Adjust daddr to be valid given dsize
+        daddr -= (daddr % dsize)
+
+    return saddr, ssize, daddr, dsize, nbytes, biter
+
+
+class TCD:
+    def __init__(self, emu, saddr=None, smod=0, ssize=None, dmod=0, dsize=None,
+                 soff=None, nbytes=None, slast=None, daddr=None, citer=None, doff=None,
+                 dlast_sga=None, biter=None, bwc=0, major_linkch=0, done=0, active=0,
+                 major_e_link=0, e_sg=0, d_req=0, int_half=0, int_maj=0,
+                 start=1):
+
+        if saddr is None or ssize is None or daddr is None or dsize is None or \
+                nbytes is None or biter is None:
+            self.saddr, self.ssize, self.daddr, self.dsize, self.nbytes, self.biter = \
+                    get_xfer_vals(emu, saddr, ssize, daddr, dsize, nbytes, biter)
+        else:
+            self.saddr  = saddr
+            self.ssize  = ssize
+            self.daddr  = daddr
+            self.dsize  = dsize
+            self.nbytes = nbytes
+            self.biter  = biter
+
+        if soff is None:
+            # Automatically define soff as nbytes
+            soff = self.nbytes
+        self.soff = soff
+
+        if slast is None:
+            # Set slast to return saddr to it's original value
+            slast = -self.size()
+        self.slast = slast
+
+        if doff is None:
+            # Automatically define doff as nbytes
+            doff = self.nbytes
+        self.doff = doff
+
+        if dlast_sga is None:
+            # Set dlast to return saddr to it's original value
+            dlast_sga = -self.size()
+        self.dlast_sga = dlast_sga
+
+        self._set_values()
+
+        if citer is None:
+            citer = self.biter
+
+        self.smod           = smod
+        self.dmod           = dmod
+        self.citer          = citer
+        self.bwc            = bwc
+        self.major_linkch   = major_linkch
+        self.done           = done
+        self.active         = active
+        self.major_e_link   = major_e_link
+        self.e_sg           = e_sg
+        self.d_req          = d_req
+        self.int_half       = int_half
+        self.int_maj        = int_maj
+        self.start          = start
+
+    def size(self):
+        return self.nbytes * self.biter
+
+    def _set_values(self):
+        # Calculate the correct values for the SSIZE and DSIZE fields
+        self._ssize = SIZE_MAP[self.ssize]
+        self._dsize = SIZE_MAP[self.dsize]
+
+    def to_bytes(self):
+        self._set_values()
+
+        ssize = (self.smod << 3)                 | self._ssize
+        dsize = (self.dmod << 3)                 | self._dsize
+        link  = ((self.bwc & 0x3) << 6)          | self.major_linkch
+        flags = \
+                ((self.bwc & 0x3) << 6)          | self.major_linkch | \
+                ((self.done & 0x1) << 7)         | ((self.active & 0x1) << 6) | \
+                ((self.major_e_link & 0x1) << 5) | ((self.e_sg & 0x1) << 4) | \
+                ((self.d_req & 0x1) << 3)        | ((self.int_half & 0x1) << 2) | \
+                ((self.int_maj & 0x1) << 1)      | (self.start & 0x1)
+
+        # soff, slast, doff, and dlast_sga are signed fields
+        soff  = self.soff & 0xFFFF
+        slast = self.slast & 0xFFFFFFFF
+        doff  = self.doff & 0xFFFF
+        dlast = self.dlast_sga & 0xFFFFFFFF
+
+        return struct.pack('>IBBHIIIHHIHBB', self.saddr, ssize, dsize, soff,
+                           self.nbytes, slast, self.daddr, self.citer, doff,
+                           dlast, self.biter, link, flags)
+
+    def write(self, emu, addr):
+        # Write in 4-byte chunks to mimic the normal maximum size a program can
+        # write with one instruction.
+        data = self.to_bytes()
+        emu.writeMemory(addr, data[:4])
+        emu.writeMemory(addr + 4, data[4:8])
+        emu.writeMemory(addr + 8, data[8:12])
+        emu.writeMemory(addr + 12, data[12:16])
+        emu.writeMemory(addr + 16, data[16:20])
+        emu.writeMemory(addr + 20, data[20:24])
+        emu.writeMemory(addr + 24, data[24:28])
+        emu.writeMemory(addr + 28, data[28:])
+
 
 class MPC5674_eDMA_Test(MPC5674_Test):
 
     # Simple register tests
 
     def test_edma_mcr_defaults(self):
-        for i in range(len(FLEXCAN_DEVICES)):
-            devname, baseaddr = FLEXCAN_DEVICES[i]
+        for i in range(len(EDMA_DEVICES)):
+            devname, baseaddr = EDMA_DEVICES[i]
             self.assertEqual(self.emu.dma[i].devname, devname)
 
             addr = baseaddr + EDMA_MCR_OFFSET
@@ -66,8 +240,8 @@ class MPC5674_eDMA_Test(MPC5674_Test):
             self.assertEqual(self.emu.dma[i].registers.mcr.edbg, 0)
 
     def test_edma_esr_defaults(self):
-        for i in range(len(FLEXCAN_DEVICES)):
-            devname, baseaddr = FLEXCAN_DEVICES[i]
+        for i in range(len(EDMA_DEVICES)):
+            devname, baseaddr = EDMA_DEVICES[i]
             self.assertEqual(self.emu.dma[i].devname, devname)
 
             addr = baseaddr + EDMA_ESR_OFFSET
@@ -88,64 +262,272 @@ class MPC5674_eDMA_Test(MPC5674_Test):
             self.assertEqual(self.emu.dma[i].registers.esr.dbe, 0)
 
     def test_edma_erqr_defaults(self):
-        for i in range(len(FLEXCAN_DEVICES)):
-            devname, baseaddr = FLEXCAN_DEVICES[i]
+        for i in range(len(EDMA_DEVICES)):
+            devname, baseaddr = EDMA_DEVICES[i]
             self.assertEqual(self.emu.dma[i].devname, devname)
 
-            if devname == 'eDMA_A':
-                addr = baseaddr + EDMA_ERQRH_OFFSET
-                self.assertEqual(self.emu.readMemValue(addr, 4), 0x00000000)
-                self.assertEqual(self.emu.readMemory(addr, 4), b'\x00\x00\x00\x00')
+            high_addr = baseaddr + EDMA_ERQRH_OFFSET
+            low_addr = baseaddr + EDMA_ERQRL_OFFSET
+            set_addr = baseaddr + EDMA_SERQR_OFFSET
+            clear_addr = baseaddr + EDMA_CERQR_OFFSET
 
-            addr = baseaddr + EDMA_ERQRL_OFFSET
-            self.assertEqual(self.emu.readMemValue(addr, 4), 0x00000000)
-            self.assertEqual(self.emu.readMemory(addr, 4), b'\x00\x00\x00\x00')
+            if devname == 'eDMA_A':
+                self.assertEqual(self.emu.readMemValue(high_addr, 4), 0x00000000)
+                self.assertEqual(self.emu.readMemory(high_addr, 4), b'\x00\x00\x00\x00')
+
+            self.assertEqual(self.emu.readMemValue(low_addr, 4), 0x00000000)
+            self.assertEqual(self.emu.readMemory(low_addr, 4), b'\x00\x00\x00\x00')
+
+            # Verify that the "set ERQR" register works as expected
+            #   0x80 writes are ignored
+            #   0x40 writes cause all ERQR flags to be set
+            #        all other writes will only set the specific channel
+            self.emu.writeMemValue(set_addr, 0xFF, 1)
+            if devname == 'eDMA_A':
+                self.assertEqual(self.emu.readMemValue(high_addr, 4), 0x00000000)
+            self.assertEqual(self.emu.readMemValue(low_addr, 4), 0x00000000)
+
+            self.emu.writeMemValue(set_addr, 0x40, 1)
+            if devname == 'eDMA_A':
+                self.assertEqual(self.emu.readMemValue(high_addr, 4), 0xFFFFFFFF)
+            self.assertEqual(self.emu.readMemValue(low_addr, 4), 0xFFFFFFFF)
+
+            # Inverse for the "clear ERQR" register
+            self.emu.writeMemValue(clear_addr, 0xFF, 1)
+            if devname == 'eDMA_A':
+                self.assertEqual(self.emu.readMemValue(high_addr, 4), 0xFFFFFFFF)
+            self.assertEqual(self.emu.readMemValue(low_addr, 4), 0xFFFFFFFF)
+
+            self.emu.writeMemValue(clear_addr, 0x40, 1)
+            if devname == 'eDMA_A':
+                self.assertEqual(self.emu.readMemValue(high_addr, 4), 0x00000000)
+            self.assertEqual(self.emu.readMemValue(low_addr, 4), 0x00000000)
+
+            # Set each channel individually
+            for chan in range(self.emu.dma[i].num_channels):
+                if devname == 'eDMA_A':
+                    self.emu.dma[i].registers.erqrh = 0x00000000
+                self.emu.dma[i].registers.erqrl = 0x00000000
+
+                msg = 'setting ERQR[%d]' % chan
+                mask = 1 << (chan % 32)
+                self.emu.writeMemValue(set_addr, chan, 1)
+
+                if chan >= 32:
+                    self.assertEqual(self.emu.readMemValue(high_addr, 4), mask, msg=msg)
+                    self.assertEqual(self.emu.readMemValue(low_addr, 4), 0x00000000, msg=msg)
+                else:
+                    if devname == 'eDMA_A':
+                        self.assertEqual(self.emu.readMemValue(high_addr, 4), 0x00000000, msg=msg)
+                    self.assertEqual(self.emu.readMemValue(low_addr, 4), mask, msg=msg)
+
+            # Clear each channel individually
+            for chan in range(self.emu.dma[i].num_channels):
+                if devname == 'eDMA_A':
+                    self.emu.dma[i].registers.erqrh = 0xFFFFFFFF
+                self.emu.dma[i].registers.erqrl = 0xFFFFFFFF
+
+                msg = 'clearing ERQR[%d]' % chan
+                mask = ~(1 << (chan % 32)) & 0xFFFFFFFF
+                self.emu.writeMemValue(clear_addr, chan, 1)
+
+                if chan >= 32:
+                    self.assertEqual(self.emu.readMemValue(high_addr, 4), mask, msg=msg)
+                    self.assertEqual(self.emu.readMemValue(low_addr, 4), 0xFFFFFFFF, msg=msg)
+                else:
+                    if devname == 'eDMA_A':
+                        self.assertEqual(self.emu.readMemValue(high_addr, 4), 0xFFFFFFFF, msg=msg)
+                    self.assertEqual(self.emu.readMemValue(low_addr, 4), mask, msg=msg)
 
     def test_edma_eeir_defaults(self):
-        for i in range(len(FLEXCAN_DEVICES)):
-            devname, baseaddr = FLEXCAN_DEVICES[i]
+        for i in range(len(EDMA_DEVICES)):
+            devname, baseaddr = EDMA_DEVICES[i]
             self.assertEqual(self.emu.dma[i].devname, devname)
 
-            if devname == 'eDMA_A':
-                addr = baseaddr + EDMA_EEIRH_OFFSET
-                self.assertEqual(self.emu.readMemValue(addr, 4), 0x00000000)
-                self.assertEqual(self.emu.readMemory(addr, 4), b'\x00\x00\x00\x00')
+            high_addr = baseaddr + EDMA_EEIRH_OFFSET
+            low_addr = baseaddr + EDMA_EEIRL_OFFSET
+            set_addr = baseaddr + EDMA_SEEIR_OFFSET
+            clear_addr = baseaddr + EDMA_CEEIR_OFFSET
 
-            addr = baseaddr + EDMA_EEIRL_OFFSET
-            self.assertEqual(self.emu.readMemValue(addr, 4), 0x00000000)
-            self.assertEqual(self.emu.readMemory(addr, 4), b'\x00\x00\x00\x00')
+            if devname == 'eDMA_A':
+                self.assertEqual(self.emu.readMemValue(high_addr, 4), 0x00000000)
+                self.assertEqual(self.emu.readMemory(high_addr, 4), b'\x00\x00\x00\x00')
+
+            self.assertEqual(self.emu.readMemValue(low_addr, 4), 0x00000000)
+            self.assertEqual(self.emu.readMemory(low_addr, 4), b'\x00\x00\x00\x00')
+
+            # Verify that the "set EEIR" register works as expected
+            #   0x80 writes are ignored
+            #   0x40 writes cause all EEIR flags to be set
+            #        all other writes will only set the specific channel
+            self.emu.writeMemValue(set_addr, 0xFF, 1)
+            if devname == 'eDMA_A':
+                self.assertEqual(self.emu.readMemValue(high_addr, 4), 0x00000000)
+            self.assertEqual(self.emu.readMemValue(low_addr, 4), 0x00000000)
+
+            self.emu.writeMemValue(set_addr, 0x40, 1)
+            if devname == 'eDMA_A':
+                self.assertEqual(self.emu.readMemValue(high_addr, 4), 0xFFFFFFFF)
+            self.assertEqual(self.emu.readMemValue(low_addr, 4), 0xFFFFFFFF)
+
+            # Inverse for the "clear EEIR" register
+            self.emu.writeMemValue(clear_addr, 0xFF, 1)
+            if devname == 'eDMA_A':
+                self.assertEqual(self.emu.readMemValue(high_addr, 4), 0xFFFFFFFF)
+            self.assertEqual(self.emu.readMemValue(low_addr, 4), 0xFFFFFFFF)
+
+            self.emu.writeMemValue(clear_addr, 0x40, 1)
+            if devname == 'eDMA_A':
+                self.assertEqual(self.emu.readMemValue(high_addr, 4), 0x00000000)
+            self.assertEqual(self.emu.readMemValue(low_addr, 4), 0x00000000)
+
+            # Set each channel individually
+            for chan in range(self.emu.dma[i].num_channels):
+                if devname == 'eDMA_A':
+                    self.emu.dma[i].registers.eeirh = 0x00000000
+                self.emu.dma[i].registers.eeirl = 0x00000000
+
+                msg = 'setting EEIR[%d]' % chan
+
+                mask = 1 << (chan % 32)
+                self.emu.writeMemValue(set_addr, chan, 1)
+
+                if chan >= 32:
+                    self.assertEqual(self.emu.readMemValue(high_addr, 4), mask, msg=msg)
+                    self.assertEqual(self.emu.readMemValue(low_addr, 4), 0x00000000, msg=msg)
+                else:
+                    if devname == 'eDMA_A':
+                        self.assertEqual(self.emu.readMemValue(high_addr, 4), 0x00000000, msg=msg)
+                    self.assertEqual(self.emu.readMemValue(low_addr, 4), mask, msg=msg)
+
+            # Clear each channel individually
+            for chan in range(self.emu.dma[i].num_channels):
+                if devname == 'eDMA_A':
+                    self.emu.dma[i].registers.eeirh = 0xFFFFFFFF
+                self.emu.dma[i].registers.eeirl = 0xFFFFFFFF
+
+                msg = 'clearing EEIR[%d]' % chan
+
+                mask = ~(1 << (chan % 32)) & 0xFFFFFFFF
+                self.emu.writeMemValue(clear_addr, chan, 1)
+
+                if chan >= 32:
+                    self.assertEqual(self.emu.readMemValue(high_addr, 4), mask, msg=msg)
+                    self.assertEqual(self.emu.readMemValue(low_addr, 4), 0xFFFFFFFF, msg=msg)
+                else:
+                    if devname == 'eDMA_A':
+                        self.assertEqual(self.emu.readMemValue(high_addr, 4), 0xFFFFFFFF, msg=msg)
+                    self.assertEqual(self.emu.readMemValue(low_addr, 4), mask, msg=msg)
 
     def test_edma_irqr_defaults(self):
-        for i in range(len(FLEXCAN_DEVICES)):
-            devname, baseaddr = FLEXCAN_DEVICES[i]
+        for i in range(len(EDMA_DEVICES)):
+            devname, baseaddr = EDMA_DEVICES[i]
             self.assertEqual(self.emu.dma[i].devname, devname)
 
-            if devname == 'eDMA_A':
-                addr = baseaddr + EDMA_IRQRH_OFFSET
-                self.assertEqual(self.emu.readMemValue(addr, 4), 0x00000000)
-                self.assertEqual(self.emu.readMemory(addr, 4), b'\x00\x00\x00\x00')
+            high_addr = baseaddr + EDMA_IRQRH_OFFSET
+            low_addr = baseaddr + EDMA_IRQRL_OFFSET
+            clear_addr = baseaddr + EDMA_CIRQR_OFFSET
 
-            addr = baseaddr + EDMA_IRQRL_OFFSET
-            self.assertEqual(self.emu.readMemValue(addr, 4), 0x00000000)
-            self.assertEqual(self.emu.readMemory(addr, 4), b'\x00\x00\x00\x00')
+            if devname == 'eDMA_A':
+                self.assertEqual(self.emu.readMemValue(high_addr, 4), 0x00000000)
+                self.assertEqual(self.emu.readMemory(high_addr, 4), b'\x00\x00\x00\x00')
+
+            self.assertEqual(self.emu.readMemValue(low_addr, 4), 0x00000000)
+            self.assertEqual(self.emu.readMemory(low_addr, 4), b'\x00\x00\x00\x00')
+
+            # Verify that the "clear IRQR" register works as expected
+            #   0x80 writes are ignored
+            #   0x40 writes cause all IRQR flags to be cleared
+            #        all other writes will only cleared the specific channel
+            if devname == 'eDMA_A':
+                self.emu.dma[i].registers.irqrh = 0xFFFFFFFF
+            self.emu.dma[i].registers.irqrl = 0xFFFFFFFF
+
+            self.emu.writeMemValue(clear_addr, 0xFF, 1)
+            if devname == 'eDMA_A':
+                self.assertEqual(self.emu.readMemValue(high_addr, 4), 0xFFFFFFFF)
+            self.assertEqual(self.emu.readMemValue(low_addr, 4), 0xFFFFFFFF)
+
+            self.emu.writeMemValue(clear_addr, 0x40, 1)
+            if devname == 'eDMA_A':
+                self.assertEqual(self.emu.readMemValue(high_addr, 4), 0x00000000)
+            self.assertEqual(self.emu.readMemValue(low_addr, 4), 0x00000000)
+
+            # Clear each channel individually
+            for chan in range(self.emu.dma[i].num_channels):
+                if devname == 'eDMA_A':
+                    self.emu.dma[i].registers.irqrh = 0xFFFFFFFF
+                self.emu.dma[i].registers.irqrl = 0xFFFFFFFF
+
+                msg = 'clearing IRQR[%d]' % chan
+
+                mask = ~(1 << (chan % 32)) & 0xFFFFFFFF
+                self.emu.writeMemValue(clear_addr, chan, 1)
+
+                if chan >= 32:
+                    self.assertEqual(self.emu.readMemValue(high_addr, 4), mask, msg=msg)
+                    self.assertEqual(self.emu.readMemValue(low_addr, 4), 0xFFFFFFFF, msg=msg)
+                else:
+                    if devname == 'eDMA_A':
+                        self.assertEqual(self.emu.readMemValue(high_addr, 4), 0xFFFFFFFF, msg=msg)
+                    self.assertEqual(self.emu.readMemValue(low_addr, 4), mask, msg=msg)
 
     def test_edma_er_defaults(self):
-        for i in range(len(FLEXCAN_DEVICES)):
-            devname, baseaddr = FLEXCAN_DEVICES[i]
+        for i in range(len(EDMA_DEVICES)):
+            devname, baseaddr = EDMA_DEVICES[i]
             self.assertEqual(self.emu.dma[i].devname, devname)
 
-            if devname == 'eDMA_A':
-                addr = baseaddr + EDMA_ERH_OFFSET
-                self.assertEqual(self.emu.readMemValue(addr, 4), 0x00000000)
-                self.assertEqual(self.emu.readMemory(addr, 4), b'\x00\x00\x00\x00')
+            high_addr = baseaddr + EDMA_ERH_OFFSET
+            low_addr = baseaddr + EDMA_ERL_OFFSET
+            clear_addr = baseaddr + EDMA_CER_OFFSET
 
-            addr = baseaddr + EDMA_ERL_OFFSET
-            self.assertEqual(self.emu.readMemValue(addr, 4), 0x00000000)
-            self.assertEqual(self.emu.readMemory(addr, 4), b'\x00\x00\x00\x00')
+            if devname == 'eDMA_A':
+                self.assertEqual(self.emu.readMemValue(high_addr, 4), 0x00000000)
+                self.assertEqual(self.emu.readMemory(high_addr, 4), b'\x00\x00\x00\x00')
+
+            self.assertEqual(self.emu.readMemValue(low_addr, 4), 0x00000000)
+            self.assertEqual(self.emu.readMemory(low_addr, 4), b'\x00\x00\x00\x00')
+
+            # Verify that the "clear ER" register works as expected
+            #   0x80 writes are ignored
+            #   0x40 writes cause all ER flags to be cleared
+            #        all other writes will only cleared the specific channel
+            if devname == 'eDMA_A':
+                self.emu.dma[i].registers.erh = 0xFFFFFFFF
+            self.emu.dma[i].registers.erl = 0xFFFFFFFF
+
+            self.emu.writeMemValue(clear_addr, 0xFF, 1)
+            if devname == 'eDMA_A':
+                self.assertEqual(self.emu.readMemValue(high_addr, 4), 0xFFFFFFFF)
+            self.assertEqual(self.emu.readMemValue(low_addr, 4), 0xFFFFFFFF)
+
+            self.emu.writeMemValue(clear_addr, 0x40, 1)
+            if devname == 'eDMA_A':
+                self.assertEqual(self.emu.readMemValue(high_addr, 4), 0x00000000)
+            self.assertEqual(self.emu.readMemValue(low_addr, 4), 0x00000000)
+
+            # Clear each channel individually
+            for chan in range(self.emu.dma[i].num_channels):
+                if devname == 'eDMA_A':
+                    self.emu.dma[i].registers.erh = 0xFFFFFFFF
+                self.emu.dma[i].registers.erl = 0xFFFFFFFF
+
+                msg = 'clearing ER[%d]' % chan
+
+                mask = ~(1 << (chan % 32)) & 0xFFFFFFFF
+                self.emu.writeMemValue(clear_addr, chan, 1)
+
+                if chan >= 32:
+                    self.assertEqual(self.emu.readMemValue(high_addr, 4), mask, msg=msg)
+                    self.assertEqual(self.emu.readMemValue(low_addr, 4), 0xFFFFFFFF, msg=msg)
+                else:
+                    if devname == 'eDMA_A':
+                        self.assertEqual(self.emu.readMemValue(high_addr, 4), 0xFFFFFFFF, msg=msg)
+                    self.assertEqual(self.emu.readMemValue(low_addr, 4), mask, msg=msg)
 
     def test_edma_hrs_defaults(self):
-        for i in range(len(FLEXCAN_DEVICES)):
-            devname, baseaddr = FLEXCAN_DEVICES[i]
+        for i in range(len(EDMA_DEVICES)):
+            devname, baseaddr = EDMA_DEVICES[i]
             self.assertEqual(self.emu.dma[i].devname, devname)
 
             if devname == 'eDMA_A':
@@ -158,8 +540,8 @@ class MPC5674_eDMA_Test(MPC5674_Test):
             self.assertEqual(self.emu.readMemory(addr, 4), b'\x00\x00\x00\x00')
 
     def test_edma_gwr_defaults(self):
-        for i in range(len(FLEXCAN_DEVICES)):
-            devname, baseaddr = FLEXCAN_DEVICES[i]
+        for i in range(len(EDMA_DEVICES)):
+            devname, baseaddr = EDMA_DEVICES[i]
             self.assertEqual(self.emu.dma[i].devname, devname)
 
             if devname == 'eDMA_A':
@@ -172,8 +554,8 @@ class MPC5674_eDMA_Test(MPC5674_Test):
             self.assertEqual(self.emu.readMemory(addr, 4), b'\x00\x00\x00\x00')
 
     def test_edma_cpr_defaults(self):
-        for i in range(len(FLEXCAN_DEVICES)):
-            devname, baseaddr = FLEXCAN_DEVICES[i]
+        for i in range(len(EDMA_DEVICES)):
+            devname, baseaddr = EDMA_DEVICES[i]
             self.assertEqual(self.emu.dma[i].devname, devname)
 
             if devname == 'eDMA_A':
@@ -196,8 +578,8 @@ class MPC5674_eDMA_Test(MPC5674_Test):
                 self.assertEqual(self.emu.dma[i].registers.cpr[chan].chpri, chan & 0xF, msg=testmsg)
 
     def test_edma_tcd_defaults(self):
-        for i in range(len(FLEXCAN_DEVICES)):
-            devname, baseaddr = FLEXCAN_DEVICES[i]
+        for i in range(len(EDMA_DEVICES)):
+            devname, baseaddr = EDMA_DEVICES[i]
             self.assertEqual(self.emu.dma[i].devname, devname)
 
             if devname == 'eDMA_A':
@@ -205,13 +587,14 @@ class MPC5674_eDMA_Test(MPC5674_Test):
             else:
                 self.assertEqual(self.emu.dma[i].num_channels, 32)
 
-            addr = baseaddr + EDMA_TCDx_OFFSET
-            # Each TCD is a 256 bit (8 byte) field
-            bytevalue = b'\x00' * 8
+            # Each TCD is a 256 bit (16 byte) field
+            bytevalue = b'\x00' * 32
             for chan in range(self.emu.dma[i].num_channels):
                 testmsg = '%s[%d]' % (devname, chan)
-                self.assertEqual(self.emu.readMemValue(addr + (8*chan), 8), 0, msg=testmsg)
-                self.assertEqual(self.emu.readMemory(addr + (8*chan), 8), bytevalue, msg=testmsg)
+
+                tcd_addr = baseaddr + EDMA_TCDx_OFFSET + (32 * chan)
+
+                self.assertEqual(self.emu.readMemory(tcd_addr, 32), bytevalue, msg=testmsg)
                 self.assertEqual(self.emu.dma[i].registers.tcd[chan].saddr, 0, msg=testmsg)
                 self.assertEqual(self.emu.dma[i].registers.tcd[chan].smod, 0, msg=testmsg)
                 self.assertEqual(self.emu.dma[i].registers.tcd[chan].ssize, 0, msg=testmsg)
@@ -236,3 +619,420 @@ class MPC5674_eDMA_Test(MPC5674_Test):
                 self.assertEqual(self.emu.dma[i].registers.tcd[chan].start, 0, msg=testmsg)
 
     # Functionality tests
+
+    @unittest.skip('implement')
+    def test_edma_tcd_config_errors(self):
+        pass
+
+    def test_edma_tcd_simple(self):
+        for i in range(len(EDMA_DEVICES)):
+            devname, baseaddr = EDMA_DEVICES[i]
+            self.assertEqual(self.emu.dma[i].devname, devname)
+
+            if devname == 'eDMA_A':
+                self.assertEqual(self.emu.dma[i].num_channels, 64, msg=devname)
+            else:
+                self.assertEqual(self.emu.dma[i].num_channels, 32, msg=devname)
+
+            mcr_addr = baseaddr + EDMA_MCR_OFFSET
+            ssbr_addr = baseaddr + EDMA_SSBR_OFFSET
+            cdsbr_addr = baseaddr + EDMA_CDSBR_OFFSET
+
+            # Create some TCDs
+            tcd1 = TCD(self.emu, start=1)
+            tcd2 = TCD(self.emu, start=0)
+
+            # Fill in the source addresses with some random data, along with a
+            # little data surrounding the valid start and end.
+            sdata1_size = tcd1.size() + (tcd1.nbytes * 2)
+            sdata1 = os.urandom(sdata1_size)
+            self.emu.writeMemory(tcd1.saddr - tcd1.nbytes, sdata1)
+
+            sdata1_empty = os.urandom(sdata1_size)
+            self.emu.writeMemory(tcd1.daddr - tcd1.nbytes, sdata1_empty)
+
+            sdata1_expected = sdata1_empty[:tcd1.nbytes] + \
+                    sdata1[tcd1.nbytes:-tcd1.nbytes] + \
+                    sdata1_empty[-tcd1.nbytes:]
+
+            sdata2_size = tcd2.size() + (tcd2.nbytes * 2)
+            sdata2 = os.urandom(sdata2_size)
+            self.emu.writeMemory(tcd2.saddr - tcd2.nbytes, sdata2)
+
+            sdata2_empty = os.urandom(sdata2_size)
+            self.emu.writeMemory(tcd2.daddr - tcd2.nbytes, sdata2_empty)
+
+            sdata2_expected = sdata2_empty[:tcd2.nbytes] + \
+                    sdata2[tcd2.nbytes:-tcd2.nbytes] + \
+                    sdata2_empty[-tcd2.nbytes:]
+
+            # Pick two channels to use in the same priority group
+            chan1, chan2 = random.sample(random.choice(self.emu.dma[i].groups)[0], k=2)
+            logger.debug('Selected test channels: %d, %d', chan1, chan2)
+            tcd1_addr = baseaddr + EDMA_TCDx_OFFSET + (32 * chan1)
+            tcd2_addr = baseaddr + EDMA_TCDx_OFFSET + (32 * chan2)
+            cpr1_addr = baseaddr + EDMA_CPRx_OFFSET + chan1
+            cpr2_addr = baseaddr + EDMA_CPRx_OFFSET + chan2
+
+            # With the default fixed priority set channel 2 to have higher
+            # priority over channel 1
+            self.assertEqual(self.emu.readMemValue(cpr1_addr, 1) & 0x0F, chan1 % 16, msg=devname)
+            self.assertEqual(self.emu.readMemValue(cpr2_addr, 1) & 0x0F, chan2 % 16, msg=devname)
+            self.emu.writeMemValue(cpr1_addr, 0, 1)
+            self.emu.writeMemValue(cpr2_addr, 1, 1)
+
+            # Disable DMA (set MCR[HALT])
+            self.emu.writeMemValue(mcr_addr, EDMA_MCR_DEFAULT[i] | EDMA_MCR_HALT_FLAG, 4)
+            self.assertEqual(self.emu.dma[i].registers.mcr.halt, 1, msg=devname)
+
+            # Write the TCDs and confirm nothing happens.
+            tcd1.write(self.emu, tcd1_addr)
+            self.assertEqual(self.emu.readMemory(tcd1_addr, 32), tcd1.to_bytes(), msg=devname)
+            self.assertTrue(chan1 not in self.emu.dma[i]._pending)
+            self.assertEqual(self.emu.dma[i].registers.tcd[chan1].start, 1, msg=devname)
+            self.assertEqual(self.emu.dma[i].registers.tcd[chan1].active, 0, msg=devname)
+
+            tcd2.write(self.emu, tcd2_addr)
+            self.assertEqual(self.emu.readMemory(tcd2_addr, 32), tcd2.to_bytes(), msg=devname)
+            self.assertTrue(chan2 not in self.emu.dma[i]._pending)
+            self.assertEqual(self.emu.dma[i].registers.tcd[chan2].start, 0, msg=devname)
+            self.assertEqual(self.emu.dma[i].registers.tcd[chan2].active, 0, msg=devname)
+
+            self.assertEqual(self.emu.dma[i].getPending(), None, msg=devname)
+
+            # clear MCR[HALT]
+            self.emu.writeMemValue(mcr_addr, EDMA_MCR_DEFAULT[i], 4)
+            self.assertEqual(self.emu.dma[i].registers.mcr.halt, 0, msg=devname)
+
+            # TCD1 should have been started when halt was cleared
+            self.assertEqual(self.emu.readMemory(tcd1_addr, 32), tcd1.to_bytes(), msg=devname)
+            self.assertTrue(chan1 in self.emu.dma[i]._pending)
+            config1 = self.emu.dma[i]._pending[chan1]
+            self.assertEqual(config1.tcd, self.emu.dma[i].registers.tcd[chan1], msg=devname)
+            self.assertEqual(self.emu.dma[i].registers.tcd[chan1].start, 1, msg=devname)
+            self.assertEqual(self.emu.dma[i].registers.tcd[chan1].active, 0, msg=devname)
+
+            self.assertEqual(self.emu.readMemory(tcd2_addr, 32), tcd2.to_bytes(), msg=devname)
+            self.assertTrue(chan2 not in self.emu.dma[i]._pending)
+            self.assertEqual(self.emu.dma[i].registers.tcd[chan2].start, 0, msg=devname)
+            self.assertEqual(self.emu.dma[i].registers.tcd[chan2].active, 0, msg=devname)
+
+            self.assertEqual(self.emu.dma[i].getPending(), config1, msg=devname)
+
+            # TODO: set START
+            self.assertEqual(self.emu.readMemory(ssbr_addr, 1), b'\x00', msg=devname)
+            self.emu.writeMemValue(ssbr_addr, chan2, 1)
+            self.assertEqual(self.emu.readMemory(ssbr_addr, 1), b'\x00', msg=devname)
+
+            tcd2.start = 1
+            self.assertEqual(self.emu.readMemory(tcd2_addr, 32), tcd2.to_bytes(), msg=devname)
+            self.assertTrue(chan2 in self.emu.dma[i]._pending)
+            config2 = self.emu.dma[i]._pending[chan2]
+            self.assertEqual(config2.tcd, self.emu.dma[i].registers.tcd[chan2], msg=devname)
+            self.assertEqual(self.emu.dma[i].registers.tcd[chan2].start, 1, msg=devname)
+            self.assertEqual(self.emu.dma[i].registers.tcd[chan2].active, 0, msg=devname)
+
+            # Ensure that channel 2 is now higher in the priority list
+            self.assertEqual(self.emu.dma[i].getPending(), config2, msg=devname)
+
+            # Determine how many stepi() calls it should take to complete the
+            # transfers
+            cycles = tcd1.biter + tcd2.biter
+
+            # Fill in a bunch of NOPs (0x60000000: ori r0,r0,0) starting at the
+            # current PC
+            pc = self.emu.getProgramCounter()
+            instrs = b'\x60\x00\x00\x00' * cycles
+            self.emu.flash.data[pc:pc+len(instrs)] = instrs
+
+            # Confirm the two designations have not been written to yet by the
+            # DMA transfer
+            self.assertEqual(self.emu.readMemory(tcd2.daddr - tcd2.nbytes, sdata2_size),
+                             sdata2_empty, msg=devname)
+            self.assertEqual(self.emu.readMemory(tcd1.daddr - tcd1.nbytes, sdata1_size),
+                             sdata1_empty, msg=devname)
+
+            # There are no active transfers yet
+            self.assertEqual(self.emu.dma[i]._active, None)
+
+            # 2 pending transfers
+            self.assertEqual(self.emu.dma[i]._pending,
+                             {chan1: config1, chan2: config2}, msg=devname)
+
+            self.assertEqual(self.emu.dma[i].registers.tcd[chan2].citer,
+                             tcd2.biter, msg=devname)
+            logger.debug('[%s] channel (%d) %d major loops', devname, chan2, tcd2.biter)
+            for citer in reversed(range(tcd2.biter)):
+                msg = '[%s] channel %d / loop %d of %d' % (devname, chan2, citer, tcd2.biter)
+                logger.debug(msg)
+                self.emu.stepi()
+
+                if citer > 0:
+                    # Start and Done should be cleared, Active will be set while
+                    # data is actively being transfered, so it should be cleared
+                    # by now.
+                    self.assertEqual(self.emu.dma[i].registers.tcd[chan2].start, 0, msg=msg)
+                    self.assertEqual(self.emu.dma[i].registers.tcd[chan2].active, 0, msg=msg)
+                    self.assertEqual(self.emu.dma[i].registers.tcd[chan2].done, 0, msg=msg)
+                    self.assertTrue(chan2 in self.emu.dma[i]._pending, msg=msg)
+                    self.assertEqual(self.emu.dma[i].getPending(), config2, msg=msg)
+
+                    # TCD2 should not be the active transfer (because that only
+                    # happens in a small minor-loop self linked condition)
+                    self.assertEqual(self.emu.dma[i]._active, None, msg=msg)
+
+                    # But it should be the first pending transfer
+                    self.assertTrue(chan2 in self.emu.dma[i]._pending, msg=msg)
+                    self.assertEqual(self.emu.dma[i].getPending(), config2, msg=msg)
+
+                    # Confirm that citer has been decremented
+                    self.assertEqual(self.emu.dma[i].registers.tcd[chan2].citer, citer, msg=msg)
+                else:
+                    self.assertEqual(self.emu.dma[i].registers.tcd[chan2].start, 0, msg=msg)
+                    self.assertEqual(self.emu.dma[i].registers.tcd[chan2].active, 0, msg=msg)
+                    self.assertEqual(self.emu.dma[i].registers.tcd[chan2].done, 1, msg=msg)
+                    self.assertTrue(chan2 not in self.emu.dma[i]._pending, msg=msg)
+                    self.assertEqual(self.emu.dma[i].getPending(), config1, msg=msg)
+
+                    # Confirm that citer has been reset to the starting value
+                    self.assertEqual(self.emu.dma[i].registers.tcd[chan2].citer, tcd2.biter, msg=msg)
+
+            # TCD2 should be complete
+            self.assertEqual(config2.tcd, self.emu.dma[i].registers.tcd[chan2], msg=devname)
+
+            # TCD1 is not active yet
+            self.assertEqual(self.emu.dma[i]._active, None, msg=devname)
+
+            # 1 pending transfers
+            self.assertEqual(self.emu.dma[i]._pending, {chan1: config1}, msg=devname)
+
+            # Confirm that the correct amount of data has been written to the
+            # TCD2 destination
+            self.assertEqual(self.emu.readMemory(tcd2.daddr - tcd2.nbytes, sdata2_size), sdata2_expected, msg=devname)
+            self.assertEqual(self.emu.readMemory(tcd1.daddr - tcd1.nbytes, sdata1_size), sdata1_empty, msg=devname)
+
+            self.assertEqual(self.emu.dma[i].registers.tcd[chan1].citer, tcd1.biter, msg=devname)
+            logger.debug('[%s] channel (%d) %d major loops', devname, chan1, tcd1.biter)
+            for citer in reversed(range(tcd1.biter)):
+                msg = '[%s] channel %d / loop %d of %d' % (devname, chan1, citer, tcd1.biter)
+                logger.debug(msg)
+                self.emu.stepi()
+
+                if citer > 0:
+                    # Start and Done should be cleared, Active will be set while
+                    # data is actively being transfered, so it should be cleared
+                    # by now.
+                    self.assertEqual(self.emu.dma[i].registers.tcd[chan1].start, 0, msg=msg)
+                    self.assertEqual(self.emu.dma[i].registers.tcd[chan1].active, 0, msg=msg)
+                    self.assertEqual(self.emu.dma[i].registers.tcd[chan1].done, 0, msg=msg)
+                    self.assertTrue(chan1 in self.emu.dma[i]._pending, msg=msg)
+                    self.assertEqual(self.emu.dma[i].getPending(), config1, msg=msg)
+
+                    # TCD1 should not be the active transfer (because that only
+                    # happens in a small minor-loop self linked condition)
+                    self.assertEqual(self.emu.dma[i]._active, None, msg=msg)
+
+                    # But it should be the first pending transfer
+                    self.assertTrue(chan1 in self.emu.dma[i]._pending, msg=msg)
+                    self.assertEqual(self.emu.dma[i].getPending(), config1, msg=msg)
+
+                    # Confirm that citer has been decremented
+                    self.assertEqual(self.emu.dma[i].registers.tcd[chan1].citer, citer, msg=msg)
+                else:
+                    self.assertEqual(self.emu.dma[i].registers.tcd[chan1].start, 0, msg=msg)
+                    self.assertEqual(self.emu.dma[i].registers.tcd[chan1].active, 0, msg=msg)
+                    self.assertEqual(self.emu.dma[i].registers.tcd[chan1].done, 1, msg=msg)
+                    self.assertTrue(chan1 not in self.emu.dma[i]._pending, msg=msg)
+                    self.assertEqual(self.emu.dma[i].getPending(), None, msg=msg)
+
+                    # Confirm that citer has been reset to the starting value
+                    self.assertEqual(self.emu.dma[i].registers.tcd[chan1].citer, tcd1.biter, msg=msg)
+
+            self.assertEqual(self.emu.readMemory(tcd2.daddr - tcd2.nbytes, sdata2_size), sdata2_expected, msg=devname)
+            self.assertEqual(self.emu.readMemory(tcd1.daddr - tcd1.nbytes, sdata1_size), sdata1_expected, msg=devname)
+
+            # No active transfers anymore
+            self.assertEqual(self.emu.dma[i]._active, None, msg=devname)
+
+            # No more pending transfers
+            self.assertEqual(self.emu.dma[i]._pending, {}, msg=devname)
+
+            # There should still be the processActiveTransfers function
+            # registered for this peripheral, it will clear itself on the next
+            # cycle
+            self.assertEqual(self.emu.extra_processing, [self.emu.dma[i].processActiveTransfers], msg=devname)
+            self.emu.stepi()
+            self.assertEqual(self.emu.extra_processing, [], msg=devname)
+
+    @unittest.skip('implement')
+    def test_edma_fixed_priority(self):
+        pass
+
+    @unittest.skip('implement')
+    def test_edma_rr_priority(self):
+        pass
+
+    def test_edma_hw_trigger(self):
+        # Set the "normal" empty DSPI A receive queue value that isn't an
+        # attempt to mimic real hardware
+        self.emu.dspi[0]._popr_empty_data = b'\x00\x00\x00\x00'
+
+        dspi_a_mcr_addr     = 0XFFF90000
+        dspi_a_sr_addr      = 0XFFF9002C
+        dspi_a_rser_addr    = 0XFFF90030
+        dspi_a_popr_addr    = 0XFFF90038
+
+        SR_RFDF_MASK        = 0x00020000
+        RSER_RFDF_RE_MASK   = 0x00020000
+        RSER_RFDF_DIRS_MASK = 0x00010000
+
+        # Enable DSPI A
+        self.emu.writeMemValue(dspi_a_mcr_addr, 0, 4)
+
+        # Set the RSER[RFDF_RE] flag to indicate that received messages should
+        # result in an interrupt or DMA request
+        value = self.emu.readMemValue(dspi_a_rser_addr, 4)
+        self.emu.writeMemValue(dspi_a_rser_addr, value | RSER_RFDF_RE_MASK, 4)
+
+        # Set up the DSPI A receive event (eDMA A, channel 33)
+        # Configure the TCD to do a circular queue of 4 2-byte entries @
+        # 0x40000000
+        tcd = TCD(self.emu, start=0, saddr=dspi_a_popr_addr, ssize=2, slast=0,
+                  daddr=0x40000000, dsize=2, dmod=3, nbytes=2, biter=1, citer=1,
+                  dlast_sga=2)
+        tcd_addr = EDMA_DEVICES[0][1] + EDMA_TCDx_OFFSET + (32 * 33)
+        tcd.write(self.emu, tcd_addr)
+
+        # Populate known patterns from 0x40000000 - 0x40000010
+        self.emu.writeMemory(0x40000000, b'\x11\x11\x22\x22\x33\x33\x44\x44')
+
+        ########################
+        # Leave ERQRH[ERQ33] unset and RSER[RFDF_DIRS] clear, send a message to
+        # DSPI A
+        ########################
+
+        self.emu.dspi[0].processReceivedData(0xAAAA)
+        self.assertEqual(self.emu.dma[0]._pending, {})
+        self.emu.dma[0].processActiveTransfers()
+
+        # ensure that it was not automatically moved to the destination
+        # address as specified in TCD33
+        self.assertEqual(self.emu.readMemory(0x40000000, 8),
+                         b'\x11\x11\x22\x22\x33\x33\x44\x44')
+        self.assertEqual(self.emu.readMemory(dspi_a_popr_addr, 4), b'\x00\x00\xAA\xAA')
+        self.assertEqual(self.emu.readMemory(dspi_a_popr_addr, 4), b'\x00\x00\x00\x00')
+
+        # Ensure that the SR[RFDF] flag is set and the right exception has been
+        # queued.
+        self.assertEqual(self.emu.readMemValue(dspi_a_sr_addr, 4) & SR_RFDF_MASK, SR_RFDF_MASK)
+        self.assertEqual(self._getPendingExceptions(),
+                         [intc_exc.ExternalException(intc_exc.INTC_SRC.DSPI_A_RX_DRAIN)])
+        self.emu.writeMemValue(dspi_a_sr_addr, SR_RFDF_MASK, 4)
+        self.assertEqual(self.emu.readMemValue(dspi_a_sr_addr, 4) & SR_RFDF_MASK, 0)
+
+        ########################
+        # Set ERQRH[ERQ33] but leave RSER[RFDF_DIRS] cleared and ensure the
+        # normal interrupt still happens.
+        ########################
+
+        erqrh_addr = EDMA_DEVICES[0][1] + EDMA_ERQRH_OFFSET
+        self.emu.writeMemValue(erqrh_addr, 0x00000002, 4)
+
+        self.emu.dspi[0].processReceivedData(0xBBBB)
+        self.assertEqual(self.emu.dma[0]._pending, {})
+        self.emu.dma[0].processActiveTransfers()
+
+        # ensure that it was not automatically moved to the destination
+        # address as specified in TCD33
+        self.assertEqual(self.emu.readMemory(0x40000000, 8),
+                         b'\x11\x11\x22\x22\x33\x33\x44\x44')
+        self.assertEqual(self.emu.readMemory(dspi_a_popr_addr, 4), b'\x00\x00\xBB\xBB')
+        self.assertEqual(self.emu.readMemory(dspi_a_popr_addr, 4), b'\x00\x00\x00\x00')
+
+        # Ensure that the SR[RFDF] flag is set and the right exception has been
+        # queued.
+        self.assertEqual(self.emu.readMemValue(dspi_a_sr_addr, 4) & SR_RFDF_MASK, SR_RFDF_MASK)
+        self.assertEqual(self._getPendingExceptions(),
+                         [intc_exc.ExternalException(intc_exc.INTC_SRC.DSPI_A_RX_DRAIN)])
+        self.emu.writeMemValue(dspi_a_sr_addr, SR_RFDF_MASK, 4)
+        self.assertEqual(self.emu.readMemValue(dspi_a_sr_addr, 4) & SR_RFDF_MASK, 0)
+
+        ########################
+        # clear ERQRH[ERQ33] and set the RSER[RFDF_DIRS] bit for DSPI A and
+        # ensure that the normal interrupt does not happen, but also the DMA
+        # transfer does not happen.
+        ########################
+
+        value = self.emu.readMemValue(dspi_a_rser_addr, 4)
+        self.emu.writeMemValue(dspi_a_rser_addr, value | RSER_RFDF_DIRS_MASK, 4)
+
+        erqrh_addr = EDMA_DEVICES[0][1] + EDMA_ERQRH_OFFSET
+        self.emu.writeMemValue(erqrh_addr, 0x00000000, 4)
+
+        self.emu.dspi[0].processReceivedData(0xCCCC)
+        self.assertEqual(self.emu.dma[0]._pending, {})
+        self.emu.dma[0].processActiveTransfers()
+
+        # ensure that it was not automatically moved to the destination
+        # address as specified in TCD33
+        self.assertEqual(self.emu.readMemory(0x40000000, 8),
+                         b'\x11\x11\x22\x22\x33\x33\x44\x44')
+        self.assertEqual(self.emu.readMemory(dspi_a_popr_addr, 4), b'\x00\x00\xCC\xCC')
+        self.assertEqual(self.emu.readMemory(dspi_a_popr_addr, 4), b'\x00\x00\x00\x00')
+
+        # Ensure that the SR[RFDF] flag is not set and the no exceptions are
+        # queued.
+        self.assertEqual(self.emu.readMemValue(dspi_a_sr_addr, 4) & SR_RFDF_MASK, 0)
+        self.assertEqual(self._getPendingExceptions(), [])
+
+        ########################
+        # set ERQRH[ERQ33] and set the RSER[RFDF_DIRS] bit for DSPI A and ensure
+        # that the RFDF interrupt is not set but rather the data is copied
+        # correctly to the destination address specified in TCD33 using the
+        # circular queue feature.
+        ########################
+
+        erqrh_addr = EDMA_DEVICES[0][1] + EDMA_ERQRH_OFFSET
+        self.emu.writeMemValue(erqrh_addr, 0x00000002, 4)
+
+        # Test messages and the address we expect them to be placed at
+        msgs = (
+            (random.randrange(1, 0xFFFF+1), 0x40000000),
+            (random.randrange(1, 0xFFFF+1), 0x40000002),
+            (random.randrange(1, 0xFFFF+1), 0x40000004),
+            (random.randrange(1, 0xFFFF+1), 0x40000006),
+            (random.randrange(1, 0xFFFF+1), 0x40000000),
+            (random.randrange(1, 0xFFFF+1), 0x40000002),
+        )
+        expected = bytearray(b'\x11\x11\x22\x22\x33\x33\x44\x44')
+        for msg, daddr in msgs:
+            # Modify the expected bytes to match what should be read @
+            # 0x40000000 after the DMA transfer is complete.
+            offset = daddr - 0x40000000
+            expected[offset:offset+2] = e_bits.buildbytes(msg, 2, bigend=self.emu.getEndian())
+
+            # Send the message and force the transfer to complete
+            self.emu.dspi[0].processReceivedData(msg)
+            self.assertTrue(33 in self.emu.dma[0]._pending)
+            self.emu.dma[0].processActiveTransfers()
+            self.assertEqual(self.emu.dma[0]._pending, {})
+
+            # ensure the message was moved to the destination and the POPR
+            # register is empty
+            data = self.emu.readMemory(0x40000000, 8)
+            logger.debug('send msg 0x%x, dest 0x%08x: %s', msg, daddr, data.hex())
+            self.assertEqual(data, expected)
+            self.assertEqual(self.emu.readMemory(dspi_a_popr_addr, 4), b'\x00\x00\x00\x00')
+
+            # Ensure that the SR[RFDF] flag is not set and the no exceptions are
+            # queued.
+            self.assertEqual(self.emu.readMemValue(dspi_a_sr_addr, 4) & SR_RFDF_MASK, 0)
+            self.assertEqual(self._getPendingExceptions(), [])
+
+    @unittest.skip('implement')
+    def test_edma_channel_linking(self):
+        pass
+
+    @unittest.skip('implement')
+    def test_edma_scatter_gather(self):
+        pass

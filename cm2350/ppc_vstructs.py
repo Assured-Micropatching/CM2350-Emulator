@@ -1,6 +1,8 @@
 import bisect
 import struct
 import operator
+import itertools
+
 import vstruct.bitfield
 import vstruct.primitives
 import envi.bits as e_bits
@@ -83,6 +85,30 @@ VSTRUCT_ADD_DATA_ERROR_TYPES = (
     VStructWriteOnlyError,
     VStructUnimplementedError,
 )
+
+
+def bytes_to_int(fmt, data, offset, size):
+    """
+    efficient in-place parsing of data from the offset to the specified size
+    """
+    if fmt is not None and size < 8:
+        return struct.unpack_from(fmt, data, offset)[0]
+    else:
+        # We have to do this the slow way
+        return sum(c << (s*8) for c, s in \
+                zip(itertools.islice(data, offset, offset+size), \
+                reversed(range(size))))
+
+
+def int_to_bytes(fmt, value, size):
+    """
+    efficient transforming of an integer to bytes
+    """
+    if fmt is not None and size < 8:
+        return struct.pack(fmt, value)
+    else:
+        # We have to do this the slow way
+        return bytes((value >> (s*8)) & 0xFF for s in reversed(range(size)))
 
 
 class v_bits(vstruct.bitfield.v_bits):
@@ -183,7 +209,7 @@ class v_bits(vstruct.bitfield.v_bits):
 
     def vsParse(self, data, offset=0):
         if not self._vs_startbit and not self._vs_endbit:
-            rawvalue = struct.unpack_from(self._vs_fmt, data, offset)[0]
+            rawvalue = bytes_to_int(self._vs_fmt, data, offset, self._vs_size)
             self.vsSetValue(rawvalue)
             return offset + self._vs_size
         else:
@@ -902,16 +928,11 @@ class PeriphRegister(VBitField):
         # Unfortunately we can't just call field.vsEmit() here because we need
         # to be able to mesh fields with unaligned start and end bits. Instead
         # continually add field values into one accumulated value
-        if not self._vs_fmt:
-            num_fields = len(list(self))
-            total_bits = sum(f._vs_bitwidth for _, f in self)
-            raise Exception('Cannot emit from %s without a format (fmt: %s, fields: %d, size: %d, bits: %d)' % (self.__class__.__name__, self._vs_fmt, num_fields, self._vs_size, total_bits))
-
         value = 0
         for fname, field in self.vsGetFields():
             value |= (field.vsGetValue() & field._vs_mask) << field._vs_shift
 
-        return struct.pack(self._vs_fmt, value)
+        return int_to_bytes(self._vs_fmt, value, self._vs_size)
 
     def vsParse(self, data, offset=0):
         # Unfortunately we can't just call field.vsParse() here because we need
@@ -924,7 +945,7 @@ class PeriphRegister(VBitField):
         if len(data) - offset < self._vs_size:
             raise VStructAlignmentError()
 
-        value = struct.unpack_from(self._vs_fmt, data, offset)[0]
+        value = bytes_to_int(self._vs_fmt, data, offset, self._vs_size)
         for fname, field in self.vsGetFields():
             field.vsSetValue(value >> field._vs_shift)
             self._vsFireCallbacks(fname)
@@ -1013,13 +1034,13 @@ class PeriphRegSubFieldMixin:
 
                 # The field also needs to be right shifted a few extra bits
                 # depending on how many are being left out of this field
-                value |= ((field.vsGetValue() >> cut_bits) & mask) << (field._vs_shift - missing_bits)
+                value |= (((field.vsGetValue() & field._vs_mask) >> cut_bits) & mask) << (field._vs_shift - missing_bits)
                 emit_bitwidth += width
 
             elif field._vs_startbyte >= offset:
                 # Grab the field value as-is but adjust the shift amount for the
                 # missing bits
-                value |= field.vsGetValue() << (field._vs_shift - missing_bits)
+                value |= (field.vsGetValue() & field._vs_mask) << (field._vs_shift - missing_bits)
                 emit_bitwidth += field._vs_bitwidth
 
             cur_bitwidth += field._vs_bitwidth
@@ -1029,20 +1050,7 @@ class PeriphRegSubFieldMixin:
         if emit_bitwidth:
             emit_size = (emit_bitwidth + 7) // 8
             fmt = vstruct.primitives.num_fmts.get((self._vs_bigend, emit_size))
-            if fmt:
-                return struct.pack(fmt, value)
-            else:
-                # If the format is None pack the number byte-by-byte. This is
-                # slow but this case is really only likely to occur during
-                # debugging or not often.
-                emit_data = bytearray()
-                if self._vs_bigend:
-                    for shift in reversed(range(0, emit_size*8, 8)):
-                        emit_data.append((value >> shift) & 0xFF)
-                else:
-                    for shift in range(0, emit_size*8, 8):
-                        emit_data.append((value >> shift) & 0xFF)
-                return emit_data
+            return int_to_bytes(fmt, value, emit_size)
 
         else:
             # If the target offset was not found, then this field doesn't have
@@ -1064,7 +1072,7 @@ class PeriphRegSubFieldMixin:
         parse_size = avail_data - extra_data
 
         fmt = vstruct.primitives.num_fmts.get((self._vs_bigend, parse_size))
-        value = struct.unpack_from(fmt, data, data_offset)[0]
+        value = bytes_to_int(fmt, data, data_offset, parse_size)
 
         # TODO: Not as fast as finding the right starting offset like
         #       PeripheralRegisterSet, perhaps we should support a bitoffset

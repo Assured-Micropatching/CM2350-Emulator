@@ -328,6 +328,15 @@ class DSPI(ExternalIOPeripheral):
         # size
         self._rx_fifo_size = 0
 
+        # TODO: read from a fixed-log or buffer, for now we make this match
+        # what the real CM2350 reads from the DSPI buses
+        if self.devname == 'DSPI_D':
+            self._popr_empty_data = b'\x00\x00\x87\xad'
+        else:
+            self._popr_empty_data = b'\x00\x00\xff\xff'
+        logger.debug('[%s] setting 0x%s as data to return when receive queue is empty',
+                     self.devname, self._popr_empty_data)
+
         # Update the state of the peripheral based on MCR writes
         self.registers.vsAddParseCallback('mcr', self.mcrUpdate)
 
@@ -364,9 +373,9 @@ class DSPI(ExternalIOPeripheral):
 
         elif offset in DSPI_POPR_RANGE:
             # Any size read in the POPR register address range causes a new
-            # element to be shifted into POPR from the Rx FIFO.
-            idx = offset - DSPI_POPR_OFFSET
-            return self.popRx()[idx:idx+size]
+            # element to be shifted into POPR from the Rx FIFO, but reads of 2
+            # bytes or 1 byte should read from the lower part of the data.
+            return self.popRx()[-size:]
 
         elif offset in DSPI_TXFR_RANGE:
             idx = offset - DSPI_TXFR_OFFSET
@@ -532,14 +541,7 @@ class DSPI(ExternalIOPeripheral):
             return data
 
         else:
-            # TODO: read from a fixed-log or buffer, for now we make this match
-            # what the real CM2350 reads from the DSPI buses
-            if self.devname == 'DSPI_D':
-                data = b'\x00\x00\x87\xad'
-            else:
-                data = b'\x00\x00\xff\xff'
-            logger.debug('%s (%s): No available data, returning 0x%s', self.devname, self.mode, data.hex())
-            return data
+            return self._popr_empty_data
 
     def popTx(self):
         """

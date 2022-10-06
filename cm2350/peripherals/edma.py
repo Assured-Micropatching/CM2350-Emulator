@@ -394,7 +394,8 @@ EDMA_INT_MASKS = tuple(2 ** i for i in range(32)) + tuple(2 ** i for i in range(
 # Object to hold the parsed TCD configuration values
 class TCDConfig:
     # The attributes for this class are fixed
-    __slots__ = ('channel', 'tcd', 'ssize', 'dsize', 'mloff', 'nbytes', 'linkch', '_citer')
+    __slots__ = ('channel', 'tcd', 'ssize', 'dsize', 'mloff', 'nbytes',
+                 'linkch', '_citer', 'smod_mask', 'dmod_mask')
 
     def __init__(self, channel, tcd, emlm):
         self.channel = channel
@@ -410,8 +411,24 @@ class TCDConfig:
         except:
             self.dsize = None
 
+        # If smod or dmod are set get the masks now.  These masks are the masks
+        # of the address value that should be unmodified by the s/dmod
+        # calculations
+        if tcd.smod:
+            self.smod_mask = e_bits.b_masks[tcd.smod]
+        else:
+            self.smod_mask = 0
+
+        if tcd.dmod:
+            self.dmod_mask = e_bits.b_masks[tcd.dmod]
+        else:
+            self.dmod_mask = 0
+
         self._get_nbytes(emlm)
         self._get_citer()
+
+    def __str__(self):
+        return 'TCD%s' % self.channel
 
     def _get_nbytes(self, emlm):
         if emlm == 1:
@@ -478,10 +495,10 @@ class eDMA(MMIOPeripheral):
 
             # Group to channel and MCR priority field mappings
             self.groups = (
-                (range(0, 16),  'grp0pri'),
-                (range(16, 32), 'grp1pri'),
-                (range(32, 48), 'grp2pri'),
-                (range(48, 64), 'grp3pri'),
+                (list(range(0, 16)),  'grp0pri'),
+                (list(range(16, 32)), 'grp1pri'),
+                (list(range(32, 48)), 'grp2pri'),
+                (list(range(48, 64)), 'grp3pri'),
             )
 
         else:
@@ -496,8 +513,8 @@ class eDMA(MMIOPeripheral):
 
             # Group to channel and MCR priority field mappings
             self.groups = (
-                (range(0, 16),  'grp0pri'),
-                (range(16, 32), 'grp1pri'),
+                (list(range(0, 16)),  'grp0pri'),
+                (list(range(16, 32)), 'grp1pri'),
             )
 
         self._convenience_handlers = {
@@ -520,8 +537,8 @@ class eDMA(MMIOPeripheral):
         self._rr_channel_pri = None
 
         # Holds any current ongoing DMA transfer configurations
-        self._pending = {}
         self._active = None
+        self._pending = None
 
         # Callbacks for registers
         self.registers.vsAddParseCallback('mcr', self.mcrUpdate)
@@ -533,14 +550,19 @@ class eDMA(MMIOPeripheral):
         super().reset(emu)
 
         # Clear any ongoing DMA transfers
-        self._pending = {}
         self._active = None
+        self._pending = {}
 
         # Reset the fixed and round robin priority lists to their defaults
+        self._update_chan_priorities()
+
+    def _update_chan_priorities(self):
         self._fixed_group_pri = self._get_group_fixed_priorities()
         self._fixed_channel_pri = [self._get_channel_fixed_priorities(r) for r, _ in self.groups]
-        self._rr_group_pri = list(range(len(self.groups)))
-        self._rr_channel_pri = [list(r) for r, _ in self.groups]
+        # Default order is highest to lowest, which by default should be the
+        # fixed priority order
+        self._rr_group_pri = list(self._fixed_group_pri)
+        self._rr_channel_pri = [list(c) for c in self._fixed_channel_pri]
 
     def _get_group_fixed_priorities(self):
         # Return the group numbers (indexes) for this peripheral ordered by
@@ -553,14 +575,14 @@ class eDMA(MMIOPeripheral):
         # Return the channel numbers (indexes) for this peripheral ordered by
         # which priority values are highest
         return [c for _, c in \
-                sorted(((cpr.chpri, c) for c, cpr in self.registers.cpr), reverse=True)]
+                sorted(((self.registers.cpr[c].chpri, c) for c in channels), reverse=True)]
 
     def addPending(self, config):
         self._pending[config.channel] = config
 
         # Because there are pending DMA transfers, ensure that the
         # "processActiveTransfers" function is queued for extra processing
-        self.emu.extra_processing.put(self.processActiveTransfers)
+        self.emu.addExtraProcessing(self.processActiveTransfers)
 
     def getPending(self):
         """
@@ -573,47 +595,41 @@ class eDMA(MMIOPeripheral):
         # logging timestamps)
 
         if self.registers.mcr.erga == 0:
-            # fixed group priority
-            for group in self._fixed_group_pri:
-                try:
-                    if self.registers.mcr.erca == 0:
-                        # fixed channel priority
-                        return next(self._pending[c] for c in self._fixed_channel_pri[group] if c in self._pending)
-                    else:
-                        # round-robin channel priority
-                        return next(self._pending[c] for c in self._rr_channel_pri[group] if c in self._pending)
-                except StopIteration:
-                    # Try the next group
-                    pass
-
-            # If we've reached this point, no pending transfers were found
-            return None
-
+            groups = self._fixed_group_pri
         else:
-            # round-robin group priority
-            processed = []
-            channel = None
-            while self._rr_group_pri and channel is None:
-                group = self._rr_group_pri.pop(0)
-                try:
-                    if self.registers.mcr.erca == 0:
-                        # fixed channel priority
-                        channel = next(self._pending[c] for c in self._fixed_channel_pri[group] if c in self._pending)
-                    else:
-                        # round-robin channel priority
-                        channel = next(self._pending[c] for c in self._rr_channel_pri[group] if c in self._pending)
-                except StopIteration:
-                    # Try the next group
-                    pass
-                finally:
-                    processed.append(group)
+            groups = self._rr_group_pri
 
-            # Add the processed groups to the end of the round-robin priority
-            # list
-            self._rr_group_pri.extend(processed)
+        if self.registers.mcr.erca == 0:
+            channels = self._fixed_channel_pri
+        else:
+            channels = self._rr_channel_pri
 
-            # return what we found
-            return channel
+        group = None
+        channel = None
+        for group in groups:
+            try:
+                channel = next(c for c in channels[group] if c in self._pending)
+                break
+            except StopIteration:
+                # Try the next group
+                pass
+
+        if group is not None and channel is not None:
+            # If RR group priority is enabled, move the found group to the end.
+            if self.registers.mcr.erga == 1:
+                self._rr_group_pri.remove(group)
+                self._rr_group_pri.append(group)
+
+            # If RR group priority is enabled, move the found channel to the
+            # end.
+            if self.registers.mcr.erca == 1:
+                self._rr_channel_pri[group].remove(channel)
+                self._rr_channel_pri[group].append(channel)
+
+            # return the config
+            return self._pending[channel]
+        else:
+            return None
 
     def _getPeriphReg(self, offset, size):
         """
@@ -652,9 +668,9 @@ class eDMA(MMIOPeripheral):
         """
         handler = self._convenience_handlers.get(offset)
         if handler is not None:
-            chan = e_bits.parsebytes(data, 0, 1, bigend=self.emu.getEndian())
-            if chan < self.num_channels:
-                handler(chan)
+            # The argument to all of the set/clear functions is just a single
+            # byte
+            handler(data[0])
         else:
             super()._setPeriphReg(offset, data)
 
@@ -682,46 +698,140 @@ class eDMA(MMIOPeripheral):
             raise exc
 
     def setERQR(self, channel):
-        if channel >= EDMA_B_NUM_CHAN:
-            self.registers.erqrh |= EDMA_INT_MASKS[channel]
+        # If bit 0 is set, ignore the write
+        if channel & 0x80:
+            return
+
+        # If bit 1 is set, set all ERQR flags
+        if channel & 0x40:
+            if self.num_channels == EDMA_A_NUM_CHAN:
+                self.registers.erqrh = 0xFFFFFFFF
+            self.registers.erqrl = 0xFFFFFFFF
         else:
-            self.registers.erqrl |= EDMA_INT_MASKS[channel]
+            # Otherwise only set the specified ERQR flag
+            if channel >= EDMA_B_NUM_CHAN:
+                self.registers.erqrh |= EDMA_INT_MASKS[channel]
+            else:
+                self.registers.erqrl |= EDMA_INT_MASKS[channel]
 
     def clearERQR(self, channel):
-        if channel >= EDMA_B_NUM_CHAN:
-            self.registers.erqrh &= ~EDMA_INT_MASKS[channel]
+        # If bit 0 is set, ignore the write
+        if channel & 0x80:
+            return
+
+        # If bit 1 is set, clear all ERQR flags
+        if channel & 0x40:
+            if self.num_channels == EDMA_A_NUM_CHAN:
+                self.registers.erqrh = 0x00000000
+            self.registers.erqrl = 0x00000000
         else:
-            self.registers.erqrl &= ~EDMA_INT_MASKS[channel]
+            # Otherwise only clear the specified ERQR flag
+            if channel >= EDMA_B_NUM_CHAN:
+                self.registers.erqrh &= ~EDMA_INT_MASKS[channel]
+            else:
+                self.registers.erqrl &= ~EDMA_INT_MASKS[channel]
 
     def setEEIR(self, channel):
-        if channel >= EDMA_B_NUM_CHAN:
-            self.registers.eeirh |= EDMA_INT_MASKS[channel]
+        # If bit 0 is set, ignore the write
+        if channel & 0x80:
+            return
+
+        # If bit 1 is set, set all EEIR flags
+        if channel & 0x40:
+            if self.num_channels == EDMA_A_NUM_CHAN:
+                self.registers.eeirh = 0xFFFFFFFF
+            self.registers.eeirl = 0xFFFFFFFF
         else:
-            self.registers.eeirl |= EDMA_INT_MASKS[channel]
+            # Otherwise only set the specified EEIR flag
+            if channel >= EDMA_B_NUM_CHAN:
+                self.registers.eeirh |= EDMA_INT_MASKS[channel]
+            else:
+                self.registers.eeirl |= EDMA_INT_MASKS[channel]
 
     def clearEEIR(self, channel):
-        if channel >= EDMA_B_NUM_CHAN:
-            self.registers.eeirh &= ~EDMA_INT_MASKS[channel]
+        # If bit 0 is set, ignore the write
+        if channel & 0x80:
+            return
+
+        # If bit 1 is set, clear all EEIR flags
+        if channel & 0x40:
+            if self.num_channels == EDMA_A_NUM_CHAN:
+                self.registers.eeirh = 0x00000000
+            self.registers.eeirl = 0x00000000
         else:
-            self.registers.eeirl &= ~EDMA_INT_MASKS[channel]
+            # Otherwise only clear the specified EEIR flag
+            if channel >= EDMA_B_NUM_CHAN:
+                self.registers.eeirh &= ~EDMA_INT_MASKS[channel]
+            else:
+                self.registers.eeirl &= ~EDMA_INT_MASKS[channel]
 
     def clearIRQR(self, channel):
-        if channel >= EDMA_B_NUM_CHAN:
-            self.registers.irqrh &= ~EDMA_INT_MASKS[channel]
+        # If bit 0 is set, ignore the write
+        if channel & 0x80:
+            return
+
+        # If bit 1 is set, clear all IRQR flags
+        if channel & 0x40:
+            if self.num_channels == EDMA_A_NUM_CHAN:
+                self.registers.irqrh = 0x00000000
+            self.registers.irqrl = 0x00000000
         else:
-            self.registers.irqrl &= ~EDMA_INT_MASKS[channel]
+            # Otherwise only clear the specified IRQR flag
+            if channel >= EDMA_B_NUM_CHAN:
+                self.registers.irqrh &= ~EDMA_INT_MASKS[channel]
+            else:
+                self.registers.irqrl &= ~EDMA_INT_MASKS[channel]
 
     def clearER(self, channel):
-        if channel >= EDMA_B_NUM_CHAN:
-            self.registers.erh &= ~EDMA_INT_MASKS[channel]
+        # If bit 0 is set, ignore the write
+        if channel & 0x80:
+            return
+
+        # If bit 1 is set, clear all ER flags
+        if channel & 0x40:
+            if self.num_channels == EDMA_A_NUM_CHAN:
+                self.registers.erh = 0x00000000
+            self.registers.erl = 0x00000000
         else:
-            self.registers.erl &= ~EDMA_INT_MASKS[channel]
+            # Otherwise only clear the specified ER flag
+            if channel >= EDMA_B_NUM_CHAN:
+                self.registers.erh &= ~EDMA_INT_MASKS[channel]
+            else:
+                self.registers.erl &= ~EDMA_INT_MASKS[channel]
 
     def setStart(self, channel):
-        self.registers.tcd[channel].start = 1
+        # If bit 0 is set, ignore the write
+        if channel & 0x80:
+            return
+
+        # If bit 1 is set, set the START flag in all TCDs
+        if channel & 0x40:
+            for chan in range(self.num_channels):
+                self.registers.tcd[chan].start = 1
+                if self.registers.tcd[chan].active == 0 and \
+                        channel not in self._pending:
+                    logger.debug('[%s] Starting DMA channel %d from SW trigger', self.devname, chan)
+                    self.startTransfer(chan)
+        else:
+            # Otherwise only set the specified START flag
+            self.registers.tcd[channel].start = 1
+            if self.registers.tcd[channel].active == 0 and \
+                    channel not in self._pending:
+                logger.debug('[%s] Starting DMA channel %d from SW trigger', self.devname, channel)
+                self.startTransfer(channel)
 
     def clearDone(self, channel):
-        self.registers.tcd[channel].done = 0
+        # If bit 0 is set, ignore the write
+        if channel & 0x80:
+            return
+
+        # If bit 1 is set, clear the DONE flag in all TCDs
+        if channel & 0x40:
+            for chan in range(self.num_channels):
+                self.registers.tcd[chan].done = 0
+        else:
+            # Otherwise only clear the specified DONE flag
+            self.registers.tcd[channel].done = 0
 
     def setHRS(self, channel):
         if channel >= EDMA_B_NUM_CHAN:
@@ -740,6 +850,7 @@ class eDMA(MMIOPeripheral):
         Check for any global configuration errors:
             - group priority configuration
         """
+        self._update_chan_priorities()
         group_priorities = set(self.registers.mcr.vsGetField(f).vsGetValue() for _, f in self.groups)
         if len(set(group_priorities)) != len(self.groups):
             self.registers.esr.gpe = 1
@@ -756,7 +867,7 @@ class eDMA(MMIOPeripheral):
 
         if self.registers.mcr.cxfr == 1:
             self._active = None
-            for channel in self._pending:
+            for channel in list(self._pending):
                 del self._pending[channel]
 
                 # Make the channel look as if the minor loop had completed
@@ -769,7 +880,7 @@ class eDMA(MMIOPeripheral):
 
         if self.registers.mcr.ecx == 1:
             self._active = None
-            for channel in self._pending:
+            for channel in list(self._pending):
                 del self._pending[channel]
 
                 # cancel the transfer and set the error status
@@ -779,10 +890,22 @@ class eDMA(MMIOPeripheral):
             # Clear the CXFR bit
             self.registers.mcr.ecx = 0
 
+        # If DMA is not halted, ensure there are no transfers to start
         if self.registers.mcr.halt == 0:
+            any_pending = False
             for channel in range(self.num_channels):
-                if channel not in self._pending and self.registers.tcd[channel].start == 1:
+                if self.registers.tcd[channel].start == 1 and \
+                        self.registers.tcd[channel].active == 0 and \
+                        channel not in self._pending:
+                    logger.debug('[%s] Starting DMA channel %d after MCR[HALT] cleared', self.devname, channel)
                     self.startTransfer(channel)
+                elif channel in self._pending:
+                    any_pending = True
+
+            # If there are any pending transfers to process, ensure that the
+            # processActiveTransfers extra processing function is enabled.
+            if any_pending:
+                self.emu.addExtraProcessing(self.processActiveTransfers)
 
     def esrUpdate(self, thing):
         # If no error bits are set ensure the VLD bit is clear
@@ -815,26 +938,32 @@ class eDMA(MMIOPeripheral):
         field of the status is updated initiate a data transfer.
         """
         # Figure out which part of the TCD was just modified
-        channel = idx
-
-        if EDMA_TCD_STATUS_OFF in range(foffset, foffset+size):
-            channel = idx >> EDMA_TCDx_SIZE
+        tcd_offset = foffset % EDMA_TCDx_SIZE
+        if EDMA_TCD_STATUS_OFF in range(tcd_offset, tcd_offset + size):
+            channel = idx
 
             # If the DONE bit is set the E_SG and MAJOR.E_LINK bits must be 0
             if self.registers.tcd[channel].done == 1:
                 self.registers.tcd[channel].major_e_link = 0
                 self.registers.tcd[channel].e_sg = 0
 
-            # if START is set but not ACTIVE, we need to process this transfer
+            # if START is set but not ACTIVE, we need to process this transfer,
+            # if DMA is enabled
             if self.registers.tcd[channel].start == 1 and \
-                    self.registers.tcd[channel].active == 0:
-                self.startTransfer(channel)
+                    self.registers.tcd[channel].active == 0 and \
+                    channel not in self._pending:
+                if self.registers.mcr.halt == 1:
+                    logger.debug('[%s] ignoring SW initiated transfer for channel %d: DMA halted',
+                                 self.devname, channel)
+                else:
+                    logger.debug('[%s] Starting DMA channel %d from SW trigger', self.devname, channel)
+                    self.startTransfer(channel)
 
     def isChannelEnabled(self, channel):
         if channel >= EDMA_B_NUM_CHAN:
-            return bool(self.registers.erqrh | EDMA_INT_MASKS[channel])
+            return bool(self.registers.erqrh & EDMA_INT_MASKS[channel])
         else:
-            return bool(self.registers.erqrl | EDMA_INT_MASKS[channel])
+            return bool(self.registers.erqrl & EDMA_INT_MASKS[channel])
 
     def dmaRequest(self, channel):
         """
@@ -843,7 +972,16 @@ class eDMA(MMIOPeripheral):
         # Only initiate a request if hardware service requests are enabled
         if self.isChannelEnabled(channel):
             self.setHRS(channel)
-            self.startTransfer(channel)
+
+            # Now set the start flag
+            self.registers.tcd[channel].start = 1
+
+            # And start the transfer, if DMA is enabled
+            if self.registers.mcr.halt == 1:
+                logger.debug('[%s] ignoring peripheral initiated transfer for channel %d: DMA halted',
+                             self.devname, channel)
+            else:
+                self.startTransfer(channel)
 
     def verifyChannelConfig(self, channel):
         """
@@ -861,9 +999,11 @@ class eDMA(MMIOPeripheral):
 
         config = TCDConfig(channel, self.registers.tcd[channel], self.registers.mcr.emlm)
 
+        # config.ssize will be set to None if the TCD has an invalid value
+        # in SSIZE field
         if config.ssize is None:
-            # config.ssize will be set to None if the TCD has an invalid value
-            # in SSIZE field
+            logger.debug('[%s] channel %d SAE validation error (ssize: %s)',
+                         self.devname, channel, config.ssize)
             self.setError(channel, 'sae')
             return None
 
@@ -874,18 +1014,24 @@ class eDMA(MMIOPeripheral):
         #   - tcd.saddr is inconsistent with tcd.soff (not sure how to check
         #   this?)
         if config.tcd.saddr % config.ssize != 0:
+            logger.debug('[%s] channel %d SAE validation error (saddr: %#x, ssize: %d)',
+                         self.devname, channel, config.tcd.saddr, config.ssize)
             self.setError(channel, 'sae')
             return None
 
         # Source Offset Error checks (esr.soe):
         #   - tcd.soff is inconsistent with tcd.ssize
         if config.tcd.soff % config.ssize != 0:
+            logger.debug('[%s] channel %d SOE validation error (soff: %d, ssize: %d)',
+                         self.devname, channel, config.tcd.soff, config.ssize)
             self.setError(channel, 'soe')
             return None
 
+        # config.dsize will be set to None if the TCD has an invalid value
+        # in DSIZE field
         if config.dsize is None:
-            # config.dsize will be set to None if the TCD has an invalid value
-            # in DSIZE field
+            logger.debug('[%s] channel %d DAE validation error (dsize: %s)',
+                         self.devname, channel, config.dsize)
             self.setError(channel, 'dae')
             return None
 
@@ -896,24 +1042,32 @@ class eDMA(MMIOPeripheral):
         #   - tcd.daddr is inconsistent with tcd.doff (not surehow to check
         #   this?)
         if config.tcd.daddr % config.dsize != 0:
+            logger.debug('[%s] channel %d DAE validation error (daddr: %#x, dsize: %d)',
+                         self.devname, channel, config.tcd.daddr, config.dsize)
             self.setError(channel, 'dae')
             return None
 
         # Destination Offset Error checks (esr.doe):
         #   - tcd.doff is inconsistent with tcd.dsize
         if config.tcd.doff % config.dsize != 0:
+            logger.debug('[%s] channel %d DOE validation error (doff: %d, dsize: %d)',
+                         self.devname, channel, config.tcd.doff, config.dsize)
             self.setError(channel, 'doe')
             return None
 
         # NBYTES/CITER Configuration Error checks (esr.nce):
         #   - tcd.nbytes is not a multiple of tcd.ssize and tcd.dsize
         if config.nbytes % config.ssize or config.nbytes % config.dsize:
+            logger.debug('[%s] channel %d NCE validation error (nbytes: %d, ssize: %d, dsize: %d)',
+                         self.devname, channel, config.nbytes, config.ssize, config.dsize)
             self.setError(channel, 'nce')
             return None
 
         #   - tcd.citer == 0 (!= tcd.biter)
         #   - tcd.citer_e_link != tcd.biter_e_link
         if config.citer == 0 or config.tcd.citer != config.tcd.biter:
+            logger.debug('[%s] channel %d NCE validation error (biter: %#x, citer: %#x|%d)',
+                         self.devname, channel, config.tcd.biter, config.tcd.citer, config.citer)
             self.setError(channel, 'nce')
             return None
 
@@ -921,6 +1075,8 @@ class eDMA(MMIOPeripheral):
         #   - ensure tcd.dlast_sga is on a 32 byte boundary
         if config.tcd.e_sg:
             if config.tcd.dlast_sga % EDMA_XFER_SIZE_ALIGNMENT[EDMA_XFER_SIZE.S32Bit] != 0:
+                logger.debug('[%s] channel %d SGE validation error (e_sg: %d, dlast_sga: %#x)',
+                             self.devname, channel, config.tcd.e_sg, config.dlast_sga)
                 self.setError(channel, 'sge')
                 return None
 
@@ -940,26 +1096,28 @@ class eDMA(MMIOPeripheral):
         if self.registers.mcr.hoe == 1:
             self.registers.mcr.halt = 1
 
+        logger.debug('[%s] channel %d error: %s', self.devname, channel, flag)
+
         self.event('error', channel, EDMA_INT_MASKS[channel])
 
     def startTransfer(self, channel):
-        # If DMA is halted, do nothing
-        if self.registers.mcr.halt:
-            logger.debug('[%s] ignoring transfer for channel %d: DMA halted',
+        config = self.verifyChannelConfig(channel)
+        if config is None:
+            logger.debug('[%s] aborting transfer for channel %d: config error',
                     self.devname, channel)
         else:
-            config = self.verifyChannelConfig(channel)
-            if config is None:
-                logger.debug('[%s] aborting transfer for channel %d: config error',
-                        self.devname, channel)
-            else:
-                logger.debug('[%s] queuing transfer for channel %d',
-                        self.devname, channel)
+            logger.debug('[%s] queuing transfer for channel %d',
+                    self.devname, channel)
 
-                # Save the current active configuration
-                self.addPending(config)
+            # Save the current active configuration
+            self.addPending(config)
 
     def processActiveTransfers(self):
+        # If this DMA channel is halted (stalled), do nothing, the transfers
+        # will be resumed when this DMA channel is no longer halted.
+        if self.registers.mcr.halt == 1:
+            return
+
         # Get the next transfer to process
         config = self._active
         if config is None:
@@ -970,35 +1128,13 @@ class eDMA(MMIOPeripheral):
         if config is None:
             return
 
-        linkch = self._process_major_loop(config)
-        if linkch is not None:
-            # if CLM is set then a minor link loop to the same channel does not
-            # have to go through priority arbitration again
-            if linkch == config.channel and linkch == config.linkch and \
-                    config.citer != 0 and self.registers.mcr.clm == 1:
-                logger.debug('[%s] re-activating current transfer for current channel %d',
-                             self.devname, channel)
+        self._process_major_loop(config)
 
-                # Requeue this function for future extra processing
-                self._active = config
-                self.emu.extra_processing.put(self.processActiveTransfers)
-
-            else:
-                logger.debug('[%s] starting linked transfer %d for current channel %d',
-                             self.devname, linkch, channel)
-                self.startTransfer(linkch)
-
-        if config.citer == 0:
-            # This channel is no longer active
-            del self._pending[config.channel]
-
-            # Check if scatter-gather is configured for this channel, if so
-            # overwrite the current channel and re-start it
-            if config.tcd.e_sg == 1:
-                tcd = self.emu.readMemory(config.tcd.dlast_sga, EDMA_TCDx_SIZE)
-                addr = self.baseaddr + EDMA_TCDx_OFFSET + channel * EDMA_TCDx_SIZE
-                self.emu.writeMemory(addr, tcd)
-                self.startTransfer(tcd.channel)
+        # If there are more major loops to process for the current channel, next
+        # cycle it will need to go through arbitration again in case round-robin
+        # scheduling is enabled, and if the current transfer is finished this
+        # will help check if there are any more pending transfers.
+        self.emu.addExtraProcessing(self.processActiveTransfers)
 
     def _process_major_loop(self, config):
         # Indicate that this channel is active
@@ -1006,14 +1142,17 @@ class eDMA(MMIOPeripheral):
         config.tcd.done = 0
         config.tcd.active = 1
 
-        logger.debug('[%s] 0x%08x[%d] -> 0x%08x[%d]', self.devname,
-                config.tcd.saddr, config.ssize,
-                config.tcd.daddr, config.dsize)
+        logger.debug('[%s] channel %d, major loop %d/%d, xfer %d bytes from 0x%08x[%d] to 0x%08x[%d]',
+                     self.devname, config.channel, config.citer,
+                     config.tcd.biter, config.nbytes, config.tcd.saddr,
+                     config.ssize, config.tcd.daddr, config.dsize)
 
         data = bytearray()
         try:
-            while len(data) < config.nbytes:
-                data += self.emu.readMemory(config.tcd.saddr, config.ssize)
+            # Strictly speaking we could just read a big chunk of data but I
+            # suppose we will emulate the minor loops
+            for offset in range(0, config.nbytes, config.ssize):
+                data += self.emu.readMemory(config.tcd.saddr+offset, config.ssize)
         except MceDataReadBusError:
             self.setError(config.channel, 'sbe')
 
@@ -1030,8 +1169,8 @@ class eDMA(MMIOPeripheral):
                         config.dsize)
 
         try:
-            for i in range(0, len(data), config.dsize):
-                self.emu.writeMemory(config.tcd.daddr, data[i:i+config.dsize])
+            for offset in range(0, len(data), config.dsize):
+                self.emu.writeMemory(config.tcd.daddr+offset, data[offset:offset+config.dsize])
         except MceWriteBusError:
             self.setError(config.channel, 'dbe')
 
@@ -1053,8 +1192,19 @@ class eDMA(MMIOPeripheral):
         if config.citer != 0:
             # Adjust the source and destination addresses
             #TODO mloff
-            config.tcd.saddr += config.tcd.soff
-            config.tcd.daddr += config.tcd.doff
+            saddr = config.tcd.saddr + config.tcd.soff
+            if config.tcd.smod:
+                config.tcd.saddr = (config.tcd.saddr & ~config.smod_mask) | \
+                        (saddr & config.smod_mask)
+            else:
+                config.tcd.saddr = saddr
+
+            daddr = config.tcd.daddr + config.tcd.doff
+            if config.tcd.dmod:
+                config.tcd.daddr = (config.tcd.daddr & ~config.dmod_mask) | \
+                        (daddr & config.dmod_mask)
+            else:
+                config.tcd.daddr = daddr
 
             # Check if an interrupt needs to be signaled for half-way
             # completing the transfer
@@ -1062,20 +1212,47 @@ class eDMA(MMIOPeripheral):
                     config.tcd.citer == config.tcd.biter // 2:
                 self.event('xfer', config.channel, EDMA_INT_MASKS[config.channel])
 
-            if config.linkch != 0:
-                # Mark the linked channel as started so that it is processed
-                # next time.
-                self.setStart(config.linkch)
-                return config.linkch
+            if config.linkch is not None:
+                # if CLM is set then a minor link loop to the same channel does
+                # not have to go through priority arbitration again
+                if self.registers.mcr.clm == 1 and config.linkch == config.channel:
+                    logger.debug('[%s] re-activating current transfer for current channel %d',
+                                 self.devname, config.channel)
+
+                    # Immediately set the current active channel as the next
+                    # channel to process
+                    self._active = config
+                else:
+                    logger.debug('[%s] starting minor loop linked transfer %d for current channel %d',
+                                 self.devname, config.linkch, config.channel)
+                    self.startTransfer(config.linkch)
 
         else:
+            logger.debug('[%s] channel %d transfer complete', self.devname,
+                         config.channel)
+
             # Adjust the source and destination addresses
-            config.tcd.saddr += config.tcd.slast
-            config.tcd.daddr += config.tcd.dlast_sga
-            config.tcd.citer = config.tcd.biter
+            saddr = config.tcd.saddr + config.tcd.slast
+            if config.tcd.smod:
+                config.tcd.saddr = (config.tcd.saddr & ~config.smod_mask) | \
+                        (saddr & config.smod_mask)
+            else:
+                config.tcd.saddr = saddr
+
+            daddr = config.tcd.daddr + config.tcd.dlast_sga
+            if config.tcd.dmod:
+                config.tcd.daddr = (config.tcd.daddr & ~config.dmod_mask) | \
+                        (daddr & config.dmod_mask)
+            else:
+                config.tcd.daddr = daddr
+
+            config.citer = config.tcd.biter
 
             # Set the done flag
             config.tcd.done = 1
+
+            # Remove this TCD from pending
+            del self._pending[config.channel]
 
             # If the HRS flag is set for this channel, clear it
             self.clearHRS(config.channel)
@@ -1092,10 +1269,17 @@ class eDMA(MMIOPeripheral):
                 self.clearERQR(config.channel)
 
             if config.tcd.major_e_link == 1:
-                # Mark the linked channel as started so that it is processed
-                # next time.
-                self.setStart(config.tcd.major_linkch)
-                return config.tcd.major_linkch
+                logger.debug('[%s] starting major loop linked transfer %d for current channel %d',
+                             self.devname, config.tcd.major_linkch, channel)
+                self.startTransfer(config.tcd.major_linkch)
 
-        # No channel linking to be done
-        return None
+            # Check if scatter-gather is configured for this channel, if so
+            # overwrite the current channel and re-start it
+            if config.tcd.e_sg == 1:
+                tcd = self.emu.readMemory(config.tcd.dlast_sga, EDMA_TCDx_SIZE)
+                addr = self.baseaddr + EDMA_TCDx_OFFSET + channel * EDMA_TCDx_SIZE
+                self.emu.writeMemory(addr, tcd)
+
+                logger.debug('[%s] queuing SG transfer in channel %d using TCD from 0x%08x',
+                             self.devname, channel, config.tcd.dlast_sga)
+                self.startTransfer(config.channel)

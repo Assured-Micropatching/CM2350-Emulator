@@ -16,6 +16,8 @@ e200z7 is responsible for defining:
 '''
 import sys
 import queue
+import threading
+
 import logging
 import threading
 logger = logging.getLogger(__name__)
@@ -472,7 +474,8 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         # Create a queue to use for any extra processing that must occur before
         # instructions are processed. This should be more efficient than having
         # required checks each cycle.
-        self.extra_processing = queue.Queue()
+        self.extra_processing = []
+        self.extra_processing_lock = threading.RLock()
 
         # Create the queue that external IO threads can use to queue up message
         # for processing
@@ -495,6 +498,10 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         '''
         # TODO: move MCU timers into the official PowerPC "timebase" class
         self.disableTimebase()
+
+        # Clear out all pending extra processing
+        with self.extra_processing_lock:
+            self.extra_processing = []
 
         # Stop all MCU timers
         self.mcu_wdt.stop()
@@ -704,14 +711,20 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         except queue.Empty:
             pass
 
-        try:
-            # Only do one extra processing function call per tick.  If this
-            # function needs to be run in future cycles it should requeue
-            # itself.
-            extra_processing_func = self.extra_processing.get_nowait()
-            extra_processing_func()
-        except queue.Empty:
-            pass
+        # Only do one extra processing function call per tick.  If this
+        # function needs to be run in future cycles it should requeue
+        # itself.
+        with self.extra_processing_lock:
+            try:
+                self.extra_processing.pop(0)()
+            except IndexError:
+                pass
+
+    def addExtraProcessing(self, func):
+        with self.extra_processing_lock:
+            # Don't double-add extra processing functions
+            if func not in self.extra_processing:
+                self.extra_processing.append(func)
 
     def stepi(self):
         """

@@ -572,9 +572,6 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
 
         field_value = self.isrstatus.vsGetField(field)
         if value and field_value == 0:
-            # Set the ISR status flag
-            self.isrstatus.vsOverrideValue(field, int(value))
-
             intc_src, dma_req = INTC_EVENT_MAP.get(self.isrevents[field], (None, None))
             dma_field = self.dmaevents[field]
 
@@ -586,6 +583,9 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
                     self.emu.dmaRequest(dma_req)
 
                 elif intc_src is not None:
+                    # Set the ISR status flag
+                    self.isrstatus.vsOverrideValue(field, int(value))
+
                     logger.debug('[%s] queuing exception %s for %s', self.devname, intc_src, field)
                     self.emu.queueException(ExternalException(intc_src))
 
@@ -611,9 +611,6 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
 
         field_value = self.isrstatus[channel].vsGetField(field)
         if value and field_value == 0:
-            # Set the ISR status flag
-            self.isrstatus[channel].vsOverrideValue(field, int(value))
-
             intc_src, dma_req = INTC_EVENT_MAP.get(self.isrevents[channel][field], (None, None))
             dma_field = self.dmaevents[field]
 
@@ -625,6 +622,9 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
                     self.emu.dmaRequest(dma_req)
 
                 elif intc_src is not None:
+                    # Set the ISR status flag
+                    self.isrstatus[channel].vsOverrideValue(field, int(value))
+
                     logger.debug('[%s] queuing exception %s for [%d]%s', self.devname, intc_src, channel, field)
                     self.emu.queueException(ExternalException(intc_src))
 
@@ -655,15 +655,15 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
         status = reg.vsGetValue()
         new_bits = value & ~status
         if new_bits:
-            # Set the ISR status flag
-            reg.vsOverrideValue(new_bits | status)
-
             flag_reg = self.registers.vsGetField(self.isrflags[event][channel])
             flags = flag_reg.vsGetValue()
             if new_bits & flags:
                 intc_src, _ = INTC_EVENT_MAP.get(self.isrevents[event][channel], (None, None))
 
                 if intc_src is not None:
+                    # Set the ISR status flag
+                    reg.vsOverrideValue(new_bits | status)
+
                     # channel-only event configurations don't have corresponding
                     # DMA request flags
                     logger.debug('[%s] queuing exception %s for event %s[%d]', self.devname, intc_src, event, channel)

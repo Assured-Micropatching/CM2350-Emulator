@@ -576,19 +576,17 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
             dma_field = self.dmaevents[field]
 
             flag_value = self.isrflags.vsGetField(field)
-            if flag_value == 1:
-                if dma_req is not None and dma_field is not None and \
-                        self.isrflags.vsGetField(dma_field) == 1:
-                    logger.debug('[%s] sending DMA request %s for %s', self.devname, dma_req, field)
-                    self.emu.dmaRequest(dma_req)
+            if flag_value == 1 and dma_req is not None and dma_field is not None and \
+                    self.isrflags.vsGetField(dma_field) == 1:
+                logger.debug('[%s] sending DMA request %s for %s', self.devname, dma_req, field)
+                self.emu.dmaRequest(dma_req)
+            else:
+                # Set the ISR status flag
+                self.isrstatus.vsOverrideValue(field, int(value))
 
-                elif intc_src is not None:
-                    # Set the ISR status flag
-                    self.isrstatus.vsOverrideValue(field, int(value))
-
+                if flag_value == 1 and intc_src is not None:
                     logger.debug('[%s] queuing exception %s for %s', self.devname, intc_src, field)
                     self.emu.queueException(ExternalException(intc_src))
-
                 else:
                     logger.warning('[%s] Ignoring %s event because no valid ISR source or DMA request configured',
                                    self.devname, field)
@@ -615,16 +613,15 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
             dma_field = self.dmaevents[field]
 
             flag_value = self.isrflags[channel].vsGetField(field)
-            if flag_value == 1:
-                if dma_req is not None and dma_field is not None and \
-                        self.isrflags[channel].vsGetField(dma_field) == 1:
-                    logger.debug('[%s] sending DMA request %s for [%d]%s', self.devname, dma_req, channel, field)
-                    self.emu.dmaRequest(dma_req)
+            if flag_value == 1 and dma_req is not None and dma_field is not None and \
+                    self.isrflags[channel].vsGetField(dma_field) == 1:
+                logger.debug('[%s] sending DMA request %s for [%d]%s', self.devname, dma_req, channel, field)
+                self.emu.dmaRequest(dma_req)
+            else:
+                # Set the ISR status flag
+                self.isrstatus[channel].vsOverrideValue(field, int(value))
 
-                elif intc_src is not None:
-                    # Set the ISR status flag
-                    self.isrstatus[channel].vsOverrideValue(field, int(value))
-
+                if intc_src is not None:
                     logger.debug('[%s] queuing exception %s for [%d]%s', self.devname, intc_src, channel, field)
                     self.emu.queueException(ExternalException(intc_src))
 
@@ -655,15 +652,15 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
         status = reg.vsGetValue()
         new_bits = value & ~status
         if new_bits:
+            # Set the ISR status flag
+            reg.vsOverrideValue(new_bits | status)
+
             flag_reg = self.registers.vsGetField(self.isrflags[event][channel])
             flags = flag_reg.vsGetValue()
             if new_bits & flags:
                 intc_src, _ = INTC_EVENT_MAP.get(self.isrevents[event][channel], (None, None))
 
                 if intc_src is not None:
-                    # Set the ISR status flag
-                    reg.vsOverrideValue(new_bits | status)
-
                     # channel-only event configurations don't have corresponding
                     # DMA request flags
                     logger.debug('[%s] queuing exception %s for event %s[%d]', self.devname, intc_src, event, channel)

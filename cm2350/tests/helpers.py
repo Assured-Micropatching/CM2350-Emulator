@@ -187,9 +187,7 @@ class MPC5674_Test(unittest.TestCase):
         memory locations)
         '''
         pc = self.set_random_pc()
-
         value, value_bytes = self.get_random_val(size)
-        print(hex(value), value_bytes.hex(), self.emu.getEndian())
 
         if msg is None:
             msg = 'unaligned write of 0x%s to 0x%x' % (value_bytes.hex(), addr)
@@ -198,9 +196,6 @@ class MPC5674_Test(unittest.TestCase):
 
         with self.assertRaises(intc_exc.MceWriteBusError, msg=msg) as cm:
             self.emu.writeMemValue(addr, value, size)
-
-        import traceback
-        traceback.print_exception(cm.exception)
 
         self.assertEqual(cm.exception.kwargs['va'], addr, msg=msg)
         self.assertEqual(cm.exception.kwargs['pc'], pc, msg=msg)

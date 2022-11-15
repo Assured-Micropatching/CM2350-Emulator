@@ -42,21 +42,36 @@ EDMA_CPRx_OFFSET    = 0x0100
 EDMA_TCDx_OFFSET    = 0x1000
 
 EDMA_MCR_DEFAULT    = (0x0000E400, 0x00000400)
-
 EDMA_MCR_HALT_FLAG  = 0x00000020
+
+EDMA_ESR_VLD_MASK     = 0x80000000
+EDMA_ESR_ERRCHN_MASK  = 0x00003F00
+EDMA_ESR_ERRCHN_SHIFT = 8
+EDMA_ESR_SAE_MASK     = 0x00000080
+EDMA_ESR_SOE_MASK     = 0x00000040
+EDMA_ESR_DAE_MASK     = 0x00000020
+EDMA_ESR_DOE_MASK     = 0x00000010
+EDMA_ESR_NCE_MASK     = 0x00000008
+EDMA_ESR_SGE_MASK     = 0x00000004
+EDMA_ESR_SBE_MASK     = 0x00000002
+EDMA_ESR_DBE_MASK     = 0x00000001
 
 
 SIZE_MAP = {
-    1:  0,
-    2:  1,
-    4:  2,
-    8:  3,
-    32: 5,
+    1:   0,
+    2:   1,
+    4:   2,
+    8:   3,
+    16:  4,  # Invalid
+    32:  5,
+    64:  6,  # Invalid
+    128: 7,  # Invalid
 }
 
 
 def get_xfer_vals(emu, saddr=None, ssize=None, daddr=None, dsize=None, nbytes=None, biter=None):
-    # Number of bytes to be transferred
+    # Number of bytes to be transferred, but by default only choose the valid
+    # S/DSIZE values
     if ssize is None:
         ssize = random.choice([1, 2, 4, 8, 32])
     if dsize is None:
@@ -86,21 +101,32 @@ def get_xfer_vals(emu, saddr=None, ssize=None, daddr=None, dsize=None, nbytes=No
         saddr -= (saddr % ssize)
 
     if daddr is None:
-        start, stop = random.choice(emu.ram_mmaps)
-        if saddr in range(start, stop):
+        mstart, mstop = random.choice(emu.ram_mmaps)
+        if saddr in range(mstart, mstop):
             # Split the possible destination addresses by mem_end_offset*10
             # around the saddr
             buffer = mem_end_offset * 10
-            if saddr > stop - buffer:
+            if saddr > mstop - buffer:
+                start = mstart
                 stop = saddr - buffer
-            elif saddr < start + buffer:
+            elif saddr < mstart + buffer:
                 start = saddr + buffer
+                stop = mstop
             else:
                 start, stop = random.choice([
-                    (start, saddr - buffer),
-                    (saddr + buffer, stop),
+                    (mstart, saddr - buffer),
+                    (saddr + buffer, mstop),
                 ])
-        daddr = random.randrange(start, stop - mem_end_offset)
+        else:
+            start = mstart
+            stop = mstop
+
+        try:
+            daddr = random.randrange(start, stop - mem_end_offset)
+        except ValueError as e:
+            print('ERROR generating valid range %#x - %#x (%#x - %#x, saddr: %#x, offset: %#x, buffer: %#x)' %
+                  (start, stop, mstart, mstop, mem_end_offset, saddr, buffer))
+            raise e
 
         # Adjust daddr to be valid given dsize
         daddr -= (daddr % dsize)
@@ -493,8 +519,8 @@ class MPC5674_eDMA_Test(MPC5674_Test):
             #   0x40 writes cause all ER flags to be cleared
             #        all other writes will only cleared the specific channel
             if devname == 'eDMA_A':
-                self.emu.dma[i].registers.erh = 0xFFFFFFFF
-            self.emu.dma[i].registers.erl = 0xFFFFFFFF
+                self.emu.dma[i].registers.vsOverrideValue('erh', 0xFFFFFFFF)
+            self.emu.dma[i].registers.vsOverrideValue('erl', 0xFFFFFFFF)
 
             self.emu.writeMemValue(clear_addr, 0xFF, 1)
             if devname == 'eDMA_A':
@@ -509,8 +535,8 @@ class MPC5674_eDMA_Test(MPC5674_Test):
             # Clear each channel individually
             for chan in range(self.emu.dma[i].num_channels):
                 if devname == 'eDMA_A':
-                    self.emu.dma[i].registers.erh = 0xFFFFFFFF
-                self.emu.dma[i].registers.erl = 0xFFFFFFFF
+                    self.emu.dma[i].registers.vsOverrideValue('erh', 0xFFFFFFFF)
+                self.emu.dma[i].registers.vsOverrideValue('erl', 0xFFFFFFFF)
 
                 msg = 'clearing ER[%d]' % chan
 
@@ -620,9 +646,140 @@ class MPC5674_eDMA_Test(MPC5674_Test):
 
     # Functionality tests
 
-    @unittest.skip('implement')
     def test_edma_tcd_config_errors(self):
-        pass
+        # Possible configuration errors:
+        #   - Invalid tcd.ssize
+        #   - tcd.saddr is inconsistent with tcd.ssize
+        #   - tcd.soff is inconsistent with tcd.ssize
+        #   - Invalid tcd.dsize
+        #   - tcd.daddr is inconsistent with tcd.dsize
+        #   - tcd.doff is inconsistent with tcd.dsize
+        #   - tcd.nbytes is not a multiple of tcd.ssize and tcd.dsize
+        #   - tcd.citer == 0 (!= tcd.biter)
+        #   - tcd.citer_e_link != tcd.biter_e_link
+        #   - ensure tcd.dlast_sga is on a 32 byte boundary
+        #
+        # A list of TCD configurations to test and the ESR value that should
+        # result
+        tests = (
+            # ssize values 16 (4), 64 (6), and 128 (7) are invalid
+            ({'ssize': 16},                         'sae', EDMA_ESR_SAE_MASK),
+            ({'ssize': 64},                         'sae', EDMA_ESR_SAE_MASK),
+            ({'ssize': 128},                        'sae', EDMA_ESR_SAE_MASK),
+            ({'saddr': 0x40000001, 'ssize': 2},     'sae', EDMA_ESR_SAE_MASK),
+            ({'saddr': 0x40000002, 'ssize': 32},    'sae', EDMA_ESR_SAE_MASK),
+
+            # source offset errors
+            ({'soff': 1, 'ssize': 2},               'soe', EDMA_ESR_SOE_MASK),
+            ({'soff': 2, 'ssize': 32},              'soe', EDMA_ESR_SOE_MASK),
+
+            # dsize values 16 (4), 64 (6), and 128 (7) are invalid
+            ({'dsize': 16},                         'dae', EDMA_ESR_DAE_MASK),
+            ({'dsize': 64},                         'dae', EDMA_ESR_DAE_MASK),
+            ({'dsize': 128},                        'dae', EDMA_ESR_DAE_MASK),
+            ({'daddr': 0x40000001, 'dsize': 2},     'dae', EDMA_ESR_DAE_MASK),
+            ({'daddr': 0x40000002, 'dsize': 32},    'dae', EDMA_ESR_DAE_MASK),
+
+            # dest offset errors
+            ({'doff': 1, 'dsize': 2},               'doe', EDMA_ESR_DOE_MASK),
+            ({'doff': 2, 'dsize': 32},              'doe', EDMA_ESR_DOE_MASK),
+
+            # num bytes errors
+            ({'nbytes': 7, 'soff': 8, 'ssize': 2, 'doff': 8, 'dsize': 8}, 'nce', EDMA_ESR_NCE_MASK),
+            ({'nbytes': 2, 'soff': 2, 'ssize': 2, 'doff': 4, 'dsize': 4}, 'nce', EDMA_ESR_NCE_MASK),
+            ({'nbytes': 6, 'soff': 8, 'ssize': 4, 'doff': 8, 'dsize': 8}, 'nce', EDMA_ESR_NCE_MASK),
+            ({'nbytes': 2, 'soff': 4, 'ssize': 4, 'doff': 4, 'dsize': 4}, 'nce', EDMA_ESR_NCE_MASK),
+            ({'biter': 0, 'citer': 0},              'nce', EDMA_ESR_NCE_MASK),
+            ({'citer': 0},                          'nce', EDMA_ESR_NCE_MASK),
+            ({'biter': 3, 'citer': 2},              'nce', EDMA_ESR_NCE_MASK),
+            ({'biter': 1, 'citer': 2},              'nce', EDMA_ESR_NCE_MASK),
+
+            # scatter-gather errors
+            ({'e_sg': 1, 'dlast_sga': 0x40000002},  'sge', EDMA_ESR_SGE_MASK),
+            ({'e_sg': 1, 'dlast_sga': 0x40000005},  'sge', EDMA_ESR_SGE_MASK),
+
+            # TLB src lookup error
+            ({'saddr': 0x30000000},                 'sbe', EDMA_ESR_SBE_MASK),
+
+            # TLB dest lookup error
+            ({'daddr': 0x30000000},                 'dbe', EDMA_ESR_DBE_MASK),
+
+            # read src error (within valid default MMU entry, outside of valid
+            # memory)
+            ({'saddr': 0x00500000},                 'sbe', EDMA_ESR_SBE_MASK),
+
+            # write src error (within valid default MMU entry, outside of valid
+            # memory)
+            ({'daddr': 0x00500000},                 'dbe', EDMA_ESR_DBE_MASK),
+        )
+
+        for i in range(len(EDMA_DEVICES)):
+            devname, baseaddr = EDMA_DEVICES[i]
+            self.assertEqual(self.emu.dma[i].devname, devname)
+
+            esr_addr = baseaddr + EDMA_ESR_OFFSET
+            erl_addr = baseaddr + EDMA_ERL_OFFSET
+            erh_addr = baseaddr + EDMA_ERH_OFFSET
+
+            for tcd_args, flag, esr_value in tests:
+                # Pick a channel to test
+                chan = random.randrange(self.emu.dma[i].num_channels)
+                tcd_addr = baseaddr + EDMA_TCDx_OFFSET + (32 * chan)
+
+                msg = '[%s] channel %d error %s: %s' % (devname, chan, flag, tcd_args)
+
+                # Clear the contents of ESR
+                self.emu.dma[i].registers.esr.reset(self.emu)
+                self.assertEqual(self.emu.readMemValue(esr_addr, 4), 0, msg=msg)
+
+                tcd = TCD(self.emu, **tcd_args)
+                tcd.write(self.emu, tcd_addr)
+
+                # If this is the 'sbe' or 'dbe' error, we need to process active
+                # transfers first before the errors will be triggered.
+                if flag in ('sbe', 'dbe'):
+                    self.assertTrue(chan in self.emu.dma[i]._pending, msg=msg)
+                    config = self.emu.dma[i]._pending[chan]
+                    self.assertEqual(self.emu.dma[i].getPending(), config, msg=msg)
+                    self.assertEqual(self.emu.extra_processing,
+                                     [self.emu.dma[i].processActiveTransfers], msg=msg)
+
+                    # One call to processActiveTransfers() to initiate the
+                    # error, another call to clear the extra call to
+                    # processActiveTransfers()
+
+                    # By default when an extra processing function is called
+                    # it's removed from the list
+
+                    self.emu.extra_processing = []
+                    self.emu.dma[i].processActiveTransfers()
+
+                    self.assertTrue(chan not in self.emu.dma[i]._pending, msg=msg)
+                    self.assertEqual(self.emu.dma[i].getPending(), None, msg=msg)
+                    self.assertEqual(self.emu.extra_processing,
+                                     [self.emu.dma[i].processActiveTransfers], msg=msg)
+
+                    self.emu.extra_processing = []
+                    self.emu.dma[i].processActiveTransfers()
+
+                self.assertTrue(chan not in self.emu.dma[i]._pending, msg=msg)
+                self.assertEqual(self.emu.dma[i].getPending(), None, msg=msg)
+                self.assertEqual(self.emu.extra_processing, [], msg=msg)
+
+                value = EDMA_ESR_VLD_MASK | (chan << EDMA_ESR_ERRCHN_SHIFT) | esr_value
+                self.assertEqual(self.emu.readMemValue(esr_addr, 4), value, msg=msg)
+
+                # Confirm the error flag was set and then clear it
+                if chan >= 32:
+                    value = self.emu.readMemValue(erh_addr, 4)
+                    self.assertEqual(value, 1 << (chan-32), msg=msg)
+                    self.emu.writeMemValue(erh_addr, value, 4)
+                    self.assertEqual(self.emu.readMemValue(erh_addr, 4), 0, msg=msg)
+                else:
+                    value = self.emu.readMemValue(erl_addr, 4)
+                    self.assertEqual(value, 1 << chan, msg=msg)
+                    self.emu.writeMemValue(erl_addr, value, 4)
+                    self.assertEqual(self.emu.readMemValue(erl_addr, 4), 0, msg=msg)
 
     def test_edma_tcd_simple(self):
         for i in range(len(EDMA_DEVICES)):

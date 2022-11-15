@@ -110,11 +110,6 @@ class PpcEmulationTime(emutimers.EmulationTime):
     '''
     PowerPC specific emulator time and timer handling.
     '''
-    # attributes used by the PpcEmulationTime class, but we can't define
-    # __slots__ here because this is used as a parent class for multiple
-    # inheritance.
-    slots = list(set(emutimers.EmulationTime.slots + ['_tb_offset']))
-
     def __init__(self, systime_scaling=0.01):
         super().__init__(systime_scaling)
 
@@ -220,10 +215,6 @@ import envi.archs.ppc.emu as eape
 import vivisect.impemu.platarch.ppc as vimp_ppc_emu
 #class PPC_e200z7(mmio.ComplexMemoryMap, eape.Ppc32EmbeddedEmulator, PpcEmulationTime):
 class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.Ppc32EmbeddedEmulator, PpcEmulationTime):
-    #__slots__ = tuple(set(list(eape.Ppc32EmbeddedEmulator.__slots__) +
-    #    vimp_ppc_emu.PpcWorkspaceEmulator.slots + mmio.ComplexMemoryMap.slots + PpcEmulationTime.slots +
-    #    ['modules', 'mmu', 'mcu_intc', 'opcache', '_cur_instr', '_read_callbacks', '_write_callbacks']))
-
     def __init__(self, vw):
         # module registry
         self.modules = {}
@@ -659,8 +650,17 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         Data Read
         '''
         ea = self.mmu.translateDataAddr(va)
-        data = mmio.ComplexMemoryMap.readMemory(self, ea, size)
+
+        # Translate Segmentation Violation exceptions into the correct PPC
+        # Data Read Exception
+        try:
+            data = mmio.ComplexMemoryMap.readMemory(self, ea, size)
+        except envi.SegmentationViolation:
+            raise intc_exc.MceDataReadBusError(pc=self.getProgramCounter(),
+                                               data=b'', va=va)
+
         self._checkReadCallbacks(ppc_xbar.XBAR_MASTER.CORE0, ea, data=data)
+
         return data
 
     def writeMemory(self, va, bytez):
@@ -668,7 +668,12 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         Data Write
         '''
         ea = self.mmu.translateDataAddr(va)
-        mmio.ComplexMemoryMap.writeMemory(self, ea, bytez)
+        try:
+            mmio.ComplexMemoryMap.writeMemory(self, ea, bytez)
+        except envi.SegmentationViolation:
+            raise intc_exc.MceWriteBusError(pc=self.getProgramCounter(),
+                                               data=b'', va=va)
+
         self._checkWriteCallbacks(ppc_xbar.XBAR_MASTER.CORE0, ea, bytez)
 
         # If the physical address being written to has cached instructions ,
@@ -690,6 +695,9 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
     def getByteDef(self, va):
         ea = self.mmu.translateDataAddr(va)
         return mmio.ComplexMemoryMap.getByteDef(self, ea)
+
+    def isAddrValid(self, va):
+        return self.mmu.getDataEntry(va)[2] is not None
 
     def putIO(self, devname, obj):
         """

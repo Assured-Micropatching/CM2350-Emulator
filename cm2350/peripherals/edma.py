@@ -218,8 +218,8 @@ class EDMA_A_REGISTERS(PeripheralRegisterSet):
         self.eeirl  = (EDMA_EEIRL_OFFSET,  v_bits(32))
         self.irqrh  = (EDMA_IRQRH_OFFSET,  v_bits(32))
         self.irqrl  = (EDMA_IRQRL_OFFSET,  v_bits(32))
-        self.erh    = (EDMA_ERH_OFFSET,    v_bits(32))
-        self.erl    = (EDMA_ERL_OFFSET,    v_bits(32))
+        self.erh    = (EDMA_ERH_OFFSET,    v_w1c(32))
+        self.erl    = (EDMA_ERL_OFFSET,    v_w1c(32))
         self.hrsh   = (EDMA_HRSH_OFFSET,   v_bits(32))
         self.hrsl   = (EDMA_HRSL_OFFSET,   v_bits(32))
         self.gwrh   = (EDMA_GWRH_OFFSET,   v_bits(32))
@@ -271,7 +271,7 @@ class EDMA_B_REGISTERS(PeripheralRegisterSet):
         self.erqrl  = (EDMA_ERQRL_OFFSET,  v_bits(32))
         self.eeirl  = (EDMA_EEIRL_OFFSET,  v_bits(32))
         self.irqrl  = (EDMA_IRQRL_OFFSET,  v_bits(32))
-        self.erl    = (EDMA_ERL_OFFSET,    v_bits(32))
+        self.erl    = (EDMA_ERL_OFFSET,    v_w1c(32))
         self.hrsl   = (EDMA_HRSL_OFFSET,   v_bits(32))
         self.gwrl   = (EDMA_GWRL_OFFSET,   v_bits(32))
         self.cpr    = (EDMA_CPRx_OFFSET,   VTuple([EDMA_x_CPRx(i) for i in range(EDMA_B_NUM_CHAN)]))
@@ -393,10 +393,6 @@ EDMA_INT_MASKS = tuple(2 ** i for i in range(32)) + tuple(2 ** i for i in range(
 
 # Object to hold the parsed TCD configuration values
 class TCDConfig:
-    # The attributes for this class are fixed
-    __slots__ = ('channel', 'tcd', 'ssize', 'dsize', 'mloff', 'nbytes',
-                 'linkch', '_citer', 'smod_mask', 'dmod_mask')
-
     def __init__(self, channel, tcd, emlm):
         self.channel = channel
         self.tcd = tcd
@@ -542,7 +538,6 @@ class eDMA(MMIOPeripheral):
 
         # Callbacks for registers
         self.registers.vsAddParseCallback('mcr', self.mcrUpdate)
-        self.registers.vsAddParseCallback('esr', self.esrUpdate)
         self.registers.cpr.vsAddParseCallback('by_idx', self.cprUpdate)
         self.registers.tcd.vsAddParseCallback('by_idx', self.tcdUpdate)
 
@@ -790,14 +785,16 @@ class eDMA(MMIOPeripheral):
         # If bit 1 is set, clear all ER flags
         if channel & 0x40:
             if self.num_channels == EDMA_A_NUM_CHAN:
-                self.registers.erh = 0x00000000
-            self.registers.erl = 0x00000000
+                self.registers.vsOverrideValue('erh', 0x00000000)
+            self.registers.vsOverrideValue('erl', 0x00000000)
         else:
             # Otherwise only clear the specified ER flag
             if channel >= EDMA_B_NUM_CHAN:
-                self.registers.erh &= ~EDMA_INT_MASKS[channel]
+                value = self.registers.erh & ~EDMA_INT_MASKS[channel]
+                self.registers.vsOverrideValue('erh', value)
             else:
-                self.registers.erl &= ~EDMA_INT_MASKS[channel]
+                value = self.registers.erl & ~EDMA_INT_MASKS[channel]
+                self.registers.vsOverrideValue('erl', value)
 
     def setStart(self, channel):
         # If bit 0 is set, ignore the write
@@ -906,13 +903,6 @@ class eDMA(MMIOPeripheral):
             # processActiveTransfers extra processing function is enabled.
             if any_pending:
                 self.emu.addExtraProcessing(self.processActiveTransfers)
-
-    def esrUpdate(self, thing):
-        # If no error bits are set ensure the VLD bit is clear
-        self.registers.esr.vld = self.ecx == 1 or self.gpe == 1 or \
-                self.cpe == 1 or self.sae == 1 or self.soe == 1 or \
-                self.dae == 1 or self.doe == 1 or self.nce == 1 or \
-                self.sge == 1 or self.sbe == 1 or self.dbe == 1
 
     def cprUpdate(self, thing, idx, size, **kwargs):
         """
@@ -1076,7 +1066,7 @@ class eDMA(MMIOPeripheral):
         if config.tcd.e_sg:
             if config.tcd.dlast_sga % EDMA_XFER_SIZE_ALIGNMENT[EDMA_XFER_SIZE.S32Bit] != 0:
                 logger.debug('[%s] channel %d SGE validation error (e_sg: %d, dlast_sga: %#x)',
-                             self.devname, channel, config.tcd.e_sg, config.dlast_sga)
+                             self.devname, channel, config.tcd.e_sg, config.tcd.dlast_sga)
                 self.setError(channel, 'sge')
                 return None
 
@@ -1087,11 +1077,9 @@ class eDMA(MMIOPeripheral):
         return config
 
     def setError(self, channel, flag):
-        self.registers.esr.vsSetField(flag, 1)
-        self.registers.esr.errchn = channel
-
-        # Set the VLD bit
-        self.registers.esr.vld = 1
+        self.registers.esr.vsOverrideValue('vld', 1)
+        self.registers.esr.vsOverrideValue('errchn', channel)
+        self.registers.esr.vsOverrideValue(flag, 1)
 
         if self.registers.mcr.hoe == 1:
             self.registers.mcr.halt = 1
@@ -1152,6 +1140,16 @@ class eDMA(MMIOPeripheral):
             # Strictly speaking we could just read a big chunk of data but I
             # suppose we will emulate the minor loops
             for offset in range(0, config.nbytes, config.ssize):
+                # Before reading from this address verify that there is a valid
+                # TLB entry, we aren't doing this implicitly through readMemory
+                # so the TLB miss exception isn't generated because that doesn't
+                # seem to be the correct way to handle this.
+                if not self.emu.isAddrValid(config.tcd.saddr+offset):
+                    logger.debug('%s[%d:%d] TLB miss for source %#x',
+                                 self.devname, config.channel, config.citer,
+                                 config.tcd.saddr + offset)
+                    raise MceDataReadBusError()
+
                 data += self.emu.readMemory(config.tcd.saddr+offset, config.ssize)
         except MceDataReadBusError:
             self.setError(config.channel, 'sbe')
@@ -1163,13 +1161,18 @@ class eDMA(MMIOPeripheral):
 
             return None
 
-        logger.debug("%s[%d:%d] [%x:%r] -> %s -> [%x:%r]", self.devname,
-                        config.channel, config.citer, config.tcd.saddr,
-                        config.ssize, data.hex(), config.tcd.daddr,
-                        config.dsize)
-
         try:
             for offset in range(0, len(data), config.dsize):
+                # Before writing to this address verify that there is a valid
+                # TLB entry, we aren't doing this implicitly through writeMemory
+                # so the TLB miss exception isn't generated because that doesn't
+                # seem to be the correct way to handle this.
+                if not self.emu.isAddrValid(config.tcd.daddr+offset):
+                    logger.debug('%s[%d:%d] TLB miss for destination %#x',
+                                 self.devname, config.channel, config.citer,
+                                 config.tcd.daddr + offset)
+                    raise MceWriteBusError()
+
                 self.emu.writeMemory(config.tcd.daddr+offset, data[offset:offset+config.dsize])
         except MceWriteBusError:
             self.setError(config.channel, 'dbe')
@@ -1181,6 +1184,11 @@ class eDMA(MMIOPeripheral):
             del self._pending[config.channel]
 
             return None
+
+        logger.debug("%s[%d:%d] [%x:%r] -> %s -> [%x:%r]", self.devname,
+                        config.channel, config.citer, config.tcd.saddr,
+                        config.ssize, data.hex(), config.tcd.daddr,
+                        config.dsize)
 
         # Now that one major loop is complete, decrement citer, and process any
         # linked channels

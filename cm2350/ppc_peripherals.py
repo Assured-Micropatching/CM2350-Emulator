@@ -50,8 +50,6 @@ class Peripheral:
     Most basic emulator peripheral class, it automatically registers itself
     with the emulator as a "module" using the device name as the module name.
     """
-    #__slots__ = ('devname', 'emu', '_config')
-
     def __init__(self, emu, devname):
         """
         Standard "module" peripheral constructor, save the device name and
@@ -117,9 +115,6 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
     A peripheral class that implements read/write functions to connect this
     object as an MMIO device to an emulator.
     """
-    #__slots__ = tuple(set(list(Peripheral.__slots__) +
-    #    mmio.MMIO_DEVICE.slots + ['baseaddr', 'registers']))
-
     def __init__(self, emu, devname, mapaddr, mapsize, regsetcls=None,
             isrstatus=None, isrflags=None, isrevents=None, **kwargs):
         """
@@ -736,11 +731,6 @@ class ExternalIOPeripheral(MMIOPeripheral):
     """
     A peripheral class that supports external IO connections.
     """
-    #__slots__ = tuple(set(list(MMIOPeripheral.__slots__) +
-    #    ['_server_args' '_server',
-    #    '_clients', '_io_thread_sock', '_io_thread_tx_sock',
-    #    '_io_thread_rx_sock', '_io_thread']))
-
     # Sometimes python gets stupid about not calling thread destructors when
     # ipython exits, so just to be keep track of any ExternalIOPeripheral
     # objects allocated and ensure they are cleaned up
@@ -1075,10 +1065,6 @@ class TimerRegister:
     thread to track individual timers. This uses the primary emulator systime
     scaling factor.
     """
-
-    #__slots__ = ('_systime_scaling', 'freq', '_bitmask', '_timer_offset',
-    #        '_running')
-
     def __init__(self, bits=None):
         """
         Constructor for the TimerRegister class. If the bits parameter is

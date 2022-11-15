@@ -115,10 +115,6 @@ class v_bits(vstruct.bitfield.v_bits):
     """
     Slight adaptation of the v_bits class that allows setting an initial value
     """
-    __slots__ = tuple(set(vstruct.bitfield.v_bits.__slots__ +
-        ('_vs_mask', '_vs_size', '_vs_startbyte', '_vs_startbit', '_vs_endbyte',
-            '_vs_endbit', '_vs_shift')))
-
     def __init__(self, width, value=0, bigend=None):
         """
         Constructor for v_bits class
@@ -224,8 +220,6 @@ class v_sbits(v_bits):
     This has to inherit from the v_bits class instead of v_snumber because the
     VBitField class specifically looks for v_bits when calculating field sizes.
     """
-    __slots__ = tuple(set(v_bits.__slots__ + ('_vs_smask',)))
-
     def __init__(self, width, value=0, bigend=None):
         # Set a sign mask to make it easy to identify negative values
         self._vs_smask = 2**(width-1)
@@ -360,9 +354,6 @@ class v_bytearray(vstruct.primitives.v_bytes):
     A bytearray-version of v_bytes, this allows in-place parse/emit like the
     VArray type using __getitem__ and __setitem__ operations.
     """
-    __slots__ = list(set(vstruct.primitives.v_bytes.__slots__ +
-        ('_vs_pcallbacks',)))
-
     def __init__(self, size=0, vbytes=None):
         """
         Constructor for v_bytearray class
@@ -375,6 +366,7 @@ class v_bytearray(vstruct.primitives.v_bytes):
             vbytes = b'\x00' * size
         self._vs_pcallbacks = {}
         super().__init__(size=size, vbytes=bytearray(vbytes))
+        self._vs_size = len(self._vs_value)
 
     def vsSetValue(self, value):
         # Raw bytes should be the only values written, so set this the same as
@@ -474,8 +466,6 @@ class v_bytearray(vstruct.primitives.v_bytes):
 
 
 class VArrayFieldsView:
-    __slots__ = ('_varray',)
-
     def __init__(self, varray):
         assert isinstance(varray, VArray)
         self._varray = varray
@@ -500,8 +490,6 @@ class VArrayFieldsView:
 
 
 class VArrayValuesView:
-    __slots__ = ('_varray',)
-
     def __init__(self, varray):
         assert isinstance(varray, VArray)
         self._varray = varray
@@ -529,17 +517,6 @@ class VArray(VStruct):
     """
     Re-imagining of the VStruct VArray class to improve efficiency
     """
-    __slots__ = list(set(VStruct.__slots__ +
-        ('_vs_elem_type', '_vs_elem_size', '_vs_elems', '_vs_pcallbacks')))
-
-    # _vs_fields and _vs_values are changed into properties so we need to remove
-    # them from the __slots__
-    __slots__.remove('_vs_fields')
-    __slots__.remove('_vs_values')
-
-    # Now we're done, change it back to a tuple (no idea if this matters or not)
-    __slots__ = tuple(__slots__)
-
     def __init__(self, elems, count=0):
         super().__init__()
         self._vs_pcallbacks = {}
@@ -777,10 +754,6 @@ class PeriphRegister(VBitField):
     """
     A VBitField object that enables easy integration into a bare metal emulator.
     """
-    __slots__ = tuple(set(VBitField.__slots__ +
-        ('_vs_defaults', '_vs_elem_size', '_vs_elems', '_vs_bigend', '_vs_size',
-            '_vs_fmt', '_vs_bitwidth')))
-
     def __init__(self, emu=None, name=None, bigend=None):
         """
         Constructor for PeriphRegister class.  If this object is not part of a
@@ -1212,10 +1185,6 @@ class PeripheralRegisterSet(VStruct):
             self.mb[:] = b'\x00' * 0x800
             self.rximr[:] = b'\x00' * 0x400
     """
-    __slots__ = tuple(set(VStruct.__slots__ +
-        ('_vs_field_offset', '_vs_field_by_offset', '_vs_sorted_offsets',
-            '_vs_bigend')))
-
     def __init__(self, name=None, bigend=None):
         """
         Constructor for PeripheralRegisterSet class.  If this object is not
@@ -1588,8 +1557,6 @@ class BitFieldSPR(PeriphRegister):
     register "pcb" callbacks to specific SPR bits such as the PowerPC e200z7
     HID0[TBEN] field.
     """
-    __slots__ = tuple(set(PeriphRegister.__slots__ + ('_reg', '_vs_size', '_fmt')))
-
     def __init__(self, spridx, emu):
         """
         Constructor for BitFieldSPR class.

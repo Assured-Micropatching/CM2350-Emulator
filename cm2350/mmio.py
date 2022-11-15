@@ -117,11 +117,6 @@ class MMIO_DEVICE:
     This class should be subclassed.  Training-Wheels versions of _mmio_read()
     and _mmio_write() are provided.
     '''
-    # attributes used by the MMIO_DEVICE class, but we can't define
-    # __slots__ here because this is used as a parent class for multiple
-    # inheritance.
-    #slots = ['emu']
-
     def __init__(self, emu, devname, mapaddr, mapsize, **kwargs):
         self.emu = emu
         emu.addMMIO(mapaddr, mapsize, devname, self._mmio_read, self._mmio_write, **kwargs)

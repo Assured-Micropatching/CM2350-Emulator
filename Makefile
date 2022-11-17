@@ -1,4 +1,4 @@
-VENV ?= ENV
+.PHONY: default cm2350_tests
 
 .PHONY: all virtualenv venv tests
 

@@ -44,7 +44,6 @@ class MPC5674_Test(unittest.TestCase):
     def setUp(self):
         if os.environ.get('LOG_LEVEL', 'INFO') == 'DEBUG':
             e_common.initLogging(logger, logging.DEBUG)
-            #self.args.append('-vvv')
 
         if self._systime_scaling is None:
             self._systime_scaling = 0.1 if self.accurate_timing else 1.0
@@ -75,7 +74,8 @@ class MPC5674_Test(unittest.TestCase):
         self.emu.setRegister(eapr.REG_MSR, msr_val)
 
         # Enable the timebase (normally done by writing a value to HID0)
-        self.emu.enableTimebase(start_paused=self._start_timebase_paused)
+        if not self._start_timebase_paused:
+            self.emu.resume_time()
 
     def _getPendingExceptions(self):
         # Remove all the exceptions in the pending list

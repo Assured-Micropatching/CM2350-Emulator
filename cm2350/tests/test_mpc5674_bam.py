@@ -53,13 +53,12 @@ class MPC5674_Flash_BAM(MPC5674_Test):
     def test_bam_find_rchw(self):
         self.emu.flash.data[0:8] = b'\x00\x5a\x00\x00\xaa\xaa\xaa\xaa'
 
-        # timebase is enabled by default by in the setUp() function
-        self.assertTrue(self.emu.systimeRunning())
+        # reset to cause standard BAM processing
         self.emu.reset()
 
         # System time should be disabled again after reset, re-enable it
         self.assertFalse(self.emu.systimeRunning())
-        self.emu.enableTimebase()
+        self.emu.resume_time()
         self.assertTrue(self.emu.systimeRunning())
 
         self.assertEqual(self.emu.bam.rchw_addr, 0x00000000)
@@ -76,7 +75,7 @@ class MPC5674_Flash_BAM(MPC5674_Test):
 
         # System time should be disabled again after reset, re-enable it
         self.assertFalse(self.emu.systimeRunning())
-        self.emu.enableTimebase()
+        self.emu.resume_time()
         self.assertTrue(self.emu.systimeRunning())
 
         self.assertEqual(self.emu.bam.rchw_addr, 0x00004000)
@@ -93,7 +92,7 @@ class MPC5674_Flash_BAM(MPC5674_Test):
 
         # System time should be disabled again after reset, re-enable it
         self.assertFalse(self.emu.systimeRunning())
-        self.emu.enableTimebase()
+        self.emu.resume_time()
         self.assertTrue(self.emu.systimeRunning())
 
         self.assertEqual(self.emu.bam.rchw_addr, 0x00010000)
@@ -110,7 +109,7 @@ class MPC5674_Flash_BAM(MPC5674_Test):
 
         # System time should be disabled again after reset, re-enable it
         self.assertFalse(self.emu.systimeRunning())
-        self.emu.enableTimebase()
+        self.emu.resume_time()
         self.assertTrue(self.emu.systimeRunning())
 
         self.assertEqual(self.emu.bam.rchw_addr, 0x0001C000)
@@ -127,7 +126,7 @@ class MPC5674_Flash_BAM(MPC5674_Test):
 
         # System time should be disabled again after reset, re-enable it
         self.assertFalse(self.emu.systimeRunning())
-        self.emu.enableTimebase()
+        self.emu.resume_time()
         self.assertTrue(self.emu.systimeRunning())
 
         self.assertEqual(self.emu.bam.rchw_addr, 0x00020000)
@@ -144,7 +143,7 @@ class MPC5674_Flash_BAM(MPC5674_Test):
 
         # System time should be disabled again after reset, re-enable it
         self.assertFalse(self.emu.systimeRunning())
-        self.emu.enableTimebase()
+        self.emu.resume_time()
         self.assertTrue(self.emu.systimeRunning())
 
         self.assertEqual(self.emu.bam.rchw_addr, 0x00030000)
@@ -159,7 +158,7 @@ class MPC5674_Flash_BAM(MPC5674_Test):
 
         # System time should be disabled again after reset, re-enable it
         self.assertFalse(self.emu.systimeRunning())
-        self.emu.enableTimebase()
+        self.emu.resume_time()
         self.assertTrue(self.emu.systimeRunning())
 
         self.assertEqual(self.emu.bam.rchw_addr, None)
@@ -169,13 +168,12 @@ class MPC5674_Flash_BAM(MPC5674_Test):
     def test_bam_rchw_booke(self):
         self.emu.flash.data[0x4000:0x4008] = b'\x00\x5A\x00\x00\x40\x00\x00\x00'
 
-        # timebase is enabled by default by in the setUp() function
-        self.assertTrue(self.emu.systimeRunning())
+        # reset to cause standard BAM processing
         self.emu.reset()
 
         # System time should be disabled again after reset, re-enable it
         self.assertFalse(self.emu.systimeRunning())
-        self.emu.enableTimebase()
+        self.emu.resume_time()
         self.assertTrue(self.emu.systimeRunning())
 
         self.assertEqual(self.emu.bam.rchw_addr, 0x00004000)
@@ -203,13 +201,12 @@ class MPC5674_Flash_BAM(MPC5674_Test):
     def test_bam_rchw_vle(self):
         self.emu.flash.data[0x4000:0x4008] = b'\x01\x5A\x00\x00\x40\x00\x00\x00'
 
-        # timebase is enabled by default by in the setUp() function
-        self.assertTrue(self.emu.systimeRunning())
+        # reset to cause standard BAM processing
         self.emu.reset()
 
         # System time should be disabled again after reset, re-enable it
         self.assertFalse(self.emu.systimeRunning())
-        self.emu.enableTimebase()
+        self.emu.resume_time()
         self.assertTrue(self.emu.systimeRunning())
 
         self.assertEqual(self.emu.bam.rchw_addr, 0x00004000)
@@ -231,13 +228,12 @@ class MPC5674_Flash_BAM(MPC5674_Test):
     def test_bam_rchw_mcu_watchdog(self):
         self.emu.flash.data[0x4000:0x4008] = b'\x04\x5A\x00\x00\x40\x00\x00\x00'
 
-        # timebase is enabled by default by in the setUp() function
-        self.assertTrue(self.emu.systimeRunning())
+        # reset to cause standard BAM processing
         self.emu.reset()
 
         # System time should be disabled again after reset, re-enable it
         self.assertFalse(self.emu.systimeRunning())
-        self.emu.enableTimebase()
+        self.emu.resume_time()
         self.assertTrue(self.emu.systimeRunning())
 
         self.assertEqual(self.emu.bam.rchw_addr, 0x00004000)
@@ -259,13 +255,12 @@ class MPC5674_Flash_BAM(MPC5674_Test):
     def test_bam_rchw_swt(self):
         self.emu.flash.data[0x4000:0x4008] = b'\x08\x5A\x00\x00\x40\x00\x00\x00'
 
-        # timebase is enabled by default by in the setUp() function
-        self.assertTrue(self.emu.systimeRunning())
+        # reset to cause standard BAM processing
         self.emu.reset()
 
         # System time should be disabled again after reset, re-enable it
         self.assertFalse(self.emu.systimeRunning())
-        self.emu.enableTimebase()
+        self.emu.resume_time()
         self.assertTrue(self.emu.systimeRunning())
 
         self.assertEqual(self.emu.bam.rchw_addr, 0x00004000)

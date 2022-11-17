@@ -43,30 +43,6 @@ class CM2350:
                 },
             }
         },
-
-        # Standard vivisect emulator settings that need to be different for the
-        # target platform. Usually the project-specific values will be used but
-        # if the vivisect loader-specific options are used we want them to be
-        # correct.
-        'viv': {
-            'parsers': {
-                'blob': {
-                    'arch': 'ppc32-embedded',
-                    'bigend': True,
-                    'baseaddr': 0,
-                },
-                'ihex': {
-                    'arch': 'ppc32-embedded',
-                    'bigend': True,
-                    'offset': 0,
-                },
-                'srec': {
-                    'arch': 'ppc32-embedded',
-                    'bigend': True,
-                    'offset': 0,
-                }
-            }
-        }
     }
 
     docconfig = {

@@ -427,9 +427,6 @@ class MPC5674_WDT_Test(MPC5674_Test):
         self.assertEqual(self.emu.ecsm.registers.mrsr.dir, 1)
         self.assertEqual(self.emu.ecsm.registers.mrsr.swtr, 0)
 
-        # restart the system timebase but keep it paused
-        self.emu.enableTimebase(start_paused=True)
-
         # Since we reset, set the SLK flag again
         lock_swt_val = SWT_MCR_ENABLE_WDOG | 0x00000010
         self.emu.writeMemValue(SWT_MCR, lock_swt_val, 4)
@@ -492,9 +489,6 @@ class MPC5674_WDT_Test(MPC5674_Test):
         self.assertEqual(self.emu.ecsm.registers.mrsr.por, 0)
         self.assertEqual(self.emu.ecsm.registers.mrsr.dir, 1)
         self.assertEqual(self.emu.ecsm.registers.mrsr.swtr, 0)
-
-        # restart the system timebase but keep it paused
-        self.emu.enableTimebase(start_paused=True)
 
         # Since we reset, set the SLK flag again
         lock_swt_val = SWT_MCR_ENABLE_WDOG | 0x00000010

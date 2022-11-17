@@ -82,14 +82,11 @@ class MPC5674_FMPLL_Test(MPC5674_Test):
         26666666.66666666,  # ESYNCR2[ERFD] = 5
     ]
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-        # Add specific EXTAL and PLLCFG startup arguments
-        self.args = MPC5674_Test.args + [
-            '-O', 'project.MPC5674.FMPLL.extal=%d' % self.EXTAL,
-            '-O', 'project.MPC5674.SIU.pllcfg=%d' % self.PLLCFG,
-        ]
+    # Add specific EXTAL and PLLCFG startup arguments
+    args = MPC5674_Test.args + [
+        '-O', 'project.MPC5674.FMPLL.extal=%d' % self.EXTAL,
+        '-O', 'project.MPC5674.SIU.pllcfg=%d' % self.PLLCFG,
+    ]
 
     def test_fmpll_synsr_defaults(self):
         self.assertEqual(self.emu.readMemory(FMPLL_SYNSR, 4), FMPLL_SYNSR_DEFAULT_BYTES)

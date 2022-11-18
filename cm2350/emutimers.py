@@ -48,16 +48,22 @@ class EmuTimer:
         # Frequency and period can either be set when the timer is created if
         # those are fixed, or later when the timer is started.
         self.freq = freq
+        self._sysfreq_to_freq = None
         self.period = period
 
         # When a timer is not running the target is None
         self.target = None
 
+        # Used to track paused timers, only used by the pause and resume
+        # functions
+        self._remaining = None
+
     def start(self, freq=None, period=None):
         '''
         Start a timer running right now.
 
-        Uses the emutime object's systime() function call to determine what the current time is.
+        Uses the emutime object's systicks() function call to determine what the
+        current system time is.
 
         Arguments:
             freq        (optional) The clock frequency that the timer uses to
@@ -83,6 +89,9 @@ class EmuTimer:
 
         now = self._emutime.systicks()
 
+        # Ensure that the remaining time is not set
+        self._remaining = None
+
         # frequency and period must be set for a timer to be started
         if self.freq and self.period:
             # Determine how much time it should take to reach the timeout period
@@ -100,7 +109,8 @@ class EmuTimer:
             raise Exception(err)
 
         # Determine how many system ticks occur for every tick of this timer
-        duration = int(self.period * (self._emutime.getSystemFreq() / self.freq))
+        self._sysfreq_to_freq = self._emutime.getSystemFreq() / self.freq
+        duration = int(self.period * self._sysfreq_to_freq)
         self.target = now + duration
         logger.debug('[%d] %s timer started: %d @ %d Hz == %d', now, self.name, self.period, self.freq, duration)
 
@@ -111,7 +121,7 @@ class EmuTimer:
         '''
         Execute the registered callback function.
 
-        This marks the timer as no longer running and executes the regsitered
+        This marks the timer as no longer running and executes the registered
         callback function if one has been registered.
         '''
         self.target = None
@@ -121,13 +131,41 @@ class EmuTimer:
     def stop(self):
         '''
         Stop a timer.
-
-        This method is meant to be called by code that registered the original timer.
         '''
         now = self._emutime.systicks()
         logger.debug('[%d] %s timer stopped', now, self.name)
 
         self.target = None
+        self._remaining = None
+
+        # Because this is the function intended to be used outside of the
+        # EmulationTime object, notify the emutime obj that a timer has been
+        # updated
+        self._emutime.timerUpdated()
+
+    def pause(self):
+        '''
+        Temporarily pause a timer.
+        '''
+        now = self._emutime.systicks()
+        self._remaining = self.target - now
+        logger.debug('[%d] %s timer paused (%d remaining)', now, self.name, self._remaining)
+        self.target = None
+
+        # Because this is the function intended to be used outside of the
+        # EmulationTime object, notify the emutime obj that a timer has been
+        # updated
+        self._emutime.timerUpdated()
+
+    def resume(self):
+        '''
+        Resume a paused timer.
+        '''
+        now = self._emutime.systicks()
+        logger.debug('[%d] %s timer resumed (%d remaining)', now, self.name, self._remaining)
+
+        self.target = now + self._remaining
+        self._remaining = None
 
         # Because this is the function intended to be used outside of the
         # EmulationTime object, notify the emutime obj that a timer has been
@@ -141,18 +179,18 @@ class EmuTimer:
         if self.target is None:
             return None
 
-        # The remaining number of ticks is the number of system ticks, so divide
-        # the system frequency by these ticks to get seconds remaining.
-        return self._emutime.getSystemFreq() / self.ticks()
+        return self.freq / self.ticks()
 
     def ticks(self):
         '''
-        Return the number of ticks remaining before this timer should expire.
+        Return the number of timer ticks (not system ticks) remaining before
+        this timer should expire.
         '''
         if self.target is None:
             return None
 
-        return self._target - self.emutime.systicks()
+        systicks_remaining = self.target - self._emutime.systicks()
+        return int(systicks_remaining / self._sysfreq_to_freq)
 
     def running(self):
         '''
@@ -196,10 +234,6 @@ class EmuTimeCore:
 
         self._ticks = 0
 
-        # The system time is not running when breakstart is tracking the system
-        # ticks
-        self._breakstart = 0
-
         # Track the number of ticks that have elapsed
         self.freq = None
 
@@ -208,32 +242,25 @@ class EmuTimeCore:
         for t in self._timers:
             t.stop()
 
-    def systimeRunning(self):
-        '''
-        Returns an indication of if the primary system time is running or
-        paused. Useful for testing and debugging.
-        '''
-        return self._breakstart is None
-
     def tick(self):
         self._ticks += 1
 
         # Determine if any timers should expire
-        if self.systimeRunning():
-            expired_timer = self.getExpiredTimer()
-            if expired_timer is not None:
-                self._handle_expired(expired_timer)
+        expired_timer = self.getExpiredTimer()
+        if expired_timer is not None:
+            self._handle_expired(expired_timer)
 
     def resume(self):
-        if not self.systimeRunning():
-            self._ticks = self._breakstart
-            self._breakstart = None
-            self.timerUpdated()
+        '''
+        placeholder for the scaled time based timer emulation core
+        '''
+        pass
 
     def halt(self):
-        if self.systimeRunning():
-            self._breakstart = self._ticks
-            self.timerUpdated()
+        '''
+        placeholder for the scaled time based timer emulation core
+        '''
+        pass
 
     def systimeReset(self):
         '''
@@ -242,7 +269,6 @@ class EmuTimeCore:
         modules to re-create their timers).
         '''
         self._ticks = 0
-        self._breakstart = 0
         self._systemFreq = None
         self.timerUpdated()
 
@@ -250,7 +276,10 @@ class EmuTimeCore:
         self._systemFreq = float(freq)
 
     def getSystemFreq(self):
-        return self._systemFreq
+        if self._systemFreq is None:
+            return 0.0
+        else:
+            return self._systemFreq
 
     def systime(self):
         '''
@@ -261,10 +290,7 @@ class EmuTimeCore:
         return self.systicks() * self._systemFreq
 
     def systicks(self):
-        if self.systimeRunning():
-            return self._ticks
-        else:
-            return self._ticks - self._breakstart
+        return self._ticks
 
     def registerTimer(self, name, callback, freq=None, period=None):
         '''
@@ -282,25 +308,16 @@ class EmuTimeCore:
         '''
         self._timers.sort()
 
-    def getExpiredTimer(self):
-        '''
-        Checks if the next timer scheduled to expire has expired or not.  If it
-        has expired the EmuTimer object is returned.
-        '''
-        if not self.systimeRunning():
-            return None
-
-        if self._timers and self._timers[0].expired():
-            return self._timers[0]
-
-        return None
-
     def _handle_expired(self, expired_timer):
         '''
         Call the timer's callback handler
         '''
         logger.debug('[%d] %s expired', self.systicks(), expired_timer.name)
         expired_timer.callback()
+
+        # After the timer callback has been run, this timer should be placed at
+        # the end of the queue
+        self._emutime.timerUpdated()
 
 
 class ScaledEmuTimeCore(EmuTimeCore):
@@ -390,6 +407,13 @@ class ScaledEmuTimeCore(EmuTimeCore):
             else:
                 self._tb_thread = None
 
+    def systimeRunning(self):
+        '''
+        Returns an indication of if the primary system time is running or
+        paused. Useful for testing and debugging.
+        '''
+        return self._breakstart is None
+
     def tick(self):
         '''
         keep track of ticks but don't check for expiration here
@@ -401,11 +425,10 @@ class ScaledEmuTimeCore(EmuTimeCore):
         Resume tracking the amount of time passing for the emulator, but only
         if system time has already been started.
         '''
-        if self._breakstart is not None:
-            halted_time = time.time() - self._breakstart
-            self._sysoffset += halted_time
-            self._breakstart = None
-            self.timerUpdated()
+        halted_time = time.time() - self._breakstart
+        self._sysoffset += halted_time
+        self._breakstart = None
+        self.timerUpdated()
 
     def halt_time(self):
         '''
@@ -413,9 +436,8 @@ class ScaledEmuTimeCore(EmuTimeCore):
 
         This also stops timers from expiring.
         '''
-        if self._breakstart is None:
-            self._breakstart = time.time()
-            self.timerUpdated()
+        self._breakstart = time.time()
+        self.timerUpdated()
 
     def systimeReset(self):
         EmuTimeCore.systimeReset(self)
@@ -441,7 +463,7 @@ class ScaledEmuTimeCore(EmuTimeCore):
         # Make sure to take into account the breakstart offset if the system
         # is halted
         if not self.systimeRunning():
-            elapsed_time = now - (self._sysoffset + self._breakstart)
+            elapsed_time = (now - self._sysoffset) - (now - self._breakstart)
         else:
             elapsed_time = now - self._sysoffset
         return elapsed_time * self._systime_scaling
@@ -486,6 +508,19 @@ class ScaledEmuTimeCore(EmuTimeCore):
 
         if self._timers and self._timers[0].expired():
             return self._timers[0].time()
+
+        return None
+
+    def getExpiredTimer(self):
+        '''
+        Checks if the next timer scheduled to expire has expired or not.  If it
+        has expired the EmuTimer object is returned.
+        '''
+        if not self.systimeRunning():
+            return None
+
+        if self._timers and self._timers[0].expired():
+            return self._timers[0]
 
         return None
 

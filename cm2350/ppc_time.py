@@ -18,7 +18,7 @@ class PpcEmuTime:
         # of any timers currently running.  Instead use a timebase offset value
         # so values read from TBU/TBL will have the correct values but the
         # systicks() will be unmodified.
-        self._tb_offset = 0
+        self._tb_offset = None
 
         # Register the TBU/TBL callbacks, these are read-only so no write
         # callback is attached.
@@ -44,6 +44,24 @@ class PpcEmuTime:
     def _invalid_tb_read(self, emu, op):
         return 0
 
+    def enableTimebase(self):
+        '''
+        when the timebase is stopped the timebase registers shouldn't increment
+        and the timebase-managed timers (decrementer, watchdog, and the
+        fixed-interval timer) should be disabled when the timebase is disabled.
+        '''
+        if self._tb_offset is None:
+            self._tb_offset = self.systicks()
+
+    def disableTimebase(self):
+        '''
+        when the timebase is stopped the timebase registers shouldn't increment
+        and the timebase-managed timers (decrementer, watchdog, and the
+        fixed-interval timer) should be disabled when the timebase is disabled.
+        '''
+        if self._tb_offset is not None:
+            self._tb_offset = None
+
     def tblRead(self, emu, op):
         '''
         Read callback handler to associate the value of the TBL SPR with the
@@ -53,7 +71,7 @@ class PpcEmuTime:
         # 32-bit mode its just the lower 32-bits, but this masking is done
         # already in the PpcRegOper class (and will be set in the i_mfspr()
         # handler that calls this)
-        return self.systicks()
+        return self.getTimebase()
 
     def tbuRead(self, emu, op):
         '''
@@ -62,7 +80,7 @@ class PpcEmuTime:
         '''
         # Get the top 32-bits of the "ticks" value.  This should be only 32-bits
         # wide regardless of if this is a 64-bit or 32-bit machine.
-        return (self.systicks() >> 32) & 0xFFFFFFFF
+        return (self.getTimebase() >> 32) & 0xFFFFFFFF
 
     def tblWrite(self, emu, op):
         '''
@@ -77,7 +95,7 @@ class PpcEmuTime:
         # the new desired timebase offset
         tbu_offset = emu.getRegister(REG_TBU_WO)
         offset = (tbu_offset << 32) | tbl_offset
-        self._tb_offset = self.systicks() - offset
+        self._tb_offset = self.getTimebase() - offset
 
         # Return the offset so that TBL_WO has the correct offset to use to
         # calculate the desired timebase offset.
@@ -96,15 +114,18 @@ class PpcEmuTime:
         # the new desired timebase offset
         tbl_offset = emu.getRegister(REG_TBL_WO)
         offset = (tbu_offset << 32) | tbl_offset
-        self._tb_offset = self.systicks() - offset
+        self._tb_offset = self.getTimebase() - offset
 
         # Return the offset so that TBU_WO has the correct offset to use to
         # calculate the desired timebase offset.
         return tbu_offset
 
-    def systicks(self):
+    def getTimebase(self):
         '''
         Because PowerPC allows writes to the "Write-Only" TBL/TBU registers,
         adjust the returned systicks value by the current offset.
         '''
-        return super().systicks() - self._tb_offset
+        if self._tb_offset is None:
+            return 0
+        else:
+            return self.systicks() - self._tb_offset

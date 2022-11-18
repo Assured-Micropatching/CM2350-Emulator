@@ -194,6 +194,10 @@ class MPC5674_WDT_Test(MPC5674_Test):
         self.emu.writeMemValue(SWT_MCR, SWT_MCR_ENABLE_WDOG, 4)
         self.assertEqual(self.emu.swt.watchdog.running(), True)
 
+        # The system time is running when the system initializes, manually reset
+        # it which causes it to pause.
+        self.emu.systimeReset()
+
         # The SWT CO register should reflect the amount of time left before the
         # watchdog timer expires. Because the system starts paused it should
         # have the same value as the TO initialization value

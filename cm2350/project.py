@@ -121,9 +121,10 @@ def open_project(defconfig=None, docconfig=None, args=None, parser=None):
     vw.setTransMeta("ProjectMode", parsed_args.mode)
 
     # setup logging
-    vw.verbose = min(parsed_args.verbose, 4)
+    vw.verbose = min(parsed_args.verbose, 7)
     level = e_common.LOG_LEVELS[vw.verbose]
     e_common.initLogging(logger, level=level)
+    logger.warning("LogLevel: %r  %r  %r", vw.verbose, level, logging.getLevelName(level))
 
     # print options help if requested
     if parsed_args.help_options:

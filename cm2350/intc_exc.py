@@ -1,5 +1,6 @@
 from envi.archs.ppc.regs import *
 from envi.archs.ppc.const import *
+from vtrace.platforms import signals
 
 from .intc_const import *
 from .intc_src import INTC_SRC
@@ -687,3 +688,28 @@ class MceWriteBusError(MachineCheckException):
     # Set the MCSR[ST] bit
     __mcsrbits__ = 0x00004000
     __mcsrmask__ = 0x00004000
+    
+class BreakException(DebugException):
+    __SIGNAL__ = None
+
+    def setupContext(self, emu):
+        # For now, we'll skip the standard setupContext and attempt to handle 
+        # "Breaks" out of the standard interrupt handling context.
+
+        # use the emulator's built-in pause/resume functionality (so we're not 
+        # left dealing with the details here)
+        emu._do_halt(self.__SIGNAL__)
+
+class SigTRAP_Exception(BreakException):
+    __SIGNAL__ = signals.SIGTRAP
+
+class SigSTOP_Exception(BreakException):
+    __SIGNAL__ = signals.SIGSTOP
+
+class SigTSTP_Exception(BreakException):
+    __SIGNAL__ = signals.SIGTSTP
+
+
+# normal exceptions:
+class ResumeException(Exception):
+    pass

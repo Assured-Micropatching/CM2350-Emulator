@@ -17,6 +17,7 @@ e200z7 is responsible for defining:
 import sys
 import queue
 import logging
+import threading
 logger = logging.getLogger(__name__)
 
 import envi
@@ -25,7 +26,7 @@ from vstruct.bitfield import *
 from envi.archs.ppc.regs import REG_MCSR, REG_MSR, REG_TSR, REG_TCR, REG_HID0, REG_HID1, REG_TBU, REG_TB, REG_TBU_WO, REG_TBL_WO
 from .ppc_vstructs import BitFieldSPR, v_const, v_w1c
 
-from . import emutimers, mmio, ppc_mmu, e200_intc
+from . import emutimers, mmio, ppc_mmu, e200_intc, e200_gdb
 from .const import *
 
 # PPC/MCU Exceptions
@@ -255,6 +256,15 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator, eape.Ppc32Em
         # standard) exceptions/interrupts
         self.mcu_intc = e200_intc.e200INTC(emu=self, ivors=True)
 
+        # Create GDBSTUB Server
+        self.gdbstub = e200_gdb.e200GDB(self)
+        self._pause_queue = queue.Queue()
+        self._pausers = queue.Queue()
+
+        # generic Breakpoint data
+        self._bpdata = {}
+        self._bps_in_place = False
+
         # The same sequence of bytes can decode to different PPC or VLE
         # instructions so the opcache must be split into a full PPC and VLE PPC
         # cache
@@ -308,6 +318,118 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator, eape.Ppc32Em
             if hasattr(module, 'reset'):
                 logger.debug("reset_core: Resetting %r...", key)
                 module.reset(self)
+
+    def halt_exec(self):
+        '''
+        Pause execution on a processor
+
+        #TODO: Make different API calls for each type of break exception:
+        * SigTRAP_Exception
+        * SigSTOP_Exception
+        * SigTSTP_Exception
+        '''
+        self.queueException(intc_exc.BreakException())
+
+    def _do_halt(self, signal):
+        '''
+        Internal Pause mechanism (to keep the details in-house).
+        This should only be called by something *in the execution thread*.
+        Currently, this is only called by BreakException during exception-
+        handling, causing a halt (pause) to emulation, until resumed.
+
+        We'll simply grab a Queue entry until something is fed to the queue.
+        By design, this will halt the processor from executing.  To resume
+        execution, The 
+
+        This will only work for single-core emulators.  On Multi-core emu's 
+        the remaining cores will continue to execute without some other
+        mechanism.
+        '''
+        try:
+            # store that we're waiting
+            self._pausers.put(threading.currentThread())
+            # pause the clock
+
+            # this part hangs until something is put in the queue to be received
+            self._pause_queue.get()
+
+        finally:
+            # clear out that we are waiting
+            self._pausers.get_nowait()
+
+            # resume the clock
+            self.resume_time()
+
+    def resume_exec(self):
+        '''
+        Resume the emulator, which has been "paused"
+        Sends a message to the _pause_queue in order to free the paused thread
+        '''
+        if self._pausers.empty():
+            logger.warning("resume while not paused!")
+            raise intc_exc.ResumeException("Resume while not Paused!")   # is this bad?
+
+        self._pause_queue.put("YAY! BE FREE!")
+
+    def addBreakpoint(self, va):
+        '''
+        Handles the details of breakpoint tracking and modified bytes.
+        '''
+        # if va is already a breakpoint, don't do it!!
+        if va in self._bpdata:
+            return -1   # raise exception
+
+        brkbytes = self.arch.archGetBreakInstr()
+
+        # check for overlapping breakpoints
+        for tva in range(va, va+len(brkbytes)-1):
+            if tva in self._bpdata:
+                return -2   # raise exception
+
+        for tva in range(va - len(brkbytes)+1, va):
+            if tva in self._bpdata:
+                return -3   # raise exception
+
+        # store existing bytes
+        self._bpdata[va] = self.readMemory(va, len(brkbyes))
+
+    def _putDownBreakpoints(self):
+        '''
+        At each emulator stop, we want to replace the original bytes.  On 
+        resume, we put the Break instruction bytes back in.
+        '''
+        brkbytes = self.arch.archGetBreakInstr()
+
+        for va in self._bpdata:
+            # stamp in a Break instruction
+            self.writeMemory(va, brkbytes)
+
+        self._bps_in_place = True
+
+    def _pullUpBreakpoints(self):
+        '''
+        At each emulator stop, we want to replace the original bytes.  On 
+        resume, we put the Break instruction bytes back in.
+        '''
+        brkbytes = self.arch.archGetBreakInstr()
+
+        for va, origbytes in list(self._bpdata.items()):
+            # restore the original bytes
+            self.writeMemory(va, origbytes)
+        
+        self._bps_in_place = False
+
+    def delBreakpoint(self, va):
+        '''
+        Remove breakpoint.
+        '''
+        if va not in self._bpdata:
+            return -1
+
+        origbytes = self._bpdata.pop(va)
+        if self._bps_in_place:
+            self.writeMemory(va, origbytes)
+
 
     ###############################################################################
     # Redirect TLB instruction emulation functions to the MMU peripheral
@@ -460,6 +582,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator, eape.Ppc32Em
             except intc_exc.INTCException as exc:
                 # If any PowerPC-specific exception occurs, queue it to be handled
                 # on the next call
+                logger.warning("INTCExc: %r", exc)
                 self.queueException(exc)
 
     def queueException(self, exception):

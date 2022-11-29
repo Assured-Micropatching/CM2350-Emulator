@@ -826,9 +826,9 @@ class MPC5674_WDT_Test(unittest.TestCase):
         # by 0.01 to get the real amount of time to sleep for half of the
         # watchdog time to elapse for the emulator.
         sleep_time = (wdt_time * 0.5) / self.emu._systime_scaling
-        self.emu.resume()
+        self.emu.resume_time()
         time.sleep(sleep_time)
-        self.emu.halt()
+        self.emu.halt_time()
 
         # It's unlikely the python timing will be accurate enough so that the
         # system time is now the sleep_time. but it should be less than the
@@ -849,9 +849,9 @@ class MPC5674_WDT_Test(unittest.TestCase):
 
         # Run for a full WDT time
         sleep_time = wdt_time / self.emu._systime_scaling
-        self.emu.resume()
+        self.emu.resume_time()
         time.sleep(sleep_time)
-        self.emu.halt()
+        self.emu.halt_time()
 
         # The watchdog timer should have expired by now
         self.assertGreater(self.emu.systime(), wdt_time)
@@ -900,9 +900,9 @@ class MPC5674_WDT_Test(unittest.TestCase):
         # by 0.01 to get the real amount of time to sleep for half of the
         # watchdog time to elapse for the emulator.
         sleep_time = (wdt_time * 0.5) / self.emu._systime_scaling
-        self.emu.resume()
+        self.emu.resume_time()
         time.sleep(sleep_time)
-        self.emu.halt()
+        self.emu.halt_time()
 
         # It's unlikely the python timing will be accurate enough so that the
         # system time is now the sleep_time. but it should be less than the
@@ -918,9 +918,9 @@ class MPC5674_WDT_Test(unittest.TestCase):
 
         # Run for a full WDT time
         sleep_time = wdt_time / self.emu._systime_scaling
-        self.emu.resume()
+        self.emu.resume_time()
         time.sleep(sleep_time)
-        self.emu.halt()
+        self.emu.halt_time()
 
         # The watchdog timer should have expired by now, but only once
         now = self.emu.systime()
@@ -941,9 +941,9 @@ class MPC5674_WDT_Test(unittest.TestCase):
         # Wait for another half WDT time for the watchdog to expire again.  The
         # second expiration should generate a ResetException
         sleep_time = (wdt_time * 0.5) / self.emu._systime_scaling
-        self.emu.resume()
+        self.emu.resume_time()
         time.sleep(sleep_time)
-        self.emu.halt()
+        self.emu.halt_time()
 
         # Watchdog should have expired twice now
         now = self.emu.systime()

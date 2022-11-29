@@ -9,4 +9,11 @@ __pycache__/
 coverage_html_report*
 
 *.viv
+/venv/
+/cm2350/internal/experiment.py
+/cm2350/internal/envi/tests/sorted_ins.py
+
+# Ignore changes to the firmware file
+/cm2350/fw_cm2350_bin_0
+
 /ENV/

@@ -76,186 +76,6 @@ def compare(data1, data2):
     print(''.join(out2))
 
 
-#######  replacement functions.  can set these in TestEmulator().call_handlers
-#######  to execute these in python instead of the supporting library
-#######  can also be run from runStep() ui to execute the replacement function
-def getLibcCallConv(emu):
-    if hasattr(emu, 'vw') and emu.vw is not None:
-        ccname = emu.vw.getMeta('DefaultCall')
-        cconv = emu.getCallingConvention(ccname)
-        return ccname, cconv
-
-    return emu.getCallingConventions()[0]
-
-def memset(emu, op=None):
-    ccname, cconv = getLibcCallConv(emu)
-    dest, char, count = cconv.getCallArgs(emu, 3)
-
-    data = ('%c' % char) * count
-    emu.writeMemory(dest, data)
-    print(data)
-    return data
-
-def memcpy(emu, op=None):
-    ccname, cconv = getLibcCallConv(emu)
-    dest, src, length = cconv.getCallArgs(emu, 3)
-    data = emu.readMemory(src, length)
-    emu.writeMemory(dest, data)
-    print(data)
-    return data
-
-def strncpy(emu, op=None):
-    ccname, cconv = getLibcCallConv(emu)
-    dest, src, length = cconv.getCallArgs(emu, 3)
-    data = emu.readMemory(src, length)
-    nulloc = data.find('\0')
-    if nulloc != -1:
-        data = data[:nulloc]
-    emu.writeMemory(dest, data)
-    print(data)
-    return data
-
-def strcpy(emu, op=None):
-    ccname, cconv = getLibcCallConv(emu)
-    dest, src = cconv.getCallArgs(emu, 2)
-    data = readString(emu, src) + '\0'
-    emu.writeMemory(dest, data)
-    print(data)
-    return data
-
-def strcat(emu, op=None):
-    ccname, cconv = getLibcCallConv(emu)
-    start, second = cconv.getCallArgs(emu, 2)
-    initial = readString(emu, start)
-    data = readString(emu, second)
-    emu.writeMemory(start + len(initial), data)
-    print(initial+data)
-    return initial+data
-
-def strlen(emu, op=None):
-    ccname, cconv = getLibcCallConv(emu)
-    start = cconv.getCallArgs(emu, 1)
-    data = readString(emu, start)
-    cconv.setReturnValue(emu, len(data))
-    print(len(data))
-    return len(data)
-
-PAGE_SIZE = 1 << 12
-PAGE_NMASK = PAGE_SIZE - 1
-PAGE_MASK = ~PAGE_NMASK
-CHUNK_SIZE = 1 << 4
-CHUNK_NMASK = CHUNK_SIZE - 1
-CHUNK_MASK = ~CHUNK_NMASK
-
-class EmuHeap:
-    def __init__(self, emu, size=10*1024, startingpoint=0x20000000):
-        self.emu = emu
-        self.size = size
-
-        mmap = '\0' * size
-
-        heapbase = self.findNewHeapBase(size, startingpoint)
-        self.ptr = heapbase
-
-    def findNewHeapBase(self, size, startingpoint=0x20000000):
-        heapbase = None
-        while not heapbase:
-            # if we roll into illegal memory, start over at page 2.  skip 0.
-            if startinpoint > (1<<(8*emu.psize)):
-                startingpoint = 0x1000
-
-            good = True
-            for x in range(size):
-                mmap = self.emu.getMemoryMap(startingpoint + x)
-                if mmap is None:
-                    continue
-
-                # we ran into a memory map.  adjust.
-                good=False
-                startingpoint = mmap[0] + mmap[1]
-                startingpoint += PAGE_NMASK
-                startingpoint &= PAGE_MASK
-                break
-
-            if good:
-                heapbase = startingpoint
-
-    def malloc(self, size):
-        size += CHUNK_NMASK
-        size &= CHUNK_MASK
-        chunk = self.ptr
-        self.ptr += size
-
-        return chunk
-
-    def free(self, addr):
-        # really?  nah.  not at this point.
-        pass
-
-
-def getHeap(emu, initial_size=None):
-    '''
-    Returns a Heap Object.
-    If one is not currently created in the emu (stored in emu metadata)
-    one is created.  If initial_size is not None, that value is used,
-    otherwise the default is used.
-    '''
-    heap = emu.getMeta('Heap')
-    if heap is None:
-        if initial_size is not None:
-            heap = EmuHeap(emu, initial_size)
-        else:
-            heap = EmuHeap(emu)
-        emu.setMeta('Heap', heap)
-
-    return heap
-
-def malloc(emu, op=None):
-    ccname, cconv = getLibcCallConv(emu)
-    size = cconv.getCallArgs(emu, 1)
-
-    heap = getHeap(emu)
-    allocated_ptr = heap.malloc(size)
-
-    cconv.setReturnValue(emu, allocated_ptr)
-
-def free(emu):
-    ccname, cconv = getLibcCallConv(emu)
-    va = cconv.getCallArgs(emu, 1)
-    print("FREE: 0x%x" % va)
-
-def skip(emu, op):
-    emu.setProgramCounter(emu.getProgramCounter()+len(op))
-
-def ret0(emu, op):
-    ccname, cconv = getLibcCallConv(emu)
-    cconv.setReturnValue(emu, 0)
-
-def ret1(emu, op):
-    ccname, cconv = getLibcCallConv(emu)
-    cconv.setReturnValue(emu, 1)
-
-def retneg1(emu, op):
-    ccname, cconv = getLibcCallConv(emu)
-    cconv.setReturnValue(emu, -1)
-
-
-def syslog(emu, op=None):
-    ccname, cconv = getLibcCallConv(emu)
-
-    loglvl, strlength = cconv.getCallArgs(emu, 2)
-    string = readString(emu, strlength)
-    count = string.count('%')
-    neg2 = string.count('%%')
-    count -= (2*neg2)
-
-    args = cconv.getCallArgs(emu, count+2)[2:]
-    outstring = string % args
-    print("SYSLOG(%d): %s" % (loglvl, outstring))
-    for s in args:
-        if emu.isValidPointer(s):
-            print("\t" + readString(emu, s))
-
 
 class TestEmulator:
     def __init__(self, emu, verbose=False):
@@ -354,7 +174,8 @@ class TestEmulator:
     def showPriRegisters(self, snapshot=SNAP_NORM):
         emu = self.emu
         print("\nRegisters:")
-        gen_regs = emu.vw.arch.archGetRegisterGroups()['general']
+        reggrps = emu.vw.arch.archGetRegisterGroups()
+        gen_regs = reggrps.get('general')
 
         reg_table, meta_regs, PC_idx, SP_idx, reg_vals = emu.getRegisterInfo()
         reg_dict = { reg_table[i][0] : (reg_table[i][1], reg_vals[i]) for i in range(len(reg_table)) }
@@ -493,7 +314,7 @@ class TestEmulator:
         self.startRun = time.time()
 
         # Start the emulation time
-        emu.resume()
+        emu.resume_time()
 
         while True:
             if maxstep is not None and maxstep > i:
@@ -573,7 +394,7 @@ class TestEmulator:
 
                     if not (emuBranch or nonstop) and pause:
                         ### pause the emulation
-                        emu.halt()
+                        emu.halt_time()
 
                         tova = None
                         moveon = False
@@ -717,7 +538,7 @@ class TestEmulator:
                             uinp = input(prompt)
 
                         ### resume the emulation
-                        emu.resume()
+                        emu.resume_time()
 
                 if quit:
                     print("Quitting!")
@@ -789,7 +610,7 @@ class TestEmulator:
 
             except KeyboardInterrupt:
                 ### pause the emulation
-                emu.halt()
+                emu.halt_time()
 
                 self.printStats(i)
                 break

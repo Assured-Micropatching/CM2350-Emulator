@@ -151,9 +151,9 @@ class MPC5674_SPRHOOKS_Test(unittest.TestCase):
         # Sleep for 1 emulated second (1.0 * system scaling) and ensure that
         # approximately the correct amount of time has elapsed (allowing for the
         # inaccuracy of python sleep durations)
-        self.emu.resume()
+        self.emu.resume_time()
         time.sleep(1.0)
-        self.emu.halt()
+        self.emu.halt_time()
 
         tbl, tbu = self.tb_read()
 
@@ -187,9 +187,9 @@ class MPC5674_SPRHOOKS_Test(unittest.TestCase):
         # Sleep for 1 second and ensure that approximately the correct amount of
         # time has elapsed (allowing for the inaccuracy of python sleep
         # durations)
-        self.emu.resume()
+        self.emu.resume_time()
         time.sleep(1.0)
-        self.emu.halt()
+        self.emu.halt_time()
 
         tbl, tbu = self.tb_read()
 
@@ -219,9 +219,9 @@ class MPC5674_SPRHOOKS_Test(unittest.TestCase):
         self.assertEqual(self.emu._tb_offset, (tbu << 32) | tbl)
 
         # Sleep 1 more second
-        self.emu.resume()
+        self.emu.resume_time()
         time.sleep(1.0)
-        self.emu.halt()
+        self.emu.halt_time()
 
         tbl2, tbu2 = self.tb_read()
 
@@ -256,9 +256,9 @@ class MPC5674_SPRHOOKS_Test(unittest.TestCase):
         self.assertEqual(self.emu.systicks(), tb_offset)
 
         # Sleep 0.1 second
-        self.emu.resume()
+        self.emu.resume_time()
         time.sleep(0.1)
-        self.emu.halt()
+        self.emu.halt_time()
 
         tbl, tbu = self.tb_read()
 
@@ -296,9 +296,9 @@ class MPC5674_SPRHOOKS_Test(unittest.TestCase):
         self.assertEqual(self.emu.systicks(), tb_offset)
 
         # Sleep 0.1 second (scaled based on the systime scaling)
-        self.emu.resume()
+        self.emu.resume_time()
         time.sleep(0.1)
-        self.emu.halt()
+        self.emu.halt_time()
 
         tbl, tbu = self.tb_read()
 

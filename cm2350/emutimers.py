@@ -264,7 +264,7 @@ class EmulationTime:
         self._breakstart = None
         self.timerUpdated()
 
-    def resume(self):
+    def resume_time(self):
         '''
         Resume tracking the amount of time passing for the emulator, but only
         if system time has already been started.
@@ -278,7 +278,7 @@ class EmulationTime:
             self._breakstart = 0
             self.timerUpdated()
 
-    def halt(self):
+    def halt_time(self):
         '''
         Pause tracking the amount of time passing for the emulator.
 

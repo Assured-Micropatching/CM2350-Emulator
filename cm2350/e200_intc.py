@@ -1,11 +1,9 @@
 import queue
 import logging
 import traceback
-
-from envi.archs.ppc import regs as ppcregs
-
 from .intc_const import *
 from . import intc_exc
+from .internal.envi.archs.ppc import regs as ppcregs
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +41,7 @@ class e200INTC:
 
         # callback handlers
         self._callbacks = {}
+        self._callbacks_ext = {}
 
         self.stack = []     # track current and preempted exceptions
         self._external_intc = None
@@ -130,8 +129,6 @@ class e200INTC:
             Set the ESR/MSR/context
             Set the PC to the correct Interrupt Service Routine
                 (two modes, determined by INTC_MCR[HVEN])
-
-        FIXME: wire in the External Interrupt Controller
         '''
         # check current exception level
         # look for higher exception queues to be populated
@@ -153,8 +150,15 @@ class e200INTC:
 
                 # Check if there are any peripheral-specific callbacks for this
                 # exception type
-                for callback in self._callbacks.get(newexc.source, []):
-                    callback(newexc)
+                ######################T SHIS IS SOME JACKED UP CRAP....  .source doesn't exist on more exceptions!
+                if newexc.__ivor__ == EXC_EXTERNAL_INPUT:
+                    for callback in self._callbacks_ext.get(newexc.source, []):
+                        callback(newexc)
+
+                else: 
+                    if newexc.__ivor__ in self._callbacks:
+                        for callback in self._callbacks.get(newexc.__ivor__, []):
+                            callback(newexc)
 
                 logger.debug('PC: 0x%08x (%r)', self.emu.getProgramCounter(), newexc)
                 logger.debug('NEWPC: %r', newpc)
@@ -171,6 +175,12 @@ class e200INTC:
                 break   # only need to do one
 
     def addCallback(self, exception, callback):
+        if exception not in self._callbacks_ext:
+            self._callbacks_ext[exception] = [callback]
+        else:
+            self._callbacks_ext[exception].append(callback)
+
+    def addCallbackInt(self, exception, callback):
         if exception not in self._callbacks:
             self._callbacks[exception] = [callback]
         else:

@@ -1,17 +1,10 @@
 import queue
 import logging
 import traceback
-<<<<<<< HEAD
-||||||| parent of c6d25eb (exception level and speed improvements)
-
-from envi.archs.ppc import regs as ppcregs
-
-=======
 import operator
 
 from envi.archs.ppc import regs as ppcregs
 
->>>>>>> c6d25eb (exception level and speed improvements)
 from .intc_const import *
 from . import intc_exc
 from .internal.envi.archs.ppc import regs as ppcregs

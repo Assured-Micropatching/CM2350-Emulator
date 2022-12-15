@@ -722,12 +722,12 @@ class MPC5674_MMU_Test(MPC5674_Test):
             self.emu.setRegister(eapr.REG_MSR, test_msr)
 
             op = self.emu.parseOpcode(0x10012340)
-            self.assertEqual(str(op), 'li r6,532', msg)
+            self.assertEqual(str(op), 'li r6,0x214', msg)
 
             # When going through the address with VLE enabled different instructions
             # should be found
             op = self.emu.parseOpcode(0x10092340)
-            self.assertEqual(str(op), 'e_lha r6,532', msg)
+            self.assertEqual(str(op), 'e_lha r6,0x214', msg)
             op = self.emu.parseOpcode(0x10092342)
             self.assertEqual(str(op), 'se_mtar r12,r1', msg)
 

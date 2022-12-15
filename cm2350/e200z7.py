@@ -801,7 +801,6 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
             except intc_exc.INTCException as exc:
                 # If any PowerPC-specific exception occurs, queue it to be handled
                 # on the next call
-                logger.warning("INTCExc: %r", exc)
                 self.queueException(exc)
 
     def queueException(self, exception):

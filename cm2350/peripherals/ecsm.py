@@ -378,9 +378,9 @@ class ECSM(MMIOPeripheral):
     def _getAddrAttrs(self, addr, instr):
         flags = 0
         if instr:
-            tlb_entry = self.emu.mmu.getInstrEntry(addr)
+            ts, pid, tlb_entry = self.emu.mmu.getInstrEntry(addr)
         else:
-            tlb_entry = self.emu.mmu.getDataEntry(addr)
+            ts, pid, tlb_entry = self.emu.mmu.getDataEntry(addr)
 
         # This address is in a cache able region if the I (Cache Inhibited flag)
         # is not set

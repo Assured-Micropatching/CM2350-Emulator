@@ -7,7 +7,6 @@ from envi.archs.ppc import regs as ppcregs
 
 from .intc_const import *
 from . import intc_exc
-from .internal.envi.archs.ppc import regs as ppcregs
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +44,6 @@ class e200INTC:
 
         # callback handlers
         self._callbacks = {}
-        self._callbacks_ext = {}
 
         self.stack = []     # track current and preempted exceptions
         self._external_intc = None
@@ -148,12 +146,6 @@ class e200INTC:
         self.hasInterrupt = self.pending and self.curlvl > self.pending[0].prio
 
     def addCallback(self, exception, callback):
-        if exception not in self._callbacks_ext:
-            self._callbacks_ext[exception] = [callback]
-        else:
-            self._callbacks_ext[exception].append(callback)
-
-    def addCallbackInt(self, exception, callback):
         if exception not in self._callbacks:
             self._callbacks[exception] = [callback]
         else:

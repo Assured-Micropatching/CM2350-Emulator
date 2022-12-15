@@ -545,8 +545,8 @@ class SIU_REGISTERS(PeripheralRegisterSet):
         self.mpgpdo  = (0x0C80, VTuple([SIU_MPGPDOn() for i in range(NUM_GPDIO_PINS // 16)]))
 
         # 0x0D00-0x0E00 is unimplemented (related to DSPI or eTPU functionality)
-        # 0x100 bytes / 32 bits per register = 64 placeholder registers
-        self.tbd     = (0x0D00, VTuple([PlaceholderRegister(32) for i in range(64)]))
+        # 0x100 * 8 bits = size of the placeholder
+        self.tbd     = (0x0D00, VTuple([PlaceholderRegister(8) for i in range(0x100)]))
 
         # Legacy GPDI (full range)
         self.gpdi_full = (0x0E00, VTuple([SIU_GPDIn() for i in range(NUM_GPDIO_PINS)]))

@@ -95,10 +95,7 @@ def get_xfer_vals(emu, saddr=None, ssize=None, daddr=None, dsize=None, nbytes=No
 
     if saddr is None:
         start, stop = random.choice(emu.ram_mmaps)
-        saddr = random.randrange(start, stop - mem_end_offset)
-
-        # Adjust saddr to be valid given ssize
-        saddr -= (saddr % ssize)
+        saddr = random.randrange(start, stop - mem_end_offset, ssize)
 
     if daddr is None:
         mstart, mstop = random.choice(emu.ram_mmaps)
@@ -106,12 +103,12 @@ def get_xfer_vals(emu, saddr=None, ssize=None, daddr=None, dsize=None, nbytes=No
             # Split the possible destination addresses by mem_end_offset*10
             # around the saddr
             buffer = mem_end_offset * 10
-            if saddr > mstop - buffer:
-                start = mstart
-                stop = saddr - buffer
-            elif saddr < mstart + buffer:
+            if mstart + buffer > saddr:
                 start = saddr + buffer
                 stop = mstop
+            elif saddr + buffer > mstop:
+                start = mstart
+                stop = saddr - buffer
             else:
                 start, stop = random.choice([
                     (mstart, saddr - buffer),
@@ -122,10 +119,10 @@ def get_xfer_vals(emu, saddr=None, ssize=None, daddr=None, dsize=None, nbytes=No
             stop = mstop
 
         try:
-            daddr = random.randrange(start, stop - mem_end_offset)
+            daddr = random.randrange(start, stop, dsize)
         except ValueError as e:
             print('ERROR generating valid range %#x - %#x (%#x - %#x, saddr: %#x, offset: %#x, buffer: %#x)' %
-                  (start, stop, mstart, mstop, mem_end_offset, saddr, buffer))
+                  (start, stop, mstart, mstop, saddr, mem_end_offset, buffer))
             raise e
 
         # Adjust daddr to be valid given dsize

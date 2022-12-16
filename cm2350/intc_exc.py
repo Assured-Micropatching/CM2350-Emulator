@@ -552,6 +552,30 @@ class DebugException(DebugPrioException):
     __msrmask__ = 0x06046034
 
     def setupContext(self, emu):
+        # If the Debug APU is not enabled the debug exception uses the CSRR0/1 
+        # registers and the exception handler is returned from with RFI
+
+        # Set CSRR0 (next instruction) and CSRR1 (Current MSR)
+        #emu.setRegister(REG_CSRR0, emu._cur_instr[2])
+        emu.setRegister(REG_CSRR0, emu.getProgramCounter())
+        emu.setRegister(REG_CSRR1, emu.getRegister(REG_MSR))
+
+        # Call the INTCException setupContext() function instead of
+        # StandardPrioException because we have already set the SRR0 and SRR1
+        # values here
+        INTCException.setupContext(self, emu)
+
+        # The __msrmask__ leaves MSR[DE] not cleared, but it should be cleared
+        # if the Debug APU is disabled (HID0[DAPUEN] == 0) or if it is enabled
+        # (HID0[DAPUEN] == 1) and HID0[CICLRDE] == 1
+        if emu.hid0.dapuen == 0 or \
+                (emu.hid0.dapuen == 1 and emu.hid0.ciclerde == 1):
+            msr = emu.getRegister(REG_MSR)
+            msr &= (MSR_DE_MASK ^ 0xffffffff)
+            emu.setRegister(REG_MSR, msr)
+
+        # If the Debug APU is enabled, this interrupt should be handled by the 
+        # external debug
         # TODO: setting CSRR0/DSRR0, CSRR1/DSRR1, and DBSR settings need to be
         # implemented when debug peripheral is added
         raise NotImplementedError()

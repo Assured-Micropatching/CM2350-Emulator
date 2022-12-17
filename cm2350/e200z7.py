@@ -511,14 +511,14 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         * SigSTOP_Exception
         * SigTSTP_Exception
         '''
-        self.queueException(intc_exc.BreakException())
+        self.queueException(intc_exc.DebugIntException())
 
-    def _do_halt(self, signal):
+    def _do_halt(self):
         '''
         Internal Pause mechanism (to keep the details in-house).
         This should only be called by something *in the execution thread*.
-        Currently, this is only called by BreakException during exception-
-        handling, causing a halt (pause) to emulation, until resumed.
+        Currently, this is only called by DebugIntException exception during
+        exception- handling, causing a halt (pause) to emulation, until resumed.
 
         We'll simply grab a Queue entry until something is fed to the queue.
         By design, this will halt the processor from executing.  To resume
@@ -550,7 +550,6 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         '''
         if self._pausers.empty():
             logger.warning("resume while not paused!")
-            raise intc_exc.ResumeException("Resume while not Paused!")   # is this bad?
 
         self._pause_queue.put("YAY! BE FREE!")
 
@@ -744,7 +743,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
             # support here?
             self.executeOpcode(op)
 
-        except DebugException as exc:
+        except intc_exc.DebugException as exc:
             # TODO: If the op is DNH
             #       If debug exceptions are enabled and external exception 
             #       handling is set this either generates a debug exception (if 
@@ -783,33 +782,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         Make sure this stays in sync with stepi()!
         """
         while True:
-            self.processIO()
-
-            try:
-                # See if there are any exceptions that need to start being handled
-                self.mcu_intc.checkException()
-
-                # do normal opcode parsing and execution
-                pc = self.getProgramCounter()
-                op = self.parseOpcode(pc)
-                # TODO: check MSR for FP (MSR_FP_MASK) and SPE (MSR_SPE_MASK)
-                # support here?
-                self.executeOpcode(op)
-
-            except (envi.UnsupportedInstruction, envi.InvalidInstruction) as exc:
-                # Translate standard envi exceptions into the PPC-specific
-                # exceptions
-                tb = sys.exc_info()[2]
-                self.queueException(intc_exc.ProgramException().with_traceback(tb))
-
-            except intc_exc.ResetException:
-                # Special case, don't queue a reset exception, just do a reset
-                self.reset()
-
-            except intc_exc.INTCException as exc:
-                # If any PowerPC-specific exception occurs, queue it to be handled
-                # on the next call
-                self.queueException(exc)
+            self.stepi()
 
     def queueException(self, exception):
         self.mcu_intc.queueException(exception)

@@ -1,8 +1,13 @@
-import envi
+import sys
 import signal
 import logging
 import threading
+
+import envi
+import envi.archs.ppc.regs as eapr
 import vtrace.platforms.gdbstub as vtp_gdb
+
+from . import intc_exc
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +61,6 @@ class e200GDB(vtp_gdb.GdbServerStub):
         self._bps_in_place = False
 
         self.runthread = None
-        self.state = STATE_DISCONNECTED
 
         self._halt_reason = 0
 
@@ -68,7 +72,6 @@ class e200GDB(vtp_gdb.GdbServerStub):
 
     def init(self, emu):
         logger.info("e200GDB Initialized.")
-        self.state = STATE_CONNECTED
 
         if self.runthread is None:
             logger.info("starting GDBServer runthread")
@@ -77,9 +80,6 @@ class e200GDB(vtp_gdb.GdbServerStub):
         else:
             logger.critical("WTFO!  self.runthread is not None?")
 
-        # This is a single-threaded GDB Server
-        self.curThread = 1
-
     def handleInterrupts(self, interrupt):
         # TODO: emulate the PPC debug control registers that can disable/enable 
         # some things?
@@ -87,8 +87,8 @@ class e200GDB(vtp_gdb.GdbServerStub):
         # If there is a debugger connected halt execution, otherwise queue the 
         # debug exception so it can be processed by the normal PPC exception 
         # handler.
-        if self.connstate == STATE_CONN_CONNECTED:
-            self.emu._do_halt(exc)
+        if self.connstate == vtp_gdb.STATE_CONN_CONNECTED:
+            self.emu._do_halt()
             self._pullUpBreakpoints()
         else:
             self.emu.queueException(interrupt)
@@ -119,9 +119,16 @@ class e200GDB(vtp_gdb.GdbServerStub):
         self.emu.halt_exec()
 
     def _serverCont(self):
-        # Clear the halt reason
-        self._halt_reason = 0
+        # If the program counter is at a breakpoint execute the current 
+        # (original) instruction before restoring the breakpoints
+        if self.emu.getProgramCounter() in self._bpdata:
+            self._serverStepi()
+
+        # Restore the breakpoints and resume execution
         self._putDownBreakpoints()
+
+        # Continue execution
+        self._halt_reason = 0
         self.emu.resume_exec()
 
     def _installBreakpoint(self, addr):
@@ -215,8 +222,12 @@ class e200GDB(vtp_gdb.GdbServerStub):
         return b'OK'
 
     def _serverGetHaltSignal(self):
-        logger.warning("_serverGetHaltSignal() ==> %r", self._halt_reason)
-        return self._halt_reason
+        # Return the halt reason and the current values of the PC and SP (r1) 
+        # registers in big-endian format
+        return (self._halt_reason, {
+            eapr.REG_R1: self.emu.getRegister(eapr.REG_R1),
+            eapr.REG_PC: self.emu.getProgramCounter(),
+        })
 
     def _serverReadMem(self, addr, size):
         # The particular error msg doesn't matter, but for testing purposes use 
@@ -263,13 +274,20 @@ class e200GDB(vtp_gdb.GdbServerStub):
         return self.emu.getRegister(ridx)
 
     def _serverStepi(self):
-        raise Exception("IMPLEMENT ME: _serverStepi")
+        self.emu.stepi()
+
+        # Return the trap signal
+        self._halt_reason = signal.SIGTRAP
+        return self._halt_reason
 
     def _serverDetach(self):
-        # disconnect connection
-        # reset debug state
-        pass
+        # Clear all breakpoints and resume execution
+        self._pullUpBreakpoints()
+        self._bpdata = {}
+        self._bps_in_place = False
 
+        self._halt_reason = 0
+        self.emu.resume_exec()
 
     def _serverH(self, cmd_data):
         return self.curThread
@@ -338,12 +356,12 @@ class e200GDB(vtp_gdb.GdbServerStub):
     def _serverQCRC(self, cmd_data):
         return b''
 
-
     def XferFeaturesReadTargetXml(self, fields):
         return getTargetXml(self.emu, self.emu._arch_name)
 
     def _serverQSetting(self, cmd_data):
-        print("FIXME: serverQSetting(%r)" % cmd_data)
+        # TODO: finish
+        #print("FIXME: serverQSetting(%r)" % cmd_data)
         if b':' in cmd_data:
             key, value = cmd_data.split(b':', 1)
             self._settings[key] = value
@@ -351,9 +369,16 @@ class e200GDB(vtp_gdb.GdbServerStub):
             self._settings[cmd_data] = True
         return b'OK'
 
+    def _serverGetThread(self, cmd_data=None):
+        # The thread syntax is p<process ID>:<thread ID>
+        return b'p1:1'
+
     def _serverSetThread(self, cmd_data):
-        print("setting thread:  %r" % cmd_data)
+        # We really don't change threads for this target, just return OK
         return b'OK'
+
+    def _serverGetCore(self, cmd_data=None):
+        return b'1'
 
 reg_xlate = set(['fpscr'])
 

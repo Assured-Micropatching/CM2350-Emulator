@@ -137,16 +137,31 @@ class e200INTC:
         with self.lock:
             self.stack.append(newexc)
 
+        # Before handling the exception update the current exception level 
+        # information
+        self.curlvl = newexc.prio
+
+        # Indicate if there are any other pending interrupts that can be
+        # processed at the current level
+        self.hasInterrupt = self.pending and self.curlvl > self.pending[0].prio
+
         # set ESR/MSR??
         newexc.setupContext(self.emu)
-
-        # set PC from IVOR
-        newpc = self.getHandler(newexc)
 
         # Check if there are any peripheral-specific callbacks for this
         # exception type
         for callback in self._callbacks.get(type(newexc), []):
             callback(newexc)
+
+        # If this was a debug exception and the external debugger is connected 
+        # it should have been handled through the external debugger by now, 
+        # don't change the PC
+        if isinstance(newexc, intc_exc.DebugException) and \
+                self.emu.gdbstub.connstate == vtp_gdb.STATE_CONN_CONNECTED:
+            return
+
+        # set PC from IVOR
+        newpc = self.getHandler(newexc)
 
         logger.debug('PC: 0x%08x (%r)  LVL: %d -> %d  NEWPC: 0x%08x',
                 self.emu.getProgramCounter(), newexc, self.curlvl, newexc.prio, newpc)

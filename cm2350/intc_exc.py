@@ -1,6 +1,6 @@
 from envi.archs.ppc.regs import *
 from envi.archs.ppc.const import *
-from vtrace.platforms import signals
+import vtrace.platforms.gdbstub as vtp_gdb
 
 from .intc_const import *
 from .intc_src import INTC_SRC, INTC_EVENT
@@ -574,16 +574,23 @@ class DebugException(DebugPrioException):
             msr &= (MSR_DE_MASK ^ 0xffffffff)
             emu.setRegister(REG_MSR, msr)
 
-        # If the Debug APU is enabled, this interrupt should be handled by the 
-        # external debug
-        # TODO: setting CSRR0/DSRR0, CSRR1/DSRR1, and DBSR settings need to be
-        # implemented when debug peripheral is added
-        raise NotImplementedError()
-
         super().setupContext(emu)
 
-        # Check the HID0 register to determine if MSR[CE, EE] should be cleared
-        # or not
+        # TODO: Check the HID0 register to determine if MSR[CE, EE] should be 
+        # cleared or not
+
+
+class DebugIntException(DebugException):
+    __priority__ = INTC_LEVEL.DEBUG_INT
+
+    def setupContext(self, emu):
+        # If an external debugger is connected halt the CPU, otherwise handle as 
+        # normal.
+        if emu.gdbstub.connstate == vtp_gdb.STATE_CONN_CONNECTED:
+            emu._do_halt()
+        else:
+            super().setupContext(emu)
+
 
 class SpeEfpuUnavailableException(StandardPrioException):
     __priority__ = INTC_LEVEL.FPU_UNAVAILABLE
@@ -747,28 +754,3 @@ class MceWriteBusError(MachineCheckException):
     # Set the MCSR[ST] bit
     __mcsrbits__ = 0x00004000
     __mcsrmask__ = 0x00004000
-    
-class BreakException(DebugException):
-    __SIGNAL__ = None
-
-    def setupContext(self, emu):
-        # For now, we'll skip the standard setupContext and attempt to handle 
-        # "Breaks" out of the standard interrupt handling context.
-
-        # use the emulator's built-in pause/resume functionality (so we're not 
-        # left dealing with the details here)
-        emu._do_halt(self.__SIGNAL__)
-
-class SigTRAP_Exception(BreakException):
-    __SIGNAL__ = signals.SIGTRAP
-
-class SigSTOP_Exception(BreakException):
-    __SIGNAL__ = signals.SIGSTOP
-
-class SigTSTP_Exception(BreakException):
-    __SIGNAL__ = signals.SIGTSTP
-
-
-# normal exceptions:
-class ResumeException(Exception):
-    pass

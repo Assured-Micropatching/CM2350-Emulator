@@ -1,4 +1,5 @@
 import sys
+import time
 import signal
 import logging
 import threading
@@ -60,6 +61,7 @@ class e200GDB(vtp_gdb.GdbServerStub):
         self._bpdata = {}
         self._bps_in_place = False
 
+        self.connstate = vtp_gdb.STATE_CONN_DISCONNECTED
         self.runthread = None
 
         self._halt_reason = 0
@@ -69,6 +71,16 @@ class e200GDB(vtp_gdb.GdbServerStub):
                 b'target.xml': self.XferFeaturesReadTargetXml,
             },
         }
+
+    def setPort(self, port):
+        self._gdb_port = port
+
+    def waitForClient(self):
+        while self.connstate != vtp_gdb.STATE_CONN_CONNECTED:
+            time.sleep(0.1)
+
+    def isClientConnected(self):
+        return self.connstate == vtp_gdb.STATE_CONN_CONNECTED
 
     def init(self, emu):
         logger.info("e200GDB Initialized.")
@@ -87,7 +99,7 @@ class e200GDB(vtp_gdb.GdbServerStub):
         # If there is a debugger connected halt execution, otherwise queue the 
         # debug exception so it can be processed by the normal PPC exception 
         # handler.
-        if self.connstate == vtp_gdb.STATE_CONN_CONNECTED:
+        if self.isClientConnected():
             self.emu._do_halt()
             self._pullUpBreakpoints()
         else:
@@ -115,8 +127,10 @@ class e200GDB(vtp_gdb.GdbServerStub):
     # wire up and handle server requests
     # specifically: qXfer handling
 
-    def _serverBREAK(self):
+    def _serverBreak(self):
+        self._halt_reason = signal.SIGTRAP
         self.emu.halt_exec()
+        return self._halt_reason
 
     def _serverCont(self):
         # If the program counter is at a breakpoint execute the current 
@@ -131,13 +145,17 @@ class e200GDB(vtp_gdb.GdbServerStub):
         self._halt_reason = 0
         self.emu.resume_exec()
 
+        # TODO also check _serverBREAK and _handleBREAK
+
+        return self._halt_reason
+
     def _installBreakpoint(self, addr):
         ea, vle, _, _, breakbytes, breakop = self._bpdata[addr]
 
         with self.emu.getAdminRights():
             self.emu.writeOpcode(addr, breakbytes)
 
-        self.emu.updateOpcache(self, ea, vle, breakop)
+        self.emu.updateOpcache(ea, vle, breakop)
 
     def _uninstallBreakpoint(self, addr):
         ea, vle, origbytes, origop, _, _ = self._bpdata[addr]
@@ -145,7 +163,7 @@ class e200GDB(vtp_gdb.GdbServerStub):
         with self.emu.getAdminRights():
             self.emu.writeOpcode(addr, origbytes)
 
-        self.emu.updateOpcache(self, ea, vle, origop)
+        self.emu.updateOpcache(ea, vle, origop)
 
     def _putDownBreakpoints(self):
         '''
@@ -153,6 +171,7 @@ class e200GDB(vtp_gdb.GdbServerStub):
         resume, we put the Break instruction bytes back in.
         '''
         if not self._bps_in_place:
+            logger.debug('Installing breakpoints: ' + ','.join(hex(a) for a in self._bpdata))
             for va in self._bpdata:
                 self._installBreakpoint(va)
             self._bps_in_place = True
@@ -163,6 +182,7 @@ class e200GDB(vtp_gdb.GdbServerStub):
         resume, we put the Break instruction bytes back in.
         '''
         if self._bps_in_place:
+            logger.debug('Removing breakpoints: ' + ','.join(hex(a) for a in self._bpdata))
             for va in self._bpdata:
                 self._uninstallBreakpoint(va)
             self._bps_in_place = False
@@ -171,6 +191,10 @@ class e200GDB(vtp_gdb.GdbServerStub):
         return self._serverSetHWBreak(addr)
 
     def _serverSetHWBreak(self, addr):
+        if addr in self._bpdata:
+            raise Exception('Cannot add breakpoint that already exists @ 0x%x' % addr)
+
+        logger.debug('Adding new breakpoint: 0x%x' % addr)
         origbytes = self._bpdata.get(addr)
         if origbytes:
             # Error, this breakpoint is already set
@@ -194,9 +218,9 @@ class e200GDB(vtp_gdb.GdbServerStub):
 
         # Generate the breakpoint instruction object for the target address
         if vle:
-            breakop = self._arch_vle_dis.disasm(breakbytes, 0, va)
+            breakop = self.emu._arch_vle_dis.disasm(breakbytes, 0, addr)
         else:
-            breakop = self._arch_dis.disasm(breakbytes, 0, va)
+            breakop = self.emu._arch_dis.disasm(breakbytes, 0, addr)
 
         # Save the physical address, vle flag, original bytes, original 
         # instruction, breakpoint bytes, and breakpoint instruction we just 
@@ -210,24 +234,29 @@ class e200GDB(vtp_gdb.GdbServerStub):
         return b'OK'
 
     def _serverRemoveSWBreak(self, addr):
-        return self._serverRemoveHWBreak(self)
+        return self._serverRemoveHWBreak(addr)
 
     def _serverRemoveHWBreak(self, addr):
+        if addr not in self._bpdata:
+            raise Exception('Cannot remove breakpoint that doesn\'t exist @ 0x%x' % addr)
+
         # Only need to write the original data back to memory if the breakpoint 
         # is currently in memory.
+        logger.debug('Removing breakpoint: 0x%x' % addr)
         if self._bps_in_place:
             self._uninstallBreakpoint(addr)
-            del self._bpdata[addr]
+        del self._bpdata[addr]
 
         return b'OK'
 
     def _serverGetHaltSignal(self):
         # Return the halt reason and the current values of the PC and SP (r1) 
         # registers in big-endian format
-        return (self._halt_reason, {
-            eapr.REG_R1: self.emu.getRegister(eapr.REG_R1),
-            eapr.REG_PC: self.emu.getProgramCounter(),
-        })
+        #return (self._halt_reason, {
+        #    eapr.REG_R1: self.emu.getRegister(eapr.REG_R1),
+        #    eapr.REG_PC: self.emu.getProgramCounter(),
+        #})
+        return self._halt_reason
 
     def _serverReadMem(self, addr, size):
         # The particular error msg doesn't matter, but for testing purposes use 

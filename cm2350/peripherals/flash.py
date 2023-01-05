@@ -1439,7 +1439,7 @@ class FLASH(mmio.MMIO_DEVICE):
 
     def writeMemory(self, addr, data):
         if addr + len(data) <= len(self.data):
-            self.data[addr:addr+size] = data
+            self.data[addr:addr+len(data)] = data
         else:
             raise envi.SegmentationViolation(addr)
 

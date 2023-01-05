@@ -157,7 +157,7 @@ class e200INTC:
         # it should have been handled through the external debugger by now, 
         # don't change the PC
         if isinstance(newexc, intc_exc.DebugException) and \
-                self.emu.gdbstub.connstate == vtp_gdb.STATE_CONN_CONNECTED:
+                self.emu.gdbstub.isClientConnected():
             return
 
         # set PC from IVOR

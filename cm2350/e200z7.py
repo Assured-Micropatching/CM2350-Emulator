@@ -672,9 +672,9 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
             #        del self.opcache[addr]
             #    else:
             #        break
-            if addr in self.opcache[0] and addr + self.opcache[0][addr].size > va:
+            if addr in self.opcache[0] and addr + self.opcache[0][addr].size > ea:
                 del self.opcache[0][addr]
-            if addr in self.opcache[1] and addr + self.opcache[1][addr].size > va:
+            if addr in self.opcache[1] and addr + self.opcache[1][addr].size > ea:
                 del self.opcache[1][addr]
 
         for addr in range(ea - 16, ea + size):
@@ -781,8 +781,11 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         Faster tight loop of what the stepi() function does.
         Make sure this stays in sync with stepi()!
         """
-        while True:
-            self.stepi()
+        try:
+            while True:
+                self.stepi()
+        except KeyboardInterrupt:
+            print()
 
     def queueException(self, exception):
         self.mcu_intc.queueException(exception)
@@ -812,9 +815,9 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         if op is None:
             off, b = mmio.ComplexMemoryMap.getByteDef(self, ea)
             if vle:
-                op = self._arch_vle_dis.disasm(b, off, ea)
+                op = self._arch_vle_dis.disasm(b, off, va)
             else:
-                op = self._arch_dis.disasm(b, off, ea)
+                op = self._arch_dis.disasm(b, off, va)
 
         instrbytes = b[off:off + op.size]
 

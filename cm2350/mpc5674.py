@@ -143,6 +143,7 @@ import envi.archs.ppc.regs as ppc_regs
 import envi.archs.ppc.const as ppc_const
 import vivisect.const as viv_const
 import vivisect.impemu.monitor as viv_imp_monitor
+import vtrace.platforms.gdbstub as vtp_gdb
 
 from . import project
 from . import e200z7
@@ -489,6 +490,8 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
                             help='Copy binary flash image to configuration directory (-c)')
         parser.add_argument('-N', '--no-backup', action='store_true',
                             help='run without a flash backup file, flash writes will be lost')
+        parser.add_argument('-g', '--gdb-port', nargs='?', const=47001, type=int,
+                            help='indicates that execution should\'nt start until a gdb client has connected, default is port 47001')
         # TODO: make a "clear" backup instead of just "no" backup?
         parser.add_argument('flash_image', nargs='?',
                             help='Binary flash image to load in the emulator')
@@ -506,6 +509,13 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         # Now that the standard options have been parsed process anything
         # leftover
         self._process_args(args)
+
+        # Set the proper port to use for the GDB server.
+        if args.gdb_port:
+            self.gdbstub.setPort(args.gdb_port)
+            self._wait_for_gdb_client = True
+        else:
+            self._wait_for_gdb_client = False
 
         # The backup file is assumed to be located in the "project directory"
         self.flash = FLASH(self)
@@ -599,6 +609,8 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
 
         # Complete initialization of the e200z7 core
         self.init_core()
+
+        # If the --gdb-port flag is provided 
 
         return
 
@@ -849,6 +861,13 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
 
         e200z7.PPC_e200z7.init_core(self)
 
+    def run(self):
+        # If the --gdb-port flag was provided then we should wait for a GDB 
+        # client to connect before continuing
+        if self._wait_for_gdb_client:
+            print('Waiting for GDB client to connect on port %d' % self.gdbstub._gdb_port)
+            self.gdbstub.waitForClient()
+        e200z7.PPC_e200z7.run(self)
 
 ### special register hardware interfacing
 # hook particular registers such that they don't store data, but rather interface to a virtual device

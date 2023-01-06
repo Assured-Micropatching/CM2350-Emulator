@@ -310,6 +310,8 @@ class e200GDB(vtp_gdb.GdbServerStub):
         return self._halt_reason
 
     def _serverDetach(self):
+        self.connstate = vtp_gdb.STATE_CONN_DISCONNECTED
+
         # Clear all breakpoints and resume execution
         self._pullUpBreakpoints()
         self._bpdata = {}

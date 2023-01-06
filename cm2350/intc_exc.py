@@ -584,12 +584,7 @@ class DebugIntException(DebugException):
     __priority__ = INTC_LEVEL.DEBUG_INT
 
     def setupContext(self, emu):
-        # If an external debugger is connected halt the CPU, otherwise handle as 
-        # normal.
-        if emu.gdbstub.connstate == vtp_gdb.STATE_CONN_CONNECTED:
-            emu._do_halt()
-        else:
-            super().setupContext(emu)
+        super().setupContext(emu)
 
 
 class SpeEfpuUnavailableException(StandardPrioException):

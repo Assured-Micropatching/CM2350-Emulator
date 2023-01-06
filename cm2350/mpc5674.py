@@ -143,7 +143,6 @@ import envi.archs.ppc.regs as ppc_regs
 import envi.archs.ppc.const as ppc_const
 import vivisect.const as viv_const
 import vivisect.impemu.monitor as viv_imp_monitor
-import vtrace.platforms.gdbstub as vtp_gdb
 
 from . import project
 from . import e200z7
@@ -862,12 +861,18 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         e200z7.PPC_e200z7.init_core(self)
 
     def run(self):
-        # If the --gdb-port flag was provided then we should wait for a GDB 
-        # client to connect before continuing
-        if self._wait_for_gdb_client:
-            print('Waiting for GDB client to connect on port %d' % self.gdbstub._gdb_port)
-            self.gdbstub.waitForClient()
-        e200z7.PPC_e200z7.run(self)
+        try:
+            logger.info('Starting execution @ 0x%x', self.getProgramCounter())
+
+            # If the --gdb-port flag was provided then we should wait for a GDB 
+            # client to connect before continuing
+            if self._wait_for_gdb_client:
+                print('Waiting for GDB client to connect on port %d' % self.gdbstub._gdb_port)
+                self.gdbstub.waitForClient()
+            e200z7.PPC_e200z7.run(self)
+        except KeyboardInterrupt:
+            print()
+            logger.info('Execution stopped @ 0x%x', self.getProgramCounter())
 
 ### special register hardware interfacing
 # hook particular registers such that they don't store data, but rather interface to a virtual device

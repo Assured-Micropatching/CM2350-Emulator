@@ -277,9 +277,11 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         self.mcu_intc = e200_intc.e200INTC(emu=self, ivors=True)
 
         # Create GDBSTUB Server
-        #self.gdbstub = e200_gdb.e200GDB(self)
-        self._pause_queue = queue.Queue()
-        self._pausers = queue.Queue()
+        self.gdbstub = e200_gdb.e200GDB(self)
+        self._run = threading.Event()
+
+        # By default the debugger _run event flag should be set.
+        self._run.set()
 
         # The same sequence of bytes can decode to different PPC or VLE
         # instructions so the opcache must be split into a full PPC and VLE PPC
@@ -466,7 +468,6 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
 
         # Create the queue that external IO threads can use to queue up message
         # for processing
-        # WHY DOES NOTHING SIMPLE EVER WORK RIGHT IN PYTHON ANYMORE?
         self.external_io = queue.Queue()
 
         # initialize the various modules on this chip.
@@ -528,30 +529,16 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         the remaining cores will continue to execute without some other
         mechanism.
         '''
-        try:
-            # store that we're waiting
-            self._pausers.put(threading.currentThread())
-            # pause the clock
-
-            # this part hangs until something is put in the queue to be received
-            self._pause_queue.get()
-
-        finally:
-            # clear out that we are waiting
-            self._pausers.get_nowait()
-
-            # resume the clock
-            self.resume_time()
+        self.halt_time()
+        self._run.clear()
+        self._run.wait()
+        self.resume_time()
 
     def resume_exec(self):
         '''
         Resume the emulator, which has been "paused"
-        Sends a message to the _pause_queue in order to free the paused thread
         '''
-        if self._pausers.empty():
-            logger.warning("resume while not paused!")
-
-        self._pause_queue.put("YAY! BE FREE!")
+        self._run.set()
 
     ###############################################################################
     # Redirect TLB instruction emulation functions to the MMU peripheral
@@ -781,11 +768,8 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         Faster tight loop of what the stepi() function does.
         Make sure this stays in sync with stepi()!
         """
-        try:
-            while True:
-                self.stepi()
-        except KeyboardInterrupt:
-            print()
+        while True:
+            self.stepi()
 
     def queueException(self, exception):
         self.mcu_intc.queueException(exception)

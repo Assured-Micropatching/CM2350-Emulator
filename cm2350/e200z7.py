@@ -41,6 +41,9 @@ __all__ = [
 ]
 
 
+# TODO: Define PIR, PVR, and SVR register contents
+
+
 class HID0(BitFieldSPR):
     def __init__(self, emu):
         super().__init__(REG_HID0, emu)
@@ -512,13 +515,13 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         * SigSTOP_Exception
         * SigTSTP_Exception
         '''
-        self.queueException(intc_exc.DebugIntException())
+        self.queueException(intc_exc.DebugException())
 
     def _do_halt(self):
         '''
         Internal Pause mechanism (to keep the details in-house).
         This should only be called by something *in the execution thread*.
-        Currently, this is only called by DebugIntException exception during
+        Currently, this is only called by DebugException exception during
         exception- handling, causing a halt (pause) to emulation, until resumed.
 
         We'll simply grab a Queue entry until something is fed to the queue.
@@ -539,6 +542,14 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         Resume the emulator, which has been "paused"
         '''
         self._run.set()
+
+    def debug_client_detached(self):
+        '''
+        Handles the condition when a gdb client detaches. For now we will halt
+        the emulator when this occurs.
+        '''
+        self.queueException(intc_exc.GdbClientDetachEvent())
+        self.resume_exec()
 
     ###############################################################################
     # Redirect TLB instruction emulation functions to the MMU peripheral

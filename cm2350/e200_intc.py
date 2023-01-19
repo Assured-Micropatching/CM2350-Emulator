@@ -137,11 +137,25 @@ class e200INTC:
         # don't change the PC
         if isinstance(newexc, intc_exc.DebugException) and \
                 self.emu.gdbstub.isClientConnected():
+            # Before halting re-evaluate if there are any pending interrupts. If 
+            # a stepi happens it may be done from the GDB server thread in which 
+            # case we don't want this event to appear to be an event that has to 
+            # be handled again.
+            self.hasInterrupt = self.pending and self.curlvl > self.pending[0].prio
+
             self.emu._do_halt()
 
             # Double check if there are any pending interrupts or not
             self.hasInterrupt = self.pending and self.curlvl > self.pending[0].prio
-            return
+            if self.hasInterrupt:
+                newexc = self.pending.pop(0)
+            else:
+                # No more exceptions to handle, just return
+                return
+
+        # If the debug client has detached stop the emulator.
+        if isinstance(newexc, intc_exc.GdbClientDetachEvent):
+            raise KeyboardInterrupt('Debug Client Detached')
 
         # store the new exception on the stack (pushing the new one in front of
         # the previous)

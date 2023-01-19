@@ -8,7 +8,9 @@ import envi
 import envi.archs.ppc.regs as eapr
 import vtrace.platforms.gdbstub as vtp_gdb
 
+from . import mmio
 from . import intc_exc
+from .gdbdefs import e200z759n3
 
 logger = logging.getLogger(__name__)
 
@@ -42,17 +44,20 @@ PPC_DNH_INSTR_BYTES = {
 }
 
 
-class e200GDB(vtp_gdb.GdbServerStub):
+class e200GDB(vtp_gdb.GdbBaseEmuServer):
     '''
     Emulated hardware debugger/gdb-stub for the e200 core.
     '''
-    def __init__(self, emu, port=47001):
-        self.emu = emu
-        regfmt = self.generateRegFmt()
-        vtp_gdb.GdbServerStub.__init__(self, 'ppc32-embedded', 4, bigend=True, reg=regfmt, port=port, find_port=True)
-
-        # don't ask me why, but GDB doesn't like the way we encode repeated values.  so for now, leave it off.
-        self._doEncoding = False
+    def __init__(self, emu):
+        # TODO: figure out GPR 32/64 bit stuff, same for PC/LR/CTR, and all SPRs
+        # such as specifying TBL vs TB.
+        #reggrps = [
+        #    ('general',     'org.gnu.gdb.power.core'),
+        #    ('spe',         'org.gnu.gdb.power.spe'),
+        #    ('spr',         'org.gnu.gdb.power.spr'),
+        #]
+        #vtp_gdb.GdbBaseEmuServer.__init__(self, emu, reggrps=reggrps)
+        vtp_gdb.GdbBaseEmuServer.__init__(self, emu)
 
         emu.modules['GDBSTUB'] = self
 
@@ -61,19 +66,21 @@ class e200GDB(vtp_gdb.GdbServerStub):
         self._bpdata = {}
         self._bps_in_place = False
 
-        self.connstate = vtp_gdb.STATE_CONN_DISCONNECTED
-        self.runthread = None
+        # There is no real filename for the firmware image
+        self.xfer_read_handlers[b'exec-file'] = None
 
-        self._halt_reason = 0
+        # We don't support the vfile handlers for this debug connection
+        self.vfile_handlers = {}
 
-        self.xfer_read_handlers = {
-            b'features': {
-                b'target.xml': self.XferFeaturesReadTargetXml,
-            },
-        }
+    def getTargetXml(self, reggrps):
+        # Hardcoded register format and XML
+        self._gdb_reg_fmt = e200z759n3.reg_fmt
+        self._gdb_target_xml = e200z759n3.target_xml
 
-    def setPort(self, port):
-        self._gdb_port = port
+        self._updateEnviGdbIdxMap()
+
+    def initProcessInfo(self):
+        self.pid = 1
 
     def waitForClient(self):
         while self.connstate != vtp_gdb.STATE_CONN_CONNECTED:
@@ -105,15 +112,6 @@ class e200GDB(vtp_gdb.GdbServerStub):
         else:
             self.emu.queueException(interrupt)
 
-    def generateRegFmt(self, emu=None):
-        if emu is None:
-            emu = self.emu
-
-        arch = envi.getArchModule(self.emu._arch_name)
-        regs_core = arch.archGetRegisterGroups().get('gdb_power_core')
-        regfmt = [(name, bitsize, idx) for idx, (name, bitsize) in enumerate(emu._rctx_regdef) if name in regs_core]
-        return regfmt
-
     def _postClientAttach(self, addr):
         # TODO: Install callbacks for signals that should cause execution to 
         # halt.
@@ -122,10 +120,6 @@ class e200GDB(vtp_gdb.GdbServerStub):
         logger.info("Halting processor")
         self._halt_reason = signal.SIGTRAP
         self.emu.halt_exec()
-
-    # gdb_reg_fmt population from archGetRegCtx() (or emu-equiv)
-    # wire up and handle server requests
-    # specifically: qXfer handling
 
     def _serverBreak(self):
         self._halt_reason = signal.SIGTRAP
@@ -136,6 +130,11 @@ class e200GDB(vtp_gdb.GdbServerStub):
         # If the program counter is at a breakpoint execute the current 
         # (original) instruction before restoring the breakpoints
         if self.emu.getProgramCounter() in self._bpdata:
+            # The breakpoints should not be installed because we are halted
+            assert not self._bps_in_place
+
+            # Should have no problem doing stepi in the server thread because 
+            # the primary thread should be halted.
             self._serverStepi()
 
         # Restore the breakpoints and resume execution
@@ -249,14 +248,41 @@ class e200GDB(vtp_gdb.GdbServerStub):
 
         return b'OK'
 
-    def _serverGetHaltSignal(self):
-        # Return the halt reason and the current values of the PC and SP (r1) 
-        # registers in big-endian format
-        #return (self._halt_reason, {
-        #    eapr.REG_R1: self.emu.getRegister(eapr.REG_R1),
-        #    eapr.REG_PC: self.emu.getProgramCounter(),
-        #})
-        return self._halt_reason
+    def _serverDetach(self):
+        vtp_gdb.GdbBaseEmuServer._serverDetach(self)
+
+        # Clear all breakpoints and resume execution
+        self._pullUpBreakpoints()
+        self._bpdata = {}
+        self._bps_in_place = False
+
+        # Signal to the emulator that the gdb client has detached
+        self.emu.debug_client_detached()
+
+    def _serverQSymbol(self, cmd_data):
+        # we have no symbol information
+        return b'OK'
+
+    def getMemoryMapXml(self):
+        self._gdb_memory_map_xml = b'''<?xml version="1.0" ?>
+<!DOCTYPE memory-map
+  PUBLIC '+//IDN gnu.org//DTD GDB Memory Map V1.0//EN'
+  'http://sourceware.org/gdb/gdb-memory-map.dtd'>
+<memory-map>
+  <memory length="0xafc000" start="0x400000" type="ram"/>
+  <memory length="0xfc000" start="0xf00000" type="ram"/>
+  <memory length="0xff000000" start="0x1000000" type="ram"/>
+  <memory length="0x400000" start="0x0" type="flash">
+    <property name="blocksize">0x800</property>
+  </memory>
+  <memory length="0x4000" start="0xefc000" type="flash">
+    <property name="blocksize">0x800</property>
+  </memory>
+  <memory length="0x4000" start="0xffc000" type="flash">
+    <property name="blocksize">0x800</property>
+  </memory>
+</memory-map>
+'''
 
     def _serverReadMem(self, addr, size):
         # The particular error msg doesn't matter, but for testing purposes use 
@@ -264,14 +290,19 @@ class e200GDB(vtp_gdb.GdbServerStub):
         #   - MMU error         = SIGBUS
         #   - unable to read    = SIGSEGV
         try:
-            with self.emu.getAdminRights():
-                return self.emu.readMemory(addr, size, skipcallbacks=True)
+            return vtp_gdb.GdbBaseEmuServer._serverReadMem(self, addr, size)
 
         except intc_exc.MceDataReadBusError:
-            return b'E%02d' % signal.SIGSEGV
+            #return b'E%02d' % signal.SIGSEGV
+
+            # We have to just accept this or GDB gets really weird
+            return b'00000000'
 
         except intc_exc.DataTlbException:
-            return b'E%02d' % signal.SIGBUS
+            #return b'E%02d' % signal.SIGBUS
+
+            # We have to just accept this or GDB gets really weird
+            return b'00000000'
 
     def _serverWriteMem(self, addr, val):
         # The particular error msg doesn't matter, but for testing purposes use 
@@ -280,200 +311,17 @@ class e200GDB(vtp_gdb.GdbServerStub):
         #   - unable to write   = SIGSEGV
 
         try:
-            with self.emu.getAdminRights():
-                self.emu.writeMemory(addr, val, skipcallbacks=True)
-            return b'OK'
+            return vtp_gdb.GdbBaseEmuServer._serverWriteMem(self, addr, val)
 
         except intc_exc.MceDataWriteBusError:
-            return b'E%02d' % signal.SIGSEGV
+            #return b'E%02d' % signal.SIGSEGV
+
+            # We have to just accept this or GDB gets really weird
+            return b'OK'
 
         except intc_exc.DataTlbException:
-            return b'E%02d' % signal.SIGBUS
+            #return b'E%02d' % signal.SIGBUS
 
-    def _serverWriteRegValByName(self, reg_name, reg_val):
-        self.emu.setRegisterByName(reg_name, reg_val)
-
-    def _serverReadRegValByName(self, reg_name):
-        return self.emu.getRegisterByName(reg_name)
-
-    def _serverWriteRegVal(self, ridx, reg_val):
-        self.emu.setRegister(ridx, reg_val)
-
-    def _serverReadRegVal(self, ridx):
-        return self.emu.getRegister(ridx)
-
-    def _serverStepi(self):
-        self.emu.stepi()
-
-        # Return the trap signal
-        self._halt_reason = signal.SIGTRAP
-        return self._halt_reason
-
-    def _serverDetach(self):
-        self.connstate = vtp_gdb.STATE_CONN_DISCONNECTED
-
-        # Clear all breakpoints and resume execution
-        self._pullUpBreakpoints()
-        self._bpdata = {}
-        self._bps_in_place = False
-
-        self._halt_reason = 0
-        self.emu.resume_exec()
-
-    def _serverH(self, cmd_data):
-        return self.curThread
-
-    def _serverQSupported(self, cmd_data):
-        return b"PacketSize=1000;qXfer:memory-map:read+;qXfer:features:read+"
-        #return b"PacketSize=1000;qXfer:features:read+;qXfer:memorymap:read+"
-
-    def _serverQXfer(self, cmd_data):
-        res = b''
-        fields = cmd_data.split(b":")
-        logger.warning("qXfer fields:  %r", fields)
-        if fields[2] == b'read':
-            section = self.xfer_read_handlers.get(fields[1])
-            if not section:
-                logger.warning("qXfer no section:  %r", fields[1])
-                return b'E00'
-
-            hdlr = section.get(fields[3])
-            if not hdlr:
-                logger.warning("qXfer no handler:  %r", fields[3])
-                return b'E00'
-
-            res = hdlr(fields)
-
-            offstr, szstr = fields[-1].split(b',')
-            off = int(offstr, 16)
-            sz = int(szstr, 16)
-
-            logger.debug("_serverQXfer(%r) => %r", cmd_data, res[off:off+sz])
-            if (off+sz) >= len(res):
-                return b'l' + res[off:off+sz]
-            return b'm' + res[off:off+sz]
-
-    def _serverQC(self, cmd_data):
-        '''
-        return Current Thread ID
-        '''
-        return b'QC0'
-
-    def _serverQL(self, cmd_data):
-        '''
-        return Current Thread ID
-        '''
-        return b'qM011000000010'
-
-    def _serverQTStatus(self, cmd_data):
-        '''
-        return Current Thread Status
-        '''
-        return b'T0'
-
-    def _serverQfThreadInfo(self, cmd_data):
-        '''
-        return Current Thread Status
-        just tell them we're done...
-        '''
-        return b'l'
-
-    def _serverQAttached(self):
-        '''
-        return whether we're attached?
-        '''
-        return b'1'
-
-    def _serverQCRC(self, cmd_data):
-        return b''
-
-    def XferFeaturesReadTargetXml(self, fields):
-        return getTargetXml(self.emu, self.emu._arch_name)
-
-    def _serverQSetting(self, cmd_data):
-        # TODO: finish
-        #print("FIXME: serverQSetting(%r)" % cmd_data)
-        if b':' in cmd_data:
-            key, value = cmd_data.split(b':', 1)
-            self._settings[key] = value
-        else:
-            self._settings[cmd_data] = True
-        return b'OK'
-
-    def _serverGetThread(self, cmd_data=None):
-        # The thread syntax is p<process ID>:<thread ID>
-        return b'p1:1'
-
-    def _serverSetThread(self, cmd_data):
-        # We really don't change threads for this target, just return OK
-        return b'OK'
-
-    def _serverGetCore(self, cmd_data=None):
-        return b'1'
-
-reg_xlate = set(['fpscr'])
-
-def translateRegFrom(rname):
-    if rname in reg_xlate:
-        return rname.upper()
-
-    return rname
-
-
-def getTargetXml(emu, arch='ppc32-embedded'):
-    global target, regdefs
-    '''
-    Takes in a RegisterContext and an archname.
-    Returns an XML file as described in the gdb-remote spec 
-    '''
-    archmod = envi.getArchModule(emu._arch_name)
-
-    gdbarchname = 'powerpc:vle'
-    regdefs = {}
-    for regnum, (rname, bitsize) in enumerate(emu.getRegDef()):
-        regdefs[rname] = (regnum, bitsize)
-
-    # features defined in https://sourceware.org/gdb/current/onlinedocs/gdb/PowerPC-Features.html
-    import xml.etree.ElementTree as ET
-
-    target = ET.Element('target')
-
-    arch = ET.SubElement(target, 'architecture')
-    arch.text = gdbarchname
-
-    feat_core = ET.SubElement(target, 'feature', {'name': 'org.gnu.gdb.power.core'})
-
-    reggrps = archmod.archGetRegisterGroups()
-    for rname in reggrps.get('gdb_power_core'):
-        regnum, bitsize = regdefs[translateRegFrom(rname)]
-        #print(rname, regnum, bitsize)
-        ET.SubElement(feat_core, 'reg', {'bitsize':str(bitsize), 'name': rname, 'regnum': str(regnum) })
-
-    feat_fpu = ET.SubElement(target, 'feature', {'name': 'org.gnu.gdb.power.fpu'})
-    for rname in reggrps.get('gdb_power_fpu'):
-        regnum, bitsize = regdefs[translateRegFrom(rname)]
-        #print(rname, regnum, bitsize)
-        ET.SubElement(feat_fpu, 'reg', {'bitsize':str(bitsize), 'name': rname, 'regnum': str(regnum) })
-
-    feat_spr = ET.SubElement(target, 'feature', {'name': 'org.gnu.gdb.power.e200spr'})
-    for rname in reggrps.get('gdb_power_spr'):
-        regnum, bitsize = regdefs[translateRegFrom(rname)]
-        ET.SubElement(feat_spr, 'reg', {'bitsize':str(bitsize), 'name': rname, 'regnum': str(regnum) })
-
-    #feat_altivec = ET.SubElement(target, 'feature', {'name': 'org.gnu.gdb.power.altivec'})
-    #for rname in reggrps.get('gdb_power_altivec'):
-    #    regnum, bitsize = regdefs[translateRegFrom(rname)]
-    #    ET.SubElement(feat_altivec, 'reg', {'bitsize':str(bitsize), 'name': rname, 'regnum': str(regnum) })
-
-    #feat_spe = ET.SubElement(target, 'feature', {'name': 'org.gnu.gdb.power.spe'})
-    #for rname in reggrps.get('gdb_power_spe'):
-        #regnum, bitsize = regdefs[translateRegFrom(rname)]
-        #ET.SubElement(feat_spe, 'reg', {'bitsize':str(bitsize), 'name': rname, 'regnum': str(regnum) })
-
-
-    out = [b'<?xml version="1.0"?>',
-            b'<!DOCTYPE target SYSTEM "gdb-target.dtd">']
-    out.append(ET.tostring(target))
-
-    return b'\n'.join(out)
+            # We have to just accept this or GDB gets really weird
+            return b'OK'
 

@@ -52,6 +52,7 @@ __all__ = [
     'MceInstructionFetchBusError',
     'MceDataReadBusError',
     'MceWriteBusError',
+    'GdbClientDetachEvent',
 ]
 
 
@@ -580,13 +581,6 @@ class DebugException(DebugPrioException):
         # cleared or not
 
 
-class DebugIntException(DebugException):
-    __priority__ = INTC_LEVEL.DEBUG_INT
-
-    def setupContext(self, emu):
-        super().setupContext(emu)
-
-
 class SpeEfpuUnavailableException(StandardPrioException):
     __priority__ = INTC_LEVEL.FPU_UNAVAILABLE
     __ivor__ = EXC_SPE_EFPU_UNAVAILABLE
@@ -725,6 +719,7 @@ class LRATException(StandardPrioException):
     def setupContext(self, emu):
         raise NotImplementedError()
 
+
 ###############################################################################
 # More specific Machine Check Exception types
 ###############################################################################
@@ -749,3 +744,12 @@ class MceWriteBusError(MachineCheckException):
     # Set the MCSR[ST] bit
     __mcsrbits__ = 0x00004000
     __mcsrmask__ = 0x00004000
+
+
+###############################################################################
+# Debug exception used to signal when GDB clients detach
+###############################################################################
+
+class GdbClientDetachEvent(DebugException):
+    pass
+

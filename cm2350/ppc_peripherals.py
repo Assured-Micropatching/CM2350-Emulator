@@ -677,7 +677,7 @@ def _recvData(sock):
     if len(data) < 4:
         # If no data is received, assume this is an error and exit
         logger.debug('Incomplete data received %d bytes: %r', len(data), data)
-        raise OSError()
+        raise OSError(errno.EAGAIN)
     size = struct.unpack('>I', data)[0]
 
     data = b''
@@ -688,7 +688,7 @@ def _recvData(sock):
         if not chunk:
             # If no data is received, assume this is an error and exit
             logger.error('No data received: %r', chunk)
-            raise OSError()
+            raise OSError(errno.EAGAIN)
         data += chunk
 
     return data
@@ -1030,11 +1030,16 @@ class ExternalIOPeripheral(MMIOPeripheral):
                         data = _recvData(self._io_thread_rx_sock)
                         # Send to all available client sockets
                         _sendData(self._clients, data)
-                    except OSError as e:
+                    except OSError as exc:
                         # If an OSError happens while receiving from the
                         # internal main-to-IO thread socket it means this thread
                         # should exit
-                        logger.warning('Lost connection to main thread, exiting', exc_info=1)
+                        if len(exc.args) >= 1 and exc.args[0] == errno.EAGAIN:
+                            # If this indicates a connection lost (EAGAIN), 
+                            # don't print the exception information.
+                            logger.warning('Lost connection to main thread, exiting')
+                        else:
+                            logger.warning('Lost connection to main thread, exiting', exc_info=1)
                         return
 
                 elif sock == self._server:
@@ -1048,11 +1053,16 @@ class ExternalIOPeripheral(MMIOPeripheral):
                         # receive data from client and send to the main thread
                         obj = _recvObj(sock)
                         self.receive(obj)
-                    except OSError:
+                    except OSError as exc:
                         # If an OSError occurs while receiving from a client
                         # thread, the client has disconnected, remove the socket
                         # from the list of inputs to receive data from
-                        logger.debug('client sock %r disconnected', sock, exc_info=1)
+                        if len(exc.args) >= 1 and exc.args[0] == errno.EAGAIN:
+                            # If this indicates a connection lost (EAGAIN), 
+                            # don't print the exception information.
+                            logger.debug('client sock %r disconnected', sock)
+                        else:
+                            logger.debug('client sock %r disconnected', sock, exc_info=1)
                         self._clients.remove(sock)
                         inputs.remove(sock)
 
@@ -1194,5 +1204,5 @@ class ExternalIOClient:
             logger.debug('Received %r from %r', obj, self._addr)
             return obj
         except OSError:
-            logger.debug('Connection closed %r', self._addr)
+            logger.debug('Connection closed %r', self._addr, exc_info=1)
             self.close()

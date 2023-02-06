@@ -906,13 +906,19 @@ class ExternalIOPeripheral(MMIOPeripheral):
         # but if we did that we couldn't use select() in the IO thread to
         # listen for all incoming messages
         self._io_thread_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._io_thread_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self._io_thread_sock.bind(('', 0))
         self._io_thread_sock.listen(1)
         io_addr = self._io_thread_sock.getsockname()
 
+        # Create the socket to transmit data to the IO thread
         self._io_thread_tx_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._io_thread_tx_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self._io_thread_tx_sock.connect(io_addr)
+
+        # Now get the socket to receive data on the IO thread
         self._io_thread_rx_sock, _ = self._io_thread_sock.accept()
+        self._io_thread_rx_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
         # If analysis-only mode is enabled don't create sockets and attempt to
         # do network things
@@ -922,6 +928,7 @@ class ExternalIOPeripheral(MMIOPeripheral):
             # TODO: support IPv6 (AF_INET6)?
             self._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self._server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self._server.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             self._server.bind(self._server_args)
             self._server.listen(0)
 
@@ -1045,6 +1052,7 @@ class ExternalIOPeripheral(MMIOPeripheral):
                 elif sock == self._server:
                     # Currently not using the address returned by accept
                     client_sock, _ = self._server.accept()
+                    client_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                     self._clients.append(client_sock)
                     inputs.append(client_sock)
 
@@ -1177,6 +1185,7 @@ class ExternalIOClient:
         """
         if self._sock is None:
             self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self._sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             self._sock.connect(self._addr)
 
     def close(self):

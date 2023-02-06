@@ -1,4 +1,6 @@
 import collections
+
+
 reg_fmt = collections.OrderedDict([
     ('r0', (32, 0)),
     ('r1', (32, 1)),
@@ -201,6 +203,12 @@ reg_fmt = collections.OrderedDict([
     ('SCCSRBAR', (32, 198)),
     ('SVR', (32, 199)),
 ])
+
+# r0 through xer, but the size is the size of the asciified GDB formatted 
+# packet.
+# 32 GPRs, 6 system registers = 38 registers
+# All registers for this interface are 32bits wide, 4 bytes = 8 characters
+reg_pkt_size = (38 * 8, 38)
 
 target_xml = b'''<?xml version="1.0"?>
 <!DOCTYPE target SYSTEM "gdb-target.dtd">

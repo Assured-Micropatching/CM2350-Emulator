@@ -67,6 +67,7 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
         self._bps_in_place = False
 
         # There is no real filename for the firmware image
+        self.supported_features[b'qXfer:exec-file:read'] = None
         self.xfer_read_handlers[b'exec-file'] = None
 
         # We don't support the vfile handlers for this debug connection
@@ -77,10 +78,22 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
         self._gdb_reg_fmt = e200z759n3.reg_fmt
         self._gdb_target_xml = e200z759n3.target_xml
 
+        # Define the default register packet size as just the general PPC 
+        # registers
+        self._reg_pkt_size = e200z759n3.reg_pkt_size
+
+        # Generate the information required based on the parsed register format.
+        self._genRegPktFmt()
         self._updateEnviGdbIdxMap()
 
     def initProcessInfo(self):
         self.pid = 1
+        self.tid = 1
+        self.processes = [1]
+
+        # We don't use these for the e200 GDB stub
+        self.process_filenames = {}
+        self.vfile_pid = None
 
     def waitForClient(self):
         while self.connstate != vtp_gdb.STATE_CONN_CONNECTED:
@@ -113,6 +126,8 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
             self.emu.queueException(interrupt)
 
     def _postClientAttach(self, addr):
+        vtp_gdb.GdbBaseEmuServer._postClientAttach(self, addr)
+
         # TODO: Install callbacks for signals that should cause execution to 
         # halt.
 
@@ -121,12 +136,12 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
         self._halt_reason = signal.SIGTRAP
         self.emu.halt_exec()
 
-    def _serverBreak(self):
-        self._halt_reason = signal.SIGTRAP
+    def _serverBreak(self, sig=signal.SIGTRAP):
+        self._halt_reason = sig
         self.emu.halt_exec()
         return self._halt_reason
 
-    def _serverCont(self):
+    def _serverCont(self, sig=0):
         # If the program counter is at a breakpoint execute the current 
         # (original) instruction before restoring the breakpoints
         if self.emu.getProgramCounter() in self._bpdata:
@@ -141,10 +156,8 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
         self._putDownBreakpoints()
 
         # Continue execution
-        self._halt_reason = 0
+        self._halt_reason = sig
         self.emu.resume_exec()
-
-        # TODO also check _serverBREAK and _handleBREAK
 
         return self._halt_reason
 

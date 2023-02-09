@@ -277,7 +277,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         self.mcu_intc = e200_intc.e200INTC(emu=self, ivors=True)
 
         # Create GDBSTUB Server
-        self.gdbstub = e200_gdb.e200GDB(self)
+        #self.gdbstub = e200_gdb.e200GDB(self)
         self._pause_queue = queue.Queue()
         self._pausers = queue.Queue()
 

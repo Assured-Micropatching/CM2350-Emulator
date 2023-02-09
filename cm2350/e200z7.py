@@ -19,7 +19,6 @@ import queue
 import threading
 
 import logging
-import threading
 logger = logging.getLogger(__name__)
 
 import envi
@@ -477,9 +476,6 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         for key, module in self.modules.items():
             logger.debug("init_core: Initializing %r...", key)
             module.init(self)
-
-            # Accept possible connections from IO threads
-            #self.processIO()
 
     def reset_core(self):
         '''

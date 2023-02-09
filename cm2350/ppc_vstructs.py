@@ -1217,17 +1217,18 @@ class PeripheralRegisterSet(VStruct):
         self._vs_sorted_offsets = []
 
     def _vsUpdateValueEndian(self, value):
-        if hasattr(value, 'vsSetEndian'):
-            value.vsSetEndian(self._vs_bigend)
-        elif hasattr(value, '_vs_bigend'):
-            value._vs_bigend = self._vs_bigend
-        elif isinstance(value, VArray):
-            # Do the same for every item in the VArray
+        # Check for a VArry first so we can do custom endian setting and avoid 
+        # having to modify using the VArrayValuesView
+        if isinstance(value, VArray):
             for _, elem in value:
                 if hasattr(elem, 'vsSetEndian'):
                     elem.vsSetEndian(self._vs_bigend)
                 elif hasattr(elem, '_vs_bigend'):
                     elem._vs_bigend = self._vs_bigend
+        elif hasattr(value, 'vsSetEndian'):
+            value.vsSetEndian(self._vs_bigend)
+        elif hasattr(value, '_vs_bigend'):
+            value._vs_bigend = self._vs_bigend
 
     def vsSetEndian(self, bigend):
         if bigend is None:

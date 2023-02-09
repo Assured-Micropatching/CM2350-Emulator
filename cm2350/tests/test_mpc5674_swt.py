@@ -36,9 +36,7 @@ SWT_TO_DEFAULT_BYTES  = b'\x00\x05\xfc\xd0'
 
 
 class MPC5674_WDT_Test(MPC5674_Test):
-    # for the watchdog tests enable the timebase paused so there is more control
-    # over time, but we don't need the full "accurate_timing"
-    _start_timebase_paused = True
+    accurate_timing = True
 
     def test_swt_mcr_defaults(self):
         self.assertEqual(self.emu.readMemory(SWT_MCR, 4), SWT_MCR_DEFAULT_BYTES)

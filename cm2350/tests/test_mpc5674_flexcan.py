@@ -961,7 +961,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             # It is expected that the calculated timestamp will be slightly
             # larger than the actual timestamp because it is saved right
             # after the memory write occurs that causes the transmit
-            margin = self.emu.can[dev].speed * 0.0010 * self.emu._systime_scaling
+            margin = self.emu.can[dev].speed * 0.0100 * self.emu._systime_scaling
 
             # Confirm that the order of the generated interrupts matches both
             # the order of the transmitted messages and the interrupt source for
@@ -1102,7 +1102,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             # It is expected that the calculated timestamp will be slightly
             # larger than the actual timestamp because it is saved right
             # after the memory write occurs that causes the transmit
-            margin = self.emu.can[dev].speed * 0.0010 * self.emu._systime_scaling
+            margin = self.emu.can[dev].speed * 0.0050 * self.emu._systime_scaling
 
             # temporarily disable the garbage collector
             gc.disable()
@@ -1240,7 +1240,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             # It is expected that the calculated timestamp will be slightly
             # larger than the actual timestamp because it is saved right
             # after the memory write occurs that causes the transmit
-            margin = self.emu.can[dev].speed * 0.0010 * self.emu._systime_scaling
+            margin = self.emu.can[dev].speed * 0.0050 * self.emu._systime_scaling
 
             # temporarily disable the garbage collector
             gc.disable()

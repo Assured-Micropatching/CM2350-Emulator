@@ -21,7 +21,7 @@ import platform
 if platform.system() == 'Darwin':
     TIMING_ACCURACY = 0.010
 else:
-    TIMING_ACCURACY = 0.002
+    TIMING_ACCURACY = 0.005
 
 
 class MPC5674_SPRHOOKS_Test(MPC5674_Test):

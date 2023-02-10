@@ -9,7 +9,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    #'ETPU2Device',
     'eTPU2',
 ]
 
@@ -66,32 +65,32 @@ class eTPU2(MMIOPeripheral):
     """
     def _param_ram_read(self, va, offset, size):
         value = self.param_ram[offset:offset+size]
-        logger.debug("0x%x:  eTPU2 ParamRAM read  [%x:%r] (%s)", self.emu.getProgramCounter(), va, size, value.hex())
+        logger.debug("0x%x:  eTPU2 ParamRAM read  [%x:%r] (%r)", self.emu.getProgramCounter(), va, size, value)
         return value
 
     def _param_ram_write(self, va, offset, bytez):
-        logger.debug("0x%x:  eTPU2 ParamRAM write [%x] = %s", self.emu.getProgramCounter(), va, bytez.hex())
+        logger.debug("0x%x:  eTPU2 ParamRAM write [%x] = %r", self.emu.getProgramCounter(), va, bytez)
         self.param_ram[offset:offset+len(bytez)] = bytez
 
     def _param_ram_mirror_read(self, va, offset, size):
         value = self.param_ram[offset:offset+size]
-        logger.debug("0x%x:  eTPU2 ParamRAMMirror read  [%x:%r] (%s)", self.emu.getProgramCounter(), va, size, value.hex())
+        logger.debug("0x%x:  eTPU2 ParamRAMMirror read  [%x:%r] (%r)", self.emu.getProgramCounter(), va, size, value)
         return value
 
     def _param_ram_bytes(self, va, offset, bytez):
         return self.param_ram
 
     def _param_ram_mirror_write(self, va, offset, bytez):
-        logger.debug("0x%x:  eTPU2 ParamRAMMirror write [%x] = %s", self.emu.getProgramCounter(), va, bytez.hex())
+        logger.debug("0x%x:  eTPU2 ParamRAMMirror write [%x] = %r", self.emu.getProgramCounter(), va, bytez)
         self.param_ram[offset:offset+len(bytez)] = bytez
 
     def _code_ram_read(self, va, offset, size):
         value = self.code_ram[offset:offset+size]
-        logger.debug("0x%x:  eTPU2 CodeRAM read  [%x:%r] (%s)", self.emu.getProgramCounter(), va, size, value.hex())
+        logger.debug("0x%x:  eTPU2 CodeRAM read  [%x:%r] (%r)", self.emu.getProgramCounter(), va, size, value)
         return value
 
     def _code_ram_write(self, va, offset, bytez):
-        logger.debug("0x%x:  eTPU2 CodeRAM write [%x] = %s", self.emu.getProgramCounter(), va, bytez.hex())
+        logger.debug("0x%x:  eTPU2 CodeRAM write [%x] = %r", self.emu.getProgramCounter(), va, bytez)
         self.code_ram[offset:offset+len(bytez)] = bytez
 
     def _code_ram_bytes(self, va, offset, bytez):

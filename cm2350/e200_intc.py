@@ -1,7 +1,8 @@
 import queue
 import logging
-import traceback
 import operator
+import threading
+import traceback
 
 from envi.archs.ppc import regs as ppcregs
 
@@ -45,10 +46,13 @@ class e200INTC:
         # callback handlers
         self._callbacks = {}
 
-        self.stack = []     # track current and preempted exceptions
+        self.lock = threading.RLock()
+
+        # track current and preempted exceptions
+        self.stack = []
         self._external_intc = None
 
-        # attributes for handling interrupts
+        # Track exceptions yet to be handled
         self.pending = []
         self.hasInterrupt = False
 
@@ -62,6 +66,9 @@ class e200INTC:
         self._external_intc = extintc
 
     def init(self, emu):
+        '''
+        Support the CPU init/reset functions.
+        '''
         logger.debug('init: e200INTC module (Interrupt Controller)')
 
         self.reset(emu)
@@ -71,8 +78,9 @@ class e200INTC:
         Clear out any pending exceptions and restore the machine to it's initial state
         '''
         # Clear out the pending and active interrupts
-        self.stack = []
-        self.pending = []
+        with self.lock:
+            self.stack = []
+            self.pending = []
 
         # use instance variable to keep the run loop tight.  this must be only
         # used in one thread.
@@ -93,17 +101,21 @@ class e200INTC:
             logger.warning('not handling exception: %r', exception)
             return
 
-        logger.debug('queuing exception: %r', exception)
-        self.pending.append(exception)
+        with self.lock:
+            logger.debug('queuing exception: %r', exception)
+            self.pending.append(exception)
 
-        # So sort the list to ensure the higher priorities are at the beginning
-        self.pending.sort(key=operator.attrgetter('prio'))
+            # So sort the list to ensure the higher priorities are at the beginning
+            self.pending.sort(key=operator.attrgetter('prio'))
 
-        # If the first interrupt in the list is one that can be handled at the
-        # current priority level, indicate there is a pending interrupt
-        self.hasInterrupt = self.curlvl > self.pending[0].prio
+            # If the first interrupt in the list is one that can be handled at the
+            # current priority level, indicate there is a pending interrupt
+            self.hasInterrupt = self.curlvl > self.pending[0].prio
 
     def checkException(self):
+        '''
+        Allows a core to check if there are exceptions that need handling.
+        '''
         if self.hasInterrupt:
             # do most costly Interrupt Handling stuff here
             self.handleException()
@@ -117,11 +129,13 @@ class e200INTC:
         # processing it.l
 
         # pull the next exception from the prioritized queue.
-        newexc = self.pending.pop(0)
+        with self.lock:
+            newexc = self.pending.pop(0)
 
         # store the new exception on the stack (pushing the new one in front of
         # the previous)
-        self.stack.append(newexc)
+        with self.lock:
+            self.stack.append(newexc)
 
         # set ESR/MSR??
         newexc.setupContext(self.emu)
@@ -143,9 +157,15 @@ class e200INTC:
 
         # Indicate if there are any other pending interrupts that can be
         # processed at the current level
-        self.hasInterrupt = self.pending and self.curlvl > self.pending[0].prio
+        with self.lock:
+            self.hasInterrupt = self.pending and \
+                    self.curlvl > self.pending[0].prio
 
     def addCallback(self, exception, callback):
+        '''
+        Adds an optional callback to be run after a specific exception has
+        completed.
+        '''
         if exception not in self._callbacks:
             self._callbacks[exception] = [callback]
         else:
@@ -178,34 +198,45 @@ class e200INTC:
         correct PC and MSR (stored in their own SRR* registers)
         '''
         # Get rid of the newest exception, it is finished being processed
-        oldexc = self.stack.pop()
+        with self.lock:
+            oldexc = self.stack.pop()
 
-        # If there are still interrupts on the stack then we are returning into
-        # another interrupt
-        if self.stack:
-            curexc = self.stack[-1]
-            self.curlvl = curexc.prio
-        else:
-            self.curlvl = INTC_LEVEL_NONE
+            # If there are still interrupts on the stack then we are returning 
+            # into another interrupt
+            if self.stack:
+                curexc = self.stack[-1]
+                self.curlvl = curexc.prio
+            else:
+                self.curlvl = INTC_LEVEL_NONE
 
         # Now execute any exception cleanup functions that may be attached to
         # this exception
         oldexc.doCleanup()
 
         # Check if there are any pending exceptions that can be processed
-        self.hasInterrupt = self.pending and self.curlvl > self.pending[0].prio
+        with self.lock:
+            self.hasInterrupt = self.pending and \
+                    self.curlvl > self.pending[0].prio
 
     def isExceptionActive(self, exctype):
-        return any(isinstance(e, exctype) for e in self.stack) or \
-                any(isinstance(e, exctype) for e in self.pending)
+        '''
+        Returns an indication that a specific exception type is currently being
+        processed or is pending.
+        '''
+        with self.lock:
+            return any(isinstance(e, exctype) for e in self.stack) or \
+                    any(isinstance(e, exctype) for e in self.pending)
 
     def findPendingException(self, exctype):
-        # Finds and returns all active and pending exceptions of the specified
-        # type
-        for exc in self.stack:
-            if isinstance(exc, exctype):
-                yield exc
+        '''
+        Finds and returns all active and pending exceptions of the specified
+        type
+        '''
+        with self.lock:
+            for exc in self.stack:
+                if isinstance(exc, exctype):
+                    yield exc
 
-        for exc in self.pending:
-            if isinstance(exc, exctype):
-                yield exc
+            for exc in self.pending:
+                if isinstance(exc, exctype):
+                    yield exc

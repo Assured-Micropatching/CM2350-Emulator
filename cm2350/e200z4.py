@@ -23,7 +23,7 @@ __all__ = [
 
 class HID0(BitFieldSPR):
     def __init__(self, emu):
-        BitFieldSPR.__init__(self, REG_HID0, emu, bigend)
+        BitFieldSPR.__init__(self, REG_HID0, emu)
         self.emcp = v_bits(1)
         self._pad0 = v_const(13)
         self.icr = v_bits(1)
@@ -38,7 +38,7 @@ class HID0(BitFieldSPR):
 
 class HID1(BitFieldSPR):
     def __init__(self, emu):
-        BitFieldSPR.__init__(self, REG_HID1, emu, bigend)
+        BitFieldSPR.__init__(self, REG_HID1, emu)
         self.pad0 = v_bits(22)
         self.hp_nor = v_bits(1)
         self.hp_nmi = v_bits(1)

@@ -1174,7 +1174,7 @@ class MPC5674_eDMA_Test(MPC5674_Test):
             # ensure the message was moved to the destination and the POPR
             # register is empty
             data = self.emu.readMemory(0x40000000, 8)
-            logger.debug('send msg 0x%x, dest 0x%08x: %s', msg, daddr, data.hex())
+            logger.debug('send msg 0x%x, dest 0x%08x: %r', msg, daddr, data)
             self.assertEqual(data, expected)
             self.assertEqual(self.emu.readMemory(dspi_a_popr_addr, 4), b'\x00\x00\x00\x00')
 

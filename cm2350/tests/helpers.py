@@ -53,7 +53,7 @@ class MPC5674_Test(unittest.TestCase):
         if self._disable_gc is None:
             self._disable_gc = True if self.accurate_timing else False
 
-        logger.debug('Creating CM2350 with args: %s' % ', '.join(self.args))
+        logger.debug('Creating CM2350 with args: %r', self.args)
         self.ECU = CM2350(self.args)
         self.emu = self.ECU.emu
 
@@ -190,9 +190,9 @@ class MPC5674_Test(unittest.TestCase):
         value, value_bytes = self.get_random_val(size)
 
         if msg is None:
-            msg = 'unaligned write of 0x%s to 0x%x' % (value_bytes.hex(), addr)
+            msg = 'unaligned write of %r to 0x%x' % (value_bytes, addr)
         else:
-            msg = 'unaligned write of 0x%s to 0x%x (%s)' % (value_bytes.hex(), addr, msg)
+            msg = 'unaligned write of %r to 0x%x (%s)' % (value_bytes, addr, msg)
 
         with self.assertRaises(intc_exc.MceWriteBusError, msg=msg) as cm:
             self.emu.writeMemValue(addr, value, size)
@@ -213,9 +213,9 @@ class MPC5674_Test(unittest.TestCase):
             data = os.urandom(size)
 
         if msg is None:
-            msg = 'invalid write of 0x%s to 0x%x' % (data.hex(), addr)
+            msg = 'invalid write of %r to 0x%x' % (data, addr)
         else:
-            msg = 'invalid write of 0x%s to 0x%x (%s)' % (data.hex(), addr, msg)
+            msg = 'invalid write of %r to 0x%x (%s)' % (data, addr, msg)
 
         with self.assertRaises(intc_exc.AlignmentException, msg=msg) as cm:
             self.emu.writeMemory(addr, data)

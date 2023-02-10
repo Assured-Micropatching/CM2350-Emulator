@@ -197,18 +197,6 @@ class MPC5674_monitor(viv_imp_monitor.AnalysisMonitor):
         self.path = {None: [0]}
         self.level = {None: 0}
 
-    #def prehook(self, emu, op, starteip):
-    #    if op.opcode == ppc_const.INS_MFSPR and op.opers[1].reg not in COMMON_SPRs:
-    #        print('SPR read:  0x%x:   %s (0x%x) = %s (0x%x)' % (
-    #            op.va, emu.getRegisterName(op.opers[0].reg), emu.getOperValue(op, 0),
-    #            emu.getRegisterName(op.opers[1].reg), emu.getOperValue(op, 1)))
-    #        #self.spraccess.append((op, emu.getOperValue(op, 0), emu.getOperValue(op, 1)))
-    #    elif op.opcode == ppc_const.INS_MTSPR and op.opers[0].reg not in COMMON_SPRs:
-    #        print('SPR write: 0x%x:   %s (0x%x) = %s (0x%x)' % (
-    #            op.va, emu.getRegisterName(op.opers[0].reg), emu.getOperValue(op, 0),
-    #            emu.getRegisterName(op.opers[1].reg), emu.getOperValue(op, 1)))
-    #        #self.spraccess.append((op, emu.getOperValue(op, 0), emu.getOperValue(op, 1)))
-
     def posthook(self, emu, op, endeip):
         #print("posthook: 0x%x: %r" % (starteip, op))
         # store all opcodes
@@ -814,7 +802,7 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
                 logger.info("Loading Firmware Blob from %r @ 0x%x", path, cfg['baseaddr'])
                 self.flash.load(FlashDevice.FLASH_MAIN, path, cfg['baseaddr'])
             else:
-                logger.critical("Starting emulator without valid firmware, please update config: %s" % self.vw.vivhome)
+                logger.critical("Starting emulator without valid firmware, please update config: %s", self.vw.vivhome)
 
         if cfg['shadowAFilename']:
             # First check if the file can be found without adding the project

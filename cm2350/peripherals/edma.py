@@ -1144,7 +1144,7 @@ class eDMA(MMIOPeripheral):
                 # TLB entry, we aren't doing this implicitly through readMemory
                 # so the TLB miss exception isn't generated because that doesn't
                 # seem to be the correct way to handle this.
-                if not self.emu.isAddrValid(config.tcd.saddr+offset):
+                if not self.emu.isValidPointer(config.tcd.saddr+offset):
                     logger.debug('%s[%d:%d] TLB miss for source %#x',
                                  self.devname, config.channel, config.citer,
                                  config.tcd.saddr + offset)
@@ -1167,7 +1167,7 @@ class eDMA(MMIOPeripheral):
                 # TLB entry, we aren't doing this implicitly through writeMemory
                 # so the TLB miss exception isn't generated because that doesn't
                 # seem to be the correct way to handle this.
-                if not self.emu.isAddrValid(config.tcd.daddr+offset):
+                if not self.emu.isValidPointer(config.tcd.daddr+offset):
                     logger.debug('%s[%d:%d] TLB miss for destination %#x',
                                  self.devname, config.channel, config.citer,
                                  config.tcd.daddr + offset)
@@ -1185,9 +1185,9 @@ class eDMA(MMIOPeripheral):
 
             return None
 
-        logger.debug("%s[%d:%d] [%x:%r] -> %s -> [%x:%r]", self.devname,
+        logger.debug("%s[%d:%d] [%x:%r] -> %r -> [%x:%r]", self.devname,
                         config.channel, config.citer, config.tcd.saddr,
-                        config.ssize, data.hex(), config.tcd.daddr,
+                        config.ssize, data, config.tcd.daddr,
                         config.dsize)
 
         # Now that one major loop is complete, decrement citer, and process any

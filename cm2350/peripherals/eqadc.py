@@ -455,10 +455,10 @@ def parseCommand(data, endian=e_const.ENDIAN_MSB):
     eoq = (cmd & 0x80000000) >> 31
     pause = (cmd & 0x40000000) >> 30
     if pause:
-        raise NotImplementedError('PAUSE not handled in commands: 0x%s' % data.hex())
+        raise NotImplementedError('PAUSE not handled in commands: %s' % data.hex())
     rep = (cmd & 0x20000000) >> 29
     if rep:
-        raise NotImplementedError('REP not handled in commands: 0x%s' % data.hex())
+        raise NotImplementedError('REP not handled in commands: %s' % data.hex())
     bn = (cmd & 0x02000000) >> 25
 
     # This field is the CAL flag for conversion commands, and the R/W flag for
@@ -785,7 +785,8 @@ class eQADC(ExternalIOPeripheral):
             if idx == 0:
                 cfcr = self.registers.cfcr[idx]
                 pc = self.emu.getProgramCounter()
-                errmsg = '0x%x: %s[%d] Streaming mode not supported (CFCR%d = 0x%s)' % (pc, self.devname, idx, idx, cfcr.vsEmit().hex())
+                errmsg = '0x%x: %s[%d] Streaming mode not supported (CFCR%d = %s)' % \
+                        (pc, self.devname, idx, idx, cfcr.vsEmit().hex())
                 raise NotImplementedError(errmsg)
             else:
                 # fields not supported for channels other than 0, force them
@@ -905,8 +906,8 @@ class eQADC(ExternalIOPeripheral):
         else:
             # Create a placeholder value to read
             data = b'\x00' * EQADC_RESULT_SIZE
-            logger.debug('%s[%d] (%s): No available data, returning 0x%s',
-                    self.devname, channel, self.mode[channel], data.hex())
+            logger.debug('%s[%d] (%s): No available data, returning %r',
+                    self.devname, channel, self.mode[channel], data)
 
         return data
 
@@ -962,9 +963,11 @@ class eQADC(ExternalIOPeripheral):
                     # If this is an alt config register then the result may be
                     # sent to the DECFILT peripheral
                     if cmd.offset in ADC_REGS_ALTCNV_RANGE and config & 0x3C00 != 0x0000:
-                        raise NotImplementedError('%s[%d] DECFILT dest not supported for result 0x%s, cmd %r (config: 0x%x)' % (self.devname, result.hex(), cmd, config))
+                        errmsg = '%s[%d] DECFILT dest not supported for result 0x%s, cmd %r (config: 0x%x)' % \
+                                (self.devname, result.hex(), cmd, config)
+                        raise NotImplementedError(errmsg)
 
-                    logger.debug('%s: conversion result = 0x%s (cmd=%r, config=0x%x', self.devname, result.hex(), cmd, config)
+                    logger.debug('%s: conversion result = %r (cmd=%r, config=0x%x', self.devname, result, cmd, config)
                     self.pushRFIFO(cmd.tag, result)
 
                     # TODO: technically "continuous" scans don't stop processing
@@ -992,7 +995,7 @@ class eQADC(ExternalIOPeripheral):
             if cmd.tag < EQADC_NUM_CBUFFERS:
                 # Pad the result out to 32 bits
                 result = b'\x00\x00' + self.adc[cmd.bn].read(cmd.offset)
-                logger.debug('%s: Read ADC%d[0x%x] = 0x%s', self.devname, cmd.bn, cmd.offset, result.hex())
+                logger.debug('%s: Read ADC%d[0x%x] = %r', self.devname, cmd.bn, cmd.offset, result)
                 self.pushRFIFO(cmd.tag, result)
             else:
                 if cmd.tag == 0b1000:
@@ -1002,7 +1005,7 @@ class eQADC(ExternalIOPeripheral):
                 logger.debug('%s: Ignoring read with %s tag (%r)', self.devname, tag_type, cmd)
 
         else:
-            raise Exception('Unepxected ADC Command: %r (0x%s)' % (cmd, data.hex()))
+            raise Exception('Unepxected ADC Command: %r (%r)' % (cmd, data))
 
         # If the EOQ flag is set clear the transfer count
         if cmd.eoq:

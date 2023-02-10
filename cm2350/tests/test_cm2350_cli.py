@@ -371,7 +371,7 @@ def tearDownModule():
                 logger.debug('removing test directory %s', testdir)
                 shutil.rmtree(testdir)
             else:
-                logger.error('WARNING: test directory %s is not a directory! not removing' % testdir)
+                logger.error('WARNING: test directory %s is not a directory! not removing', testdir)
         else:
             logger.debug('test directory %s not present, skipping', testdir)
 

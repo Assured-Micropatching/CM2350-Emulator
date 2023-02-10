@@ -385,12 +385,12 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         # processor would just do this immediately but because of variations in
         # how long it may take to execute the handler we have to do it this way
         # for now.
-        try:
-            exc = next(self.findPendingException(intc_exc.DecrementerException))
+        exc = self.nextPendingException(intc_exc.DecrementerException)
+        if exc is not None:
             # There is an active or pending decremeter exception, attach this
             # function as a cleanup function.
             exc.setCleanup(self._startMCUDEC)
-        except StopIteration:
+        else:
             # There is no active decrementer exception, so start the timer
             self.mcu_dec.start(period=self.getRegister(REG_DEC))
 
@@ -696,7 +696,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         ea = self.mmu.translateDataAddr(va)
         return mmio.ComplexMemoryMap.getByteDef(self, ea)
 
-    def isAddrValid(self, va):
+    def isValidPointer(self, va):
         return self.mmu.getDataEntry(va)[2] is not None
 
     def putIO(self, devname, obj):
@@ -809,8 +809,11 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
     def isExceptionActive(self, exctype):
         return self.mcu_intc.isExceptionActive(exctype)
 
-    def findPendingException(self, exctype):
-        return self.mcu_intc.findPendingException(exctype)
+    def nextPendingException(self, exctype):
+        try:
+            return next(self.mcu_intc.findPendingException(exctype))
+        except StopIteration:
+            return None
 
     def dmaRequest(self, request):
         logger.debug('DMA request for %s (%s)', request.name, request.value)

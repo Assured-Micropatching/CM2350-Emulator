@@ -166,7 +166,6 @@ class CriticalPrioException(INTCException):
 
     def setupContext(self, emu):
         # Set CSRR0 (next instruction) and CSRR1 (Current MSR)
-        #emu.setRegister(REG_CSRR0, emu._cur_instr[2])
         emu.setRegister(REG_CSRR0, emu.getProgramCounter())
         emu.setRegister(REG_CSRR1, emu.getRegister(REG_MSR))
 
@@ -318,7 +317,7 @@ class InstructionStorageException(MachineCheckPrioException):
         # Set the correct ESR bits for the current instruction
         esr_val = 0
 
-        op, pc, _, vle = emu._cur_instr
+        _, pc, _, vle = emu._cur_instr
 
         # ESR[BO, MIF, VLEMI] bits set (if appropriate)
         # TODO: byte-ordering mismatch condition not checked for
@@ -374,7 +373,7 @@ class AlignmentException(StandardPrioException):
         # Set the correct ESR bits for the current instruction
         esr_val = 0
 
-        op, pc, _, vle = emu._cur_instr
+        op, _, _, vle = emu._cur_instr
 
         # TODO: update with cleaner way to check for a "load" ppc instruction
         if op.mnem[:2] == 'st':
@@ -405,7 +404,7 @@ class ProgramException(StandardPrioException):
         # Set the correct ESR bits for the current instruction
         esr_val = 0
 
-        op, pc, _, vle = emu._cur_instr
+        _, _, _, vle = emu._cur_instr
 
         # TODO: Currently this is only supporting the "Illegal Instruction"
         # case, the following conditions need to be handled in the future:
@@ -475,7 +474,6 @@ class DecrementerException(StandardPrioException):
 
     def setupContext(self, emu):
         # Set SRR0 (next instruction) and SRR1 (Current MSR)
-        #emu.setRegister(REG_SRR0, emu._cur_instr[2])
         emu.setRegister(REG_SRR0, emu.getProgramCounter())
         emu.setRegister(REG_SRR1, emu.getRegister(REG_MSR))
 
@@ -490,7 +488,6 @@ class FixedIntervalTimerException(StandardPrioException):
 
     def setupContext(self, emu):
         # Set SRR0 (next instruction) and SRR1 (Current MSR)
-        #emu.setRegister(REG_SRR0, emu._cur_instr[2])
         emu.setRegister(REG_SRR0, emu.getProgramCounter())
         emu.setRegister(REG_SRR1, emu.getRegister(REG_MSR))
 
@@ -623,7 +620,6 @@ class EfpuRoundException(StandardPrioException):
         emu.setRegister(REG_ESR, esr_val)
 
         # Set SRR0 (next instruction) and SRR1 (Current MSR)
-        #emu.setRegister(REG_SRR0, emu._cur_instr[2])
         emu.setRegister(REG_SRR0, emu.getProgramCounter())
         emu.setRegister(REG_SRR1, emu.getRegister(REG_MSR))
 
@@ -638,7 +634,6 @@ class PerformanceException(StandardPrioException):
 
     def setupContext(self, emu):
         # Set SRR0 (next instruction) and SRR1 (Current MSR)
-        #emu.setRegister(REG_SRR0, emu._cur_instr[2])
         emu.setRegister(REG_SRR0, emu.getProgramCounter())
         emu.setRegister(REG_SRR1, emu.getRegister(REG_MSR))
 

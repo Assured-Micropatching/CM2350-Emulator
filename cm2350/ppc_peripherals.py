@@ -144,12 +144,13 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
         # is used the read/write functions in this base class can be used
         # unmodified.
         if regsetcls is not None:
-            # If the register set accepts a bigend parameter supply it from the
-            # emulator
-            if 'bigend' in inspect.signature(regsetcls).parameters:
+            # Try to initialize it using the bigend param, if that fails use the 
+            # vsSetEndian() function.
+            try:
                 self.registers = regsetcls(bigend=emu.getEndian())
-            else:
+            except TypeError:
                 self.registers = regsetcls()
+                self.registers.vsSetEndian(emu.getEndian())
         else:
             self.registers = None
 
@@ -470,7 +471,7 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
 
         try:
             value = self._getPeriphReg(offset, size)
-            logger.debug("0x%x:  %s: read  [%x:%r] (%s)", self.emu.getProgramCounter(), self.devname, va, size, value.hex())
+            #logger.debug("0x%x:  %s: read  [%x:%r] (%r)", self.emu.getProgramCounter(), self.devname, va, size, value)
             return value
 
         except VStructUnimplementedError as exc:
@@ -522,7 +523,7 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
             # TODO: this seems inefficient, but should be good enough for now
             return self._slow_mmio_write(va, offset, data)
 
-        logger.debug("0x%x:  %s: write [%x] = %s", self.emu.getProgramCounter(), self.devname, va, data.hex())
+        #logger.debug("0x%x:  %s: write [%x] = %r", self.emu.getProgramCounter(), self.devname, va, data)
         try:
             self._setPeriphReg(offset, data)
 

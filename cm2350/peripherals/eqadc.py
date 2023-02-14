@@ -6,13 +6,13 @@ import envi.const as e_const
 
 from ..ppc_vstructs import *
 from ..ppc_peripherals import *
-from ..intc_exc import ExternalException, INTC_SRC
+from ..intc_exc import INTC_EVENT
 
 import logging
 logger = logging.getLogger(__name__)
 
 __all__  = [
-    'EQADC',
+    'eQADC',
 ]
 
 
@@ -130,11 +130,6 @@ class EQADC_MODE(enum.IntEnum):
     CONTINUOUS_RISING_EDGE  = 0b1101
     CONTINUOUS_ANY_EDGE     = 0b1110
 
-EQADC_SUPPORTED_MODES = (
-    EQADC_MODE.DISABLE,
-    EQADC_MODE.SINGLE_SW_TRIGGER,
-)
-
 EQADC_SINGLE_SCAN_TRIGGER_MODES = (
     EQADC_MODE.SINGLE_LOW_LEVEL,
     EQADC_MODE.SINGLE_HIGH_LEVEL,
@@ -143,9 +138,18 @@ EQADC_SINGLE_SCAN_TRIGGER_MODES = (
     EQADC_MODE.SINGLE_ANY_EDGE,
 )
 
+EQADC_CONTINUOUS_SCAN_TRIGGER_MODES = (
+    EQADC_MODE.CONTINUOUS_SW_TRIGGER,
+    EQADC_MODE.CONTINUOUS_LOW_LEVEL,
+    EQADC_MODE.CONTINUOUS_HIGH_LEVEL,
+    EQADC_MODE.CONTINUOUS_FALLING_EDGE,
+    EQADC_MODE.CONTINUOUS_RISING_EDGE,
+    EQADC_MODE.CONTINUOUS_ANY_EDGE,
+)
+
 # Based on the configured mode of each channel there is a 2-bit CFIFO status
 # field in the CFSR register
-class EQUADC_CFS_MODE(enum.IntEnum):
+class EQADC_CFS_MODE(enum.IntEnum):
     IDLE                    = 0b00
     #RESERVED               = 0b01
     WAITING_FOR_TRIGGER     = 0b10
@@ -159,8 +163,10 @@ EQADC_CFS_IDLE_MODES = (EQADC_MODE.DISABLE, EQADC_MODE.SINGLE_SW_TRIGGER,
         EQADC_MODE.SINGLE_LOW_LEVEL, EQADC_MODE.SINGLE_HIGH_LEVEL,
         EQADC_MODE.SINGLE_FALLING_EDGE, EQADC_MODE.SINGLE_RISING_EDGE,
         EQADC_MODE.SINGLE_ANY_EDGE)
+
 EQADC_CFS_WAIT_FOR_TRIGGER_MODES = (EQADC_MODE.CONTINUOUS_SW_TRIGGER,
-        EQADC_MODE.CONTINUOUS_LOW_LEVEL, EQADC_MODE.CONTINUOUS_HIGH_LEVEL, EQADC_MODE.CONTINUOUS_FALLING_EDGE, EQADC_MODE.CONTINUOUS_RISING_EDGE,
+        EQADC_MODE.CONTINUOUS_LOW_LEVEL, EQADC_MODE.CONTINUOUS_HIGH_LEVEL,
+        EQADC_MODE.CONTINUOUS_FALLING_EDGE, EQADC_MODE.CONTINUOUS_RISING_EDGE,
         EQADC_MODE.CONTINUOUS_ANY_EDGE)
 
 # Mapping of interrupt types based on the supporting EQADC peripherals and the
@@ -168,43 +174,131 @@ EQADC_CFS_WAIT_FOR_TRIGGER_MODES = (EQADC_MODE.CONTINUOUS_SW_TRIGGER,
 # different sources depending on which CBuffer the interrupt comes from, but the
 # TORF (Trigger Overrun), RFOF (Result FIFO Overflow), and CFUF (Command FIFO
 # Underflow) for all CBuffers share the same interrupt source.
-EQADC_INT_SRCS = {
-    'eQADC_A': {
-        'ncf':  (INTC_SRC.EQADC_A_FISR0_NCF,  INTC_SRC.EQADC_A_FISR1_NCF,  INTC_SRC.EQADC_A_FISR2_NCF,
-                 INTC_SRC.EQADC_A_FISR3_NCF,  INTC_SRC.EQADC_A_FISR4_NCF,  INTC_SRC.EQADC_A_FISR5_NCF),
-        'torf': (INTC_SRC.EQADC_A_OVERRUN,    INTC_SRC.EQADC_A_OVERRUN,    INTC_SRC.EQADC_A_OVERRUN,
-                 INTC_SRC.EQADC_A_OVERRUN,    INTC_SRC.EQADC_A_OVERRUN,    INTC_SRC.EQADC_A_OVERRUN),
-        'pf':   (INTC_SRC.EQADC_A_FISR0_PF,   INTC_SRC.EQADC_A_FISR1_PF,   INTC_SRC.EQADC_A_FISR2_PF,
-                 INTC_SRC.EQADC_A_FISR3_PF,   INTC_SRC.EQADC_A_FISR4_PF,   INTC_SRC.EQADC_A_FISR5_PF),
-        'eoqf': (INTC_SRC.EQADC_A_FISR0_EOQF, INTC_SRC.EQADC_A_FISR1_EOQF, INTC_SRC.EQADC_A_FISR2_EOQF,
-                 INTC_SRC.EQADC_A_FISR3_EOQF, INTC_SRC.EQADC_A_FISR4_EOQF, INTC_SRC.EQADC_A_FISR5_EOQF),
-        'cfuf': (INTC_SRC.EQADC_A_OVERRUN,    INTC_SRC.EQADC_A_OVERRUN,    INTC_SRC.EQADC_A_OVERRUN,
-                 INTC_SRC.EQADC_A_OVERRUN,    INTC_SRC.EQADC_A_OVERRUN,    INTC_SRC.EQADC_A_OVERRUN),
-        'cfff': (INTC_SRC.EQADC_A_FISR0_CFFF, INTC_SRC.EQADC_A_FISR1_CFFF, INTC_SRC.EQADC_A_FISR2_CFFF,
-                 INTC_SRC.EQADC_A_FISR3_CFFF, INTC_SRC.EQADC_A_FISR4_CFFF, INTC_SRC.EQADC_A_FISR5_CFFF),
-        'rfof': (INTC_SRC.EQADC_A_OVERRUN,    INTC_SRC.EQADC_A_OVERRUN,    INTC_SRC.EQADC_A_OVERRUN,
-                 INTC_SRC.EQADC_A_OVERRUN,    INTC_SRC.EQADC_A_OVERRUN,    INTC_SRC.EQADC_A_OVERRUN),
-        'rfdf': (INTC_SRC.EQADC_A_FISR0_RFDF, INTC_SRC.EQADC_A_FISR1_RFDF, INTC_SRC.EQADC_A_FISR2_RFDF,
-                 INTC_SRC.EQADC_A_FISR3_RFDF, INTC_SRC.EQADC_A_FISR4_RFDF, INTC_SRC.EQADC_A_FISR5_RFDF),
-    },
-    'eQADC_B': {
-        'ncf':  (INTC_SRC.EQADC_B_FISR0_NCF,  INTC_SRC.EQADC_B_FISR1_NCF,  INTC_SRC.EQADC_B_FISR2_NCF,
-                 INTC_SRC.EQADC_B_FISR3_NCF,  INTC_SRC.EQADC_B_FISR4_NCF,  INTC_SRC.EQADC_B_FISR5_NCF),
-        'torf': (INTC_SRC.EQADC_B_OVERRUN,    INTC_SRC.EQADC_B_OVERRUN,    INTC_SRC.EQADC_B_OVERRUN,
-                 INTC_SRC.EQADC_B_OVERRUN,    INTC_SRC.EQADC_B_OVERRUN,    INTC_SRC.EQADC_B_OVERRUN),
-        'pf':   (INTC_SRC.EQADC_B_FISR0_PF,   INTC_SRC.EQADC_B_FISR1_PF,   INTC_SRC.EQADC_B_FISR2_PF,
-                 INTC_SRC.EQADC_B_FISR3_PF,   INTC_SRC.EQADC_B_FISR4_PF,   INTC_SRC.EQADC_B_FISR5_PF),
-        'eoqf': (INTC_SRC.EQADC_B_FISR0_EOQF, INTC_SRC.EQADC_B_FISR1_EOQF, INTC_SRC.EQADC_B_FISR2_EOQF,
-                 INTC_SRC.EQADC_B_FISR3_EOQF, INTC_SRC.EQADC_B_FISR4_EOQF, INTC_SRC.EQADC_B_FISR5_EOQF),
-        'cfuf': (INTC_SRC.EQADC_B_OVERRUN,    INTC_SRC.EQADC_B_OVERRUN,    INTC_SRC.EQADC_B_OVERRUN,
-                 INTC_SRC.EQADC_B_OVERRUN,    INTC_SRC.EQADC_B_OVERRUN,    INTC_SRC.EQADC_B_OVERRUN),
-        'cfff': (INTC_SRC.EQADC_B_FISR0_CFFF, INTC_SRC.EQADC_B_FISR1_CFFF, INTC_SRC.EQADC_B_FISR2_CFFF,
-                 INTC_SRC.EQADC_B_FISR3_CFFF, INTC_SRC.EQADC_B_FISR4_CFFF, INTC_SRC.EQADC_B_FISR5_CFFF),
-        'rfof': (INTC_SRC.EQADC_B_OVERRUN,    INTC_SRC.EQADC_B_OVERRUN,    INTC_SRC.EQADC_B_OVERRUN,
-                 INTC_SRC.EQADC_B_OVERRUN,    INTC_SRC.EQADC_B_OVERRUN,    INTC_SRC.EQADC_B_OVERRUN),
-        'rfdf': (INTC_SRC.EQADC_B_FISR0_RFDF, INTC_SRC.EQADC_B_FISR1_RFDF, INTC_SRC.EQADC_B_FISR2_RFDF,
-                 INTC_SRC.EQADC_B_FISR3_RFDF, INTC_SRC.EQADC_B_FISR4_RFDF, INTC_SRC.EQADC_B_FISR5_RFDF),
-    },
+EQADC_INT_EVENTS = {
+    'eQADC_A': (
+        {
+            'ncf':  INTC_EVENT.EQADC_A_FISR0_NCF,
+            'torf': INTC_EVENT.EQADC_A_TORF,
+            'pf':   INTC_EVENT.EQADC_A_FISR0_PF,
+            'eoqf': INTC_EVENT.EQADC_A_FISR0_EOQF,
+            'cfuf': INTC_EVENT.EQADC_A_CFUF,
+            'cfff': INTC_EVENT.EQADC_A_FISR0_CFFF,
+            'rfof': INTC_EVENT.EQADC_A_RFOF,
+            'rfdf': INTC_EVENT.EQADC_A_FISR0_RFDF,
+        },
+        {
+            'ncf':  INTC_EVENT.EQADC_A_FISR1_NCF,
+            'torf': INTC_EVENT.EQADC_A_TORF,
+            'pf':   INTC_EVENT.EQADC_A_FISR1_PF,
+            'eoqf': INTC_EVENT.EQADC_A_FISR1_EOQF,
+            'cfuf': INTC_EVENT.EQADC_A_CFUF,
+            'cfff': INTC_EVENT.EQADC_A_FISR1_CFFF,
+            'rfof': INTC_EVENT.EQADC_A_RFOF,
+            'rfdf': INTC_EVENT.EQADC_A_FISR1_RFDF,
+        },
+        {
+            'ncf':  INTC_EVENT.EQADC_A_FISR2_NCF,
+            'torf': INTC_EVENT.EQADC_A_TORF,
+            'pf':   INTC_EVENT.EQADC_A_FISR2_PF,
+            'eoqf': INTC_EVENT.EQADC_A_FISR2_EOQF,
+            'cfuf': INTC_EVENT.EQADC_A_CFUF,
+            'cfff': INTC_EVENT.EQADC_A_FISR2_CFFF,
+            'rfof': INTC_EVENT.EQADC_A_RFOF,
+            'rfdf': INTC_EVENT.EQADC_A_FISR2_RFDF,
+        },
+        {
+            'ncf':  INTC_EVENT.EQADC_A_FISR3_NCF,
+            'torf': INTC_EVENT.EQADC_A_TORF,
+            'pf':   INTC_EVENT.EQADC_A_FISR3_PF,
+            'eoqf': INTC_EVENT.EQADC_A_FISR3_EOQF,
+            'cfuf': INTC_EVENT.EQADC_A_CFUF,
+            'cfff': INTC_EVENT.EQADC_A_FISR3_CFFF,
+            'rfof': INTC_EVENT.EQADC_A_RFOF,
+            'rfdf': INTC_EVENT.EQADC_A_FISR3_RFDF,
+        },
+        {
+            'ncf':  INTC_EVENT.EQADC_A_FISR4_NCF,
+            'torf': INTC_EVENT.EQADC_A_TORF,
+            'pf':   INTC_EVENT.EQADC_A_FISR4_PF,
+            'eoqf': INTC_EVENT.EQADC_A_FISR4_EOQF,
+            'cfuf': INTC_EVENT.EQADC_A_CFUF,
+            'cfff': INTC_EVENT.EQADC_A_FISR4_CFFF,
+            'rfof': INTC_EVENT.EQADC_A_RFOF,
+            'rfdf': INTC_EVENT.EQADC_A_FISR4_RFDF,
+        },
+        {
+            'ncf':  INTC_EVENT.EQADC_A_FISR5_NCF,
+            'torf': INTC_EVENT.EQADC_A_TORF,
+            'pf':   INTC_EVENT.EQADC_A_FISR5_PF,
+            'eoqf': INTC_EVENT.EQADC_A_FISR5_EOQF,
+            'cfuf': INTC_EVENT.EQADC_A_CFUF,
+            'cfff': INTC_EVENT.EQADC_A_FISR5_CFFF,
+            'rfof': INTC_EVENT.EQADC_A_RFOF,
+            'rfdf': INTC_EVENT.EQADC_A_FISR5_RFDF,
+        },
+    ),
+    'eQADC_B': (
+        {
+            'ncf':  INTC_EVENT.EQADC_B_FISR0_NCF,
+            'torf': INTC_EVENT.EQADC_B_TORF,
+            'pf':   INTC_EVENT.EQADC_B_FISR0_PF,
+            'eoqf': INTC_EVENT.EQADC_B_FISR0_EOQF,
+            'cfuf': INTC_EVENT.EQADC_B_CFUF,
+            'cfff': INTC_EVENT.EQADC_B_FISR0_CFFF,
+            'rfof': INTC_EVENT.EQADC_B_RFOF,
+            'rfdf': INTC_EVENT.EQADC_B_FISR0_RFDF,
+        },
+        {
+            'ncf':  INTC_EVENT.EQADC_B_FISR1_NCF,
+            'torf': INTC_EVENT.EQADC_B_TORF,
+            'pf':   INTC_EVENT.EQADC_B_FISR1_PF,
+            'eoqf': INTC_EVENT.EQADC_B_FISR1_EOQF,
+            'cfuf': INTC_EVENT.EQADC_B_CFUF,
+            'cfff': INTC_EVENT.EQADC_B_FISR1_CFFF,
+            'rfof': INTC_EVENT.EQADC_B_RFOF,
+            'rfdf': INTC_EVENT.EQADC_B_FISR1_RFDF,
+        },
+        {
+            'ncf':  INTC_EVENT.EQADC_B_FISR2_NCF,
+            'torf': INTC_EVENT.EQADC_B_TORF,
+            'pf':   INTC_EVENT.EQADC_B_FISR2_PF,
+            'eoqf': INTC_EVENT.EQADC_B_FISR2_EOQF,
+            'cfuf': INTC_EVENT.EQADC_B_CFUF,
+            'cfff': INTC_EVENT.EQADC_B_FISR2_CFFF,
+            'rfof': INTC_EVENT.EQADC_B_RFOF,
+            'rfdf': INTC_EVENT.EQADC_B_FISR2_RFDF,
+        },
+        {
+            'ncf':  INTC_EVENT.EQADC_B_FISR3_NCF,
+            'torf': INTC_EVENT.EQADC_B_TORF,
+            'pf':   INTC_EVENT.EQADC_B_FISR3_PF,
+            'eoqf': INTC_EVENT.EQADC_B_FISR3_EOQF,
+            'cfuf': INTC_EVENT.EQADC_B_CFUF,
+            'cfff': INTC_EVENT.EQADC_B_FISR3_CFFF,
+            'rfof': INTC_EVENT.EQADC_B_RFOF,
+            'rfdf': INTC_EVENT.EQADC_B_FISR3_RFDF,
+        },
+        {
+            'ncf':  INTC_EVENT.EQADC_B_FISR4_NCF,
+            'torf': INTC_EVENT.EQADC_B_TORF,
+            'pf':   INTC_EVENT.EQADC_B_FISR4_PF,
+            'eoqf': INTC_EVENT.EQADC_B_FISR4_EOQF,
+            'cfuf': INTC_EVENT.EQADC_B_CFUF,
+            'cfff': INTC_EVENT.EQADC_B_FISR4_CFFF,
+            'rfof': INTC_EVENT.EQADC_B_RFOF,
+            'rfdf': INTC_EVENT.EQADC_B_FISR4_RFDF,
+        },
+        {
+            'ncf':  INTC_EVENT.EQADC_B_FISR5_NCF,
+            'torf': INTC_EVENT.EQADC_B_TORF,
+            'pf':   INTC_EVENT.EQADC_B_FISR5_PF,
+            'eoqf': INTC_EVENT.EQADC_B_FISR5_EOQF,
+            'cfuf': INTC_EVENT.EQADC_B_CFUF,
+            'cfff': INTC_EVENT.EQADC_B_FISR5_CFFF,
+            'rfof': INTC_EVENT.EQADC_B_RFOF,
+            'rfdf': INTC_EVENT.EQADC_B_FISR5_RFDF,
+        },
+    ),
 }
 
 
@@ -361,10 +455,10 @@ def parseCommand(data, endian=e_const.ENDIAN_MSB):
     eoq = (cmd & 0x80000000) >> 31
     pause = (cmd & 0x40000000) >> 30
     if pause:
-        raise NotImplementedError('PAUSE not handled in commands: 0x%s' % data.hex())
+        raise NotImplementedError('PAUSE not handled in commands: %s' % data.hex())
     rep = (cmd & 0x20000000) >> 29
     if rep:
-        raise NotImplementedError('REP not handled in commands: 0x%s' % data.hex())
+        raise NotImplementedError('REP not handled in commands: %s' % data.hex())
     bn = (cmd & 0x02000000) >> 25
 
     # This field is the CAL flag for conversion commands, and the R/W flag for
@@ -421,6 +515,10 @@ class EQADC_CFCRx(PeriphRegister):
 # register with "f" as a suffix instead of "ie". I'm defining the interrupt flag
 # fields in both registers to use the "f" suffix to make setting and checking
 # for interrupts more consistent.
+#
+# Fields that select between enabled interrupt requests and DMA requests are
+# indicated with the name of the event field with an added "_dirs" suffix.  so
+# CFFS becomes CFFF_DIRS.
 
 class EQADC_IDCRx(PeriphRegister):
     def __init__(self):
@@ -432,7 +530,7 @@ class EQADC_IDCRx(PeriphRegister):
         self.cfuf = v_bits(1)
         self._pad0 = v_const(1)
         self.cfff = v_bits(1)
-        self.cffs = v_bits(1)
+        self.cfff_dirs = v_bits(1)
         self._pad1 = v_const(4)
         self.rfof = v_bits(1)
         self._pad2 = v_const(1)
@@ -499,21 +597,21 @@ class EQADC_REDLCCR(PeriphRegister):
         self.srv1 = v_bits(4)
 
 class EQADC_REGISTERS(PeripheralRegisterSet):
-    def __init__(self, emu=None):
-        super().__init__(emu)
+    def __init__(self):
+        super().__init__()
 
         self.mcr     = (EQADC_MCR_OFFSET, EQADC_MCR())
         self.etdfr   = (EQADC_ETDFR_OFFSET, EQADC_ETDFR())
-        self.cfcr    = (EQADC_CFCR_OFFSET, VArray([EQADC_CFCRx() for i in range(EQADC_NUM_CBUFFERS)]))
-        self.idcr    = (EQADC_IDCR_OFFSET, VArray([EQADC_IDCRx() for i in range(EQADC_NUM_CBUFFERS)]))
-        self.fisr    = (EQADC_FISR_OFFSET, VArray([EQADC_FISRx() for i in range(EQADC_NUM_CBUFFERS)]))
-        self.cftcr   = (EQADC_CFTCR_OFFSET, VArray([EQADC_CFTCRx() for i in range(EQADC_NUM_CBUFFERS)]))
-        self.cfssr   = (EQADC_CFSSR_OFFSET, VArray([EQADC_CFSSRx() for i in range(EQADC_NUM_ADCS)]))
+        self.cfcr    = (EQADC_CFCR_OFFSET, VTuple([EQADC_CFCRx() for i in range(EQADC_NUM_CBUFFERS)]))
+        self.idcr    = (EQADC_IDCR_OFFSET, VTuple([EQADC_IDCRx() for i in range(EQADC_NUM_CBUFFERS)]))
+        self.fisr    = (EQADC_FISR_OFFSET, VTuple([EQADC_FISRx() for i in range(EQADC_NUM_CBUFFERS)]))
+        self.cftcr   = (EQADC_CFTCR_OFFSET, VTuple([EQADC_CFTCRx() for i in range(EQADC_NUM_CBUFFERS)]))
+        self.cfssr   = (EQADC_CFSSR_OFFSET, VTuple([EQADC_CFSSRx() for i in range(EQADC_NUM_ADCS)]))
         self.cfsr    = (EQADC_CFSR_OFFSET, EQADC_CFSR())
         self.redlccr = (EQADC_REDLCCR_OFFSET, EQADC_REDLCCR())
 
 
-class EQADC(ExternalIOPeripheral):
+class eQADC(ExternalIOPeripheral):
     """
     Class to emulate the EQADC peripheral.
 
@@ -534,16 +632,9 @@ class EQADC(ExternalIOPeripheral):
         EQADC constructor.  Each processor has multiple EQADC peripherals so the
         devname parameter must be unique.
         """
-        self._config = emu.vw.config.project.MPC5674.getSubConfig(devname)
-
-        # Get the host IP and port to use from the configuration, use the
-        # cfginfo/dict method to read these because the host defaults to "None",
-        # in which case we want to actually read None, not get an EnviConfig
-        # error.
-        host = self._config.cfginfo['host']
-        port = self._config.cfginfo['port']
-
-        super().__init__(emu, devname, host, port, mmio_addr, 0x4000, regsetcls=EQADC_REGISTERS)
+        super().__init__(emu, devname, mmio_addr, 0x4000,
+                regsetcls=EQADC_REGISTERS,
+                isrstatus='fisr', isrflags='idcr', isrevents=EQADC_INT_EVENTS)
 
         # There are so many peripheral register ranges that need custom handling
         # in this function that we need a fast and easy lookup for the different
@@ -569,12 +660,11 @@ class EQADC(ExternalIOPeripheral):
         # Voltage inputs, there are 256 possible input channels
         self.channels = None
 
-        # Each eQADC device has 2 ADC conversion chips that are indirectly
+        # Each EQADC device has 2 ADC conversion chips that are indirectly
         # accessed and programmed
         self.adc = (ADC(self, 'ADC0'), ADC(self, 'ADC1'))
 
-        self.registers.vsAddParseCallback('by_idx_idcr', self.idcrUpdate)
-        self.registers.vsAddParseCallback('by_idx_cfcr', self.cfcrUpdate)
+        self.registers.cfcr.vsAddParseCallback('by_idx', self.cfcrUpdate)
 
     def reset(self, emu):
         super().reset(emu)
@@ -672,41 +762,17 @@ class EQADC(ExternalIOPeripheral):
         # Return an empty bytes value to indicate that all data has been handled
         return b''
 
-    def event(self, channel, name, value):
-        """
-        Takes in a channel and name for an event, updates the FIFO and Interrupt
-        Status Register (FISRx) field of the matching name, and sets the flag.
-        If the Interrupt and DMA Control Register (IDCRx) has the interrupt
-        enabled then and if the value is "1" queues a corresponding interrupt.
-
-        Setting an event value of 0 has no effect, and setting an event value of
-        1 when the FISRx field is already 1 has no effect.
-        """
-        if value and self.registers.fisr[channel].vsGetField(name) == 0:
-            self.registers.fisr[channel].vsOverrideValue(name, int(value))
-
-            if self.registers.idcr[channel].vsGetField(name) == 1:
-                self.emu.queueException(ExternalException(EQADC_INT_SRCS[self.devname][channel][name]))
-
-    def idcrUpdate(self, thing, idx, size):
-        # DMA transfers are not yet supported so raise an exception if those
-        # bits are set.
-        if self.registers.idcr[idx].cffs:
-            raise NotImplementedError('%s IDCR%d[CFFS] set to 1' % (self.devname, idx))
-        if self.registers.idcr[idx].rfds:
-            raise NotImplementedError('%s IDCR%d[RFDS] set to 1' % (self.devname, idx))
-
-    def cfcrUpdate(self, thing, idx, size):
+    def cfcrUpdate(self, thing, idx, size, **kwargs):
         # If the SSE flag is set update the SSS status indicator in the FISRx
         # register
         if self.registers.cfcr[idx].sse:
+            self._update_cfsr(idx, triggered=True)
             self.registers.cfcr[idx].sse = 0
-            self.registers.fisr[idx].vsOverrideValue('sss', 1)
 
         if self.registers.cfcr[idx].cfinv:
             self.registers.cfcr[idx].cfinv = 0
             # reset the CFIFO status
-            self.registers.fisr[idx].vsOverrideValuekj('cfctr', 0)
+            self.registers.fisr[idx].vsOverrideValue('cfctr', 0)
             self.registers.fisr[idx].vsOverrideValue('tnxtptr', 0)
             self.registers.fisr[idx].vsOverrideValue('rfctr', 0)
             self.registers.fisr[idx].vsOverrideValue('popnxtptr', 0)
@@ -719,7 +785,8 @@ class EQADC(ExternalIOPeripheral):
             if idx == 0:
                 cfcr = self.registers.cfcr[idx]
                 pc = self.emu.getProgramCounter()
-                errmsg = '0x%x: %s[%d] Streaming mode not supported (CFCR%d = 0x%s)' % (pc, self.devname, idx, idx, cfcr.vsEmit().hex())
+                errmsg = '0x%x: %s[%d] Streaming mode not supported (CFCR%d = %s)' % \
+                        (pc, self.devname, idx, idx, cfcr.vsEmit().hex())
                 raise NotImplementedError(errmsg)
             else:
                 # fields not supported for channels other than 0, force them
@@ -733,36 +800,30 @@ class EQADC(ExternalIOPeripheral):
     def _update_cfsr(self, channel, triggered=False):
         mode = self.mode[channel]
         field = EQADC_CFS_FIELDS[channel]
-        if mode in EQADC_CFS_IDLE_MODES:
-            cfsr_val = EQUADC_CFS_MODE.IDLE
-        elif triggered:
-            cfsr_val = EQUADC_CFS_MODE.TRIGGERED
+        if mode in EQADC_CFS_WAIT_FOR_TRIGGER_MODES:
+            self.registers.fisr[channel].vsOverrideValue('sss', 0)
+            self.registers.cfsr.vsOverrideValue(field, EQADC_CFS_MODE.WAITING_FOR_TRIGGER)
+        elif mode in EQADC_CFS_IDLE_MODES and triggered:
+            self.registers.fisr[channel].vsOverrideValue('sss', 1)
+            self.registers.cfsr.vsOverrideValue(field, EQADC_CFS_MODE.TRIGGERED)
         else:
-            cfsr_val = EQUADC_CFS_MODE.WAITING_FOR_TRIGGER
-        self.registers.cfsr.vsOverrideValue(field, cfsr_val)
+            self.registers.fisr[channel].vsOverrideValue('sss', 0)
+            self.registers.cfsr.vsOverrideValue(field, EQADC_CFS_MODE.IDLE)
 
     def updateMode(self, channel):
         mode = EQADC_MODE(self.registers.cfcr[channel].mode)
 
-        if mode not in EQADC_SUPPORTED_MODES:
-            raise NotImplementedError('[%s] mode %s (%d) not supported' % (self.devname, mode.name, mode))
-
         # NOTE: Continuous or non-software triggered results should be generated
         # based on a periodic timer to mimic how long it takes hardware to
-        # generate an ADC result
+        # generate an ADC result.
 
         if self.mode[channel] != mode:
             self.mode[channel] = mode
             logger.debug('%s[%d]: changing to mode %s', self.devname, channel, self.mode[channel].name)
 
-            # If the mode is set to single scan - non sw triggered events,
-            # indicate that the event is ready
-            if mode in EQADC_SINGLE_SCAN_TRIGGER_MODES:
-                self.registers.fisr[channel].vsOverrideValue('sss', 1)
-            else:
-                self.registers.fisr[channel].vsOverrideValue('sss', 0)
-
-            # Update the CFSR value
+            # TODO: the sss bit should indicate that the event has not yet
+            # occured, when the event is eventually triggered then the sss bit
+            # will be set.
             self._update_cfsr(channel)
 
             # If the channel is not disabled and there are commands in the fifo,
@@ -800,26 +861,9 @@ class EQADC(ExternalIOPeripheral):
             self.registers.fisr[channel].vsOverrideValue('tnxtptr', max(fifo_size-1, 0))
             self.event(channel, 'cfff', fifo_size != max_fifo_size)
 
-    def popRFIFO(self, channel):
-        fifo_size = self.registers.fisr[channel].rfctr
-        if fifo_size > 0:
-            # The oldest message is always at index 0
-            data = self.rfifo[channel][:EQADC_RESULT_SIZE]
-            self.rfifo[channel][:-EQADC_RESULT_SIZE] = self.rfifo[channel][EQADC_RESULT_SIZE:]
-
-            # Increment the FISRx[RFCTR] field (FISRx[POPNXTPTR] is always 0)
-            fifo_size -= 1
-            self.registers.fisr[channel].vsOverrideValue('rfctr', fifo_size)
-            self.event(channel, 'rfdf', fifo_size != 0)
-
-        else:
-            data = b'\x00\x00\x00\x00'
-            logger.debug('%s[%d] (%s): No available data, returning 0x%s', self.devname, channel, self.mode[channel], data.hex())
-
-        return data
-
     def popCFIFO(self, channel):
         fifo_size = self.registers.fisr[channel].cfctr
+        data = None
         if fifo_size > 0:
             idx = self.registers.fisr[channel].tnxtptr * EQADC_CMD_SIZE
             data = self.cfifo[channel][idx:idx+EQADC_CMD_SIZE]
@@ -832,19 +876,45 @@ class EQADC(ExternalIOPeripheral):
             # any), so it should be fifo_size - 1
             self.registers.fisr[channel].vsOverrideValue('tnxtptr', max(fifo_size-1, 0))
 
-            # Now that data has been removed from the CFIFO indicate that it
-            # can be filled with more data.
+            # Indicate that the command fifo is no longer full
             self.event(channel, 'cfff', 1)
 
-            return data
+        return data
+
+    def popRFIFO(self, channel):
+        fifo_size = self.registers.fisr[channel].rfctr
+        if fifo_size > 0:
+            # The oldest message is always at index 0
+            data = self.rfifo[channel][:EQADC_RESULT_SIZE]
+            self.rfifo[channel][:-EQADC_RESULT_SIZE] = self.rfifo[channel][EQADC_RESULT_SIZE:]
+
+            # If this channel is in a continuous mode, populate the last entry
+            # in the queue with a new result, otherwise remove a result from the
+            # FIFO
+            if self.mode[channel] in EQADC_CONTINUOUS_SCAN_TRIGGER_MODES:
+                last_result = self.rfifo[channel][-(EQADC_RESULT_SIZE*2):-EQADC_RESULT_SIZE]
+                self.rfifo[channel][-EQADC_RESULT_SIZE:] = last_result
+
+            else:
+                # Increment FISRx[RFCTR] (FISRx[POPNXTPTR] is always 0 in our
+                # emulation)
+                fifo_size -= 1
+                self.registers.fisr[channel].vsOverrideValue('rfctr', fifo_size)
+
+            self.event(channel, 'rfdf', fifo_size != 0)
 
         else:
-            return None
+            # Create a placeholder value to read
+            data = b'\x00' * EQADC_RESULT_SIZE
+            logger.debug('%s[%d] (%s): No available data, returning %r',
+                    self.devname, channel, self.mode[channel], data)
+
+        return data
 
     def pushRFIFO(self, channel, data):
         # Add to the Rx FIFO (if it isn't full or disabled)
         fifo_size = self.registers.fisr[channel].rfctr
-        if fifo_size < EQADC_CFIFO_LEN:
+        if fifo_size < EQADC_RFIFO_LEN:
             # As long as the fifo_size is <= the Rx FIFO max (5) append the data
             # to the Rx FIFO.
             idx = fifo_size * EQADC_RESULT_SIZE
@@ -893,10 +963,21 @@ class EQADC(ExternalIOPeripheral):
                     # If this is an alt config register then the result may be
                     # sent to the DECFILT peripheral
                     if cmd.offset in ADC_REGS_ALTCNV_RANGE and config & 0x3C00 != 0x0000:
-                        raise NotImplementedError('%s[%d] DECFILT dest not supported for result 0x%s, cmd %r (config: 0x%x)' % (self.devname, result.hex(), cmd, config))
+                        errmsg = '%s[%d] DECFILT dest not supported for result 0x%s, cmd %r (config: 0x%x)' % \
+                                (self.devname, result.hex(), cmd, config)
+                        raise NotImplementedError(errmsg)
 
-                    logger.debug('%s: conversion result = 0x%s (cmd=%r, config=0x%x', self.devname, result.hex(), cmd, config)
+                    logger.debug('%s: conversion result = %r (cmd=%r, config=0x%x', self.devname, result, cmd, config)
                     self.pushRFIFO(cmd.tag, result)
+
+                    # TODO: technically "continuous" scans don't stop processing
+                    # when EOQ happens. For now if the mode is continuous and
+                    # the RFIFO is not full, fill it with copies of the last
+                    # result.
+                    if self.mode[channel] in EQADC_CONTINUOUS_SCAN_TRIGGER_MODES and cmd.eoq:
+                        while self.registers.fisr[channel].rfctr < EQADC_RFIFO_LEN:
+                            self.pushRFIFO(cmd.tag, result)
+
                 else:
                     logger.debug('%s: conversion %r result inhibited: 0x%x', self.devname, cmd, config)
             else:
@@ -914,7 +995,7 @@ class EQADC(ExternalIOPeripheral):
             if cmd.tag < EQADC_NUM_CBUFFERS:
                 # Pad the result out to 32 bits
                 result = b'\x00\x00' + self.adc[cmd.bn].read(cmd.offset)
-                logger.debug('%s: Read ADC%d[0x%x] = 0x%s', self.devname, cmd.bn, cmd.offset, result.hex())
+                logger.debug('%s: Read ADC%d[0x%x] = %r', self.devname, cmd.bn, cmd.offset, result)
                 self.pushRFIFO(cmd.tag, result)
             else:
                 if cmd.tag == 0b1000:
@@ -924,7 +1005,7 @@ class EQADC(ExternalIOPeripheral):
                 logger.debug('%s: Ignoring read with %s tag (%r)', self.devname, tag_type, cmd)
 
         else:
-            raise Exception('Unepxected ADC Command: %r (0x%s)' % (cmd, data.hex()))
+            raise Exception('Unepxected ADC Command: %r (%r)' % (cmd, data))
 
         # If the EOQ flag is set clear the transfer count
         if cmd.eoq:

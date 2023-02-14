@@ -2,6 +2,7 @@ import sys
 import time
 import logging
 import os.path
+import weakref
 import argparse
 
 import envi.cli as e_cli
@@ -40,25 +41,20 @@ def open_project(defconfig=None, docconfig=None, args=None, parser=None):
     or a configuration file is specified that indicates the project-specific
     files and settings to use.
     """
-    exename = os.path.basename(sys.modules['__main__'].__file__)
-
-    # Use the supplied Parser as the "parent" so an emulator/project can define
-    # it's won arguments and the help text can get displayed here.
-    prj_parser = argparse.ArgumentParser(prog=exename, parents=[parser])
-    std_parser = prj_parser.add_argument_group('Standard Options')
-
-    #std_parser.add_argument('-m', '--mode', default='emu', choices=['emu', 'interactive', 'analysis', 'test'],
-    std_parser.add_argument('-m', '--mode', default='interactive', choices=['interactive', 'test'],
+    if parser is None:
+        exename = os.path.basename(sys.modules['__main__'].__file__)
+        parser = argparse.ArgumentParser(prog=exename)
+    #parser.add_argument('-m', '--mode', default='emu', choices=['emu', 'interactive', 'analysis', 'test'],
+    parser.add_argument('-m', '--mode', default='interactive', choices=['interactive', 'test'],
                             help='Emulator mode')
-    std_parser.add_argument('-v', '--verbose', dest='verbose', default=1, action='count',
+    parser.add_argument('-v', '--verbose', dest='verbose', default=1, action='count',
                             help='Enable verbose mode (multiples matter: -vvvv)')
-    std_parser.add_argument('-c', '--config-dir', nargs='?', const=False,
+    parser.add_argument('-c', '--config-dir', nargs='?', const=False,
                             help='Path to a directory to use for emulator configuration information')
-    std_parser.add_argument('-O', '--option', default=None, action='append',
+    parser.add_argument('-O', '--option', default=None, action='append',
                             help='<secname>.<optname>=<optval> (optval must be json syntax)')
-    std_parser.add_argument('--help-options', action='store_true',
-                            help='print detailed configuration option help for the -O argument')
-    parsed_args = prj_parser.parse_args(args)
+    #parsed_args = prj_parser.parse_args(args)
+    parsed_args = parser.parse_args(args)
 
     # If this project has non-standard default configuration settings set them #
     # before creating the Vivisect workspace
@@ -121,16 +117,10 @@ def open_project(defconfig=None, docconfig=None, args=None, parser=None):
     vw.setTransMeta("ProjectMode", parsed_args.mode)
 
     # setup logging
-    vw.verbose = min(parsed_args.verbose, 7)
+    vw.verbose = min(parsed_args.verbose, len(e_common.LOG_LEVELS)-1)
     level = e_common.LOG_LEVELS[vw.verbose]
     e_common.initLogging(logger, level=level)
     logger.warning("LogLevel: %r  %r  %r", vw.verbose, level, logging.getLevelName(level))
-
-    # print options help if requested
-    if parsed_args.help_options:
-        logger.critical(vw.config.reprConfigPaths())
-        logger.critical("syntax: \t-O <secname>.<optname>=<optval> (optval must be json syntax)")
-        sys.exit(-1)
 
     # Parse any command-line options
     if parsed_args.option is not None:
@@ -163,10 +153,7 @@ def open_project(defconfig=None, docconfig=None, args=None, parser=None):
     vw.setMeta('bigend', vw.config.project.bigend)
     vw.setMeta('DefaultCall', vivisect.const.archcalls.get(arch, 'unknown'))
 
-    # Attach the CLI arguments to a metadata value
-    vw.setTransMeta('ProjectCliArgs', parsed_args)
-
-    return vw
+    return vw, parsed_args
 
 
 def merge_dict(base, update):
@@ -243,7 +230,7 @@ class VivProject(metaclass=VivProjectMeta):
         }
     }
 
-    def __init__(self, defconfig=None, docconfig=None, args=None, parser=None):
+    def open_project_config(self, defconfig=None, docconfig=None, args=None, parser=None):
         # Merge the defaults and docs provided with the class config
         defconfig = merge_dict(self.defconfig, defconfig)
         docconfig = merge_dict(self.docconfig, docconfig)
@@ -251,7 +238,7 @@ class VivProject(metaclass=VivProjectMeta):
         # Open the "project" workspace and save it.  When attached to an
         # emulator this will make the object behave like a
         # standard vivisec.impemu.monitor.AnalysisMonitor
-        self.vw = open_project(defconfig, docconfig, args, parser)
+        return open_project(defconfig, docconfig, args, parser)
 
     def get_project_path(self, filename):
         """

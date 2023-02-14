@@ -117,7 +117,7 @@ mpc5674 is reponsible for defining:
     * FlexCAN module
     * DSPI - Deserial Serial Peripheral Interface
     * eSCI - enhanced Serial Comms Interface
-    * EQADC - Enhanced Queued Analog to Digical Converter
+    * eQADC - Enhanced Queued Analog to Digical Converter
     * Decimation Filter
     * eTPU2 - enhanced Time Processing Unit
     * EBI - External Bus Interface
@@ -138,8 +138,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 import envi
-import vstruct
-import envi.bits as e_bits
 import envi.memory as e_mem
 import envi.archs.ppc.regs as ppc_regs
 import envi.archs.ppc.const as ppc_const
@@ -148,7 +146,7 @@ import vivisect.impemu.monitor as viv_imp_monitor
 
 from . import project
 from . import e200z7
-from .intc_exc import AlignmentException, MceWriteBusError, MceDataReadBusError
+from .intc_exc import *
 
 # Peripherals
 from .peripherals.bam import BAM
@@ -160,12 +158,17 @@ from .peripherals.flexcan import FlexCAN
 from .peripherals.intc import INTC
 from .peripherals.dspi import DSPI
 from .peripherals.sim import SIM
-from .peripherals.eqadc import EQADC
+from .peripherals.eqadc import eQADC
 from .peripherals.decfilt import DECFILT
 from .peripherals.ebi import EBI
 from .peripherals.ecsm import ECSM
 from .peripherals.xbar import XBAR
 from .peripherals.pbridge import PBRIDGE
+from .peripherals.edma import eDMA
+from .peripherals.etpu2 import eTPU2
+from .peripherals.emios200 import eMIOS200
+from .peripherals.esci import eSCI
+from .peripherals.pit import PIT
 
 
 __all__ = [
@@ -175,68 +178,130 @@ __all__ = [
 
 
 ###  DEBUGGING ONLY:  Emulation Monitor
-from envi.archs.ppc.regs import REG_LR, REG_XER, REG_CR, REG_CTR
+COMMON_SPRs = (ppc_regs.REG_LR, ppc_regs.REG_XER, ppc_regs.REG_CR, ppc_regs.REG_CTR)
 class MPC5674_monitor(viv_imp_monitor.AnalysisMonitor):
     def __init__(self, vw, fva=0):
         viv_imp_monitor.AnalysisMonitor.__init__(self, vw, fva)
-        self.vas = []
-        self.ops = []
+        #self.vas = []
+        #self.ops = []
         self.ophist = {}
         self.calls = []
         self.funccalls = {}
-        self.spraccess = []
-        self.curfunc = 0
         self.curfuncdata = {}
-        self.path = [0]
-        self.level = 0
+        #self.spraccess = []
 
-    def prehook(self, emu, op, starteip):
-        #print("prehook: 0x%x: %r" % (starteip, op))
-        if any(emu.getOperAddr(op, i) == 0x40010214 for i in range(len(op.opers))):
-            repropers = ', '.join('[0x%x] 0x%x' % (emu.getOperAddr(op, i), emu.getOperValue(op, i)) if op.opers[i].isDeref() \
-                    else hex(emu.getOperValue(op, i)) for i in range(len(op.opers)))
-            print("===============0x40010214 accessed!!!===== 0x%x:  %r (%r)" % (op.va, op, repropers))
-            #raw_input("===============0x40010214 accessed!!!===== 0x%x:  %r (%r)" % (op.va, op, repropers))
+        self.int_context = None
 
-    '''
-        if op.iflags & envi.IF_CALL:
-            print("cAll!")
-            self.calls.append((op, emu.getProgramCounter()))
+        # All dependant on the current interrupt context
+        self.curfunc = {None: 0}
+        self.path = {None: [0]}
+        self.level = {None: 0}
 
-        if op.mnem in (ppc_const.INS_MTSPR, ppc_const.INS_MFSPR):
-            self.spraccess.append(op)
-    '''
     def posthook(self, emu, op, endeip):
         #print("posthook: 0x%x: %r" % (starteip, op))
         # store all opcodes
 
         #self.ops.append(op)
 
+        # track instruction counts
+        self.ophist[op.mnem] = self.ophist.get(op.mnem, 0) + 1
+
+        # Check if we've entered or exited an interrupt context self.int_context
+        if emu.mcu_intc.stack:
+            cur_context = emu.mcu_intc.stack[0].prio
+        else:
+            cur_context = None
+
+        # Watch for resets
+        if op.va == emu.bam.rchw.entry_point:
+            self.curfunc = {None: 0}
+            self.path = {None: [0]}
+            self.level = {None: 0}
+
+            print("%s%d ###### RESET  0x%x" % (
+                '  '*self.level[self.int_context], self.level[self.int_context], op.va))
+
+        if cur_context != self.int_context:
+            if cur_context not in self.curfunc:
+                # if the current context isn't in the current function set yet,
+                # then this is a new interrupt context.  In this case the
+                # instruction passed into this hook is incorrect.  Get the
+                # actual instruction executed from the emulator
+                interrupted_op = op
+                op = emu._cur_instr[0]
+
+                # Start new context-based entries for this interrupt handler
+                self.curfunc[cur_context] = op.va
+                self.path[cur_context] = [op.va]
+                self.level[cur_context] = 1
+
+            # If an RFI was just executed, remove the old interrupt context
+            if op.iflags & ppc_const.IF_RFI:
+                print("%s%d ****** 0x%x RFI    <- 0x%x" % (
+                    '  '*self.level[self.int_context], self.level[self.int_context], endeip, op.va))
+
+                # Clean up the interrupt context path
+                del self.curfunc[self.int_context]
+                del self.path[self.int_context]
+                del self.level[self.int_context]
+
+            # If we are not in the "normal" context and an RFI was not just
+            # executed, the first instruction of an interrupt handler was
+            # executed.
+            if cur_context is not None and not op.iflags & ppc_const.IF_RFI:
+                # The first instruction of the interrupt handler is the address
+                # of the instruction that was just executed
+                count = self.funccalls.get(op.va, 0) + 1
+                self.funccalls[op.va] = count
+
+                if isinstance(emu.mcu_intc.stack[0], MachineCheckException):
+                    xrr0 = emu.getRegister(ppc_regs.REG_MCSRR0)
+                    xrr1 = emu.getRegister(ppc_regs.REG_MCSRR1)
+                    xrr0_name = 'MCSRR0'
+                    xrr1_name = 'MCSRR1'
+                elif isinstance(emu.mcu_intc.stack[0], (StandardPrioException, MachineCheckPrioException)):
+                    # standard and non-MCE machine check priority level
+                    # exceptions use SRR0/SRR1
+                    xrr0 = emu.getRegister(ppc_regs.REG_SRR0)
+                    xrr1 = emu.getRegister(ppc_regs.REG_SRR1)
+                    xrr0_name = 'SRR0'
+                    xrr1_name = 'SRR1'
+                elif isinstance(emu.mcu_intc.stack[0], CriticalPrioException):
+                    xrr0 = emu.getRegister(ppc_regs.REG_CSRR0)
+                    xrr1 = emu.getRegister(ppc_regs.REG_CSRR1)
+                    xrr0_name = 'CSRR0'
+                    xrr1_name = 'CSRR1'
+                else:
+                    raise Exception('Unknown exception context %s' % repr(cur_context))
+
+                print("%s%d ****** 0x%x  INT  0x%x -> 0x%x (MSR: 0x%x  MCAR: 0x%x  ESR: 0x%x  %s: 0x%x  %s: 0x%x" % (
+                    '  '*self.level[cur_context], self.level[cur_context],
+                    xrr0, op.va, endeip, emu.getRegister(ppc_regs.REG_MSR),
+                    emu.getRegister(ppc_regs.REG_MCAR), emu.getRegister(ppc_regs.REG_ESR),
+                    xrr0_name, xrr0, xrr1_name, xrr1))
+
+            self.int_context = cur_context
+
         # store opcode in the correct function container
-        cfdata = self.curfuncdata.get(self.curfunc)
+        cfdata = self.curfuncdata.get(self.curfunc[self.int_context])
         if cfdata is None:
             cfdata = {'ops': []}
-            self.curfuncdata[self.curfunc] = cfdata
+            self.curfuncdata[self.curfunc[self.int_context]] = cfdata
 
         if op.va not in cfdata['ops']:
             cfdata['ops'].append(op.va)
 
-        # track instruction counts
-        ophist = self.ophist.get(op.mnem, 0)
-        ophist += 1
-        self.ophist[op.mnem] = ophist
-
         if op.iflags & envi.IF_CALL:
-            self.calls.append((self.curfunc, op.va, endeip))
+            self.calls.append((self.curfunc[self.int_context], op.va, endeip))
 
             count = self.funccalls.get(endeip, 0) + 1
             self.funccalls[endeip] = count
 
-            self.curfunc = endeip
-            self.path.append(endeip)
-            self.level += 1
-            gap = '  ' * self.level + str(self.level)
-            print(gap + " ====>> CALL  0x%x -> 0x%x (0x%x, 0x%x, 0x%x, 0x%x, 0x%x)" % (
+            self.curfunc[self.int_context] = endeip
+            self.path[self.int_context].append(endeip)
+            self.level[self.int_context] += 1
+            print("%s%d ====>> CALL 0x%x -> 0x%x (0x%x, 0x%x, 0x%x, 0x%x, 0x%x)" % (
+                '  '*self.level[self.int_context], self.level[self.int_context],
                 op.va, endeip,
                 emu.getRegister(ppc_regs.REG_R3),
                 emu.getRegister(ppc_regs.REG_R4),
@@ -244,23 +309,22 @@ class MPC5674_monitor(viv_imp_monitor.AnalysisMonitor):
                 emu.getRegister(ppc_regs.REG_R6),
                 emu.getRegister(ppc_regs.REG_R7)))
 
-        elif op.iflags & envi.IF_RET:
-            gap = '  ' * self.level + str(self.level)
-            print(gap + " <<==== RET  0x%x <- 0x%x (0x%x)" % (endeip, op.va, emu.getRegister(ppc_regs.REG_R3)))
-            self.level -= 1
-            self.path.pop()
-            self.curfunc = self.path[-1]
+        # If this is a conditional return, only print this information if
+        # the condition was met and the branch taken. The first branch
+        # option returned by getBranches() is the fall-through, so if PC !=
+        # first target
+        elif (op.iflags & envi.IF_RET and not op.iflags & ppc_const.IF_RFI) and \
+                ((not op.iflags & envi.IF_COND) or \
+                (op.iflags & envi.IF_COND and op.getBranches()[0][0] != endeip)):
 
-        if op.opcode in (ppc_const.INS_MTSPR, ppc_const.INS_MFSPR):
-            isCommon = False
-            for oper in op.opers:
-                if oper.isReg() and oper.reg in (REG_LR, REG_XER, REG_CR, REG_CTR):
-                    isCommon = True
-            if not isCommon:
-                logger.warning('SPR access: 0x%x: %r   (0x%x, 0x%x)', op.va, op, \
-                        emu.getOperValue(op, 0), \
-                        emu.getOperValue(op, 1))
-                self.spraccess.append((op, emu.getOperValue(op, 0), emu.getOperValue(op, 1)))
+            print("%s%d <<==== RET  0x%x <- 0x%x (0x%x)" % (
+                '  '*self.level[self.int_context], self.level[self.int_context],
+                endeip, op.va,
+                emu.getRegister(ppc_regs.REG_R3)))
+
+            self.level[self.int_context] -= 1
+            self.path[self.int_context].pop()
+            self.curfunc[self.int_context] = self.path[self.int_context][-1]
 
     def apicall(self, emu, op, pc, api, argv):
         print("call!")
@@ -297,6 +361,8 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
                     # SRAM size depends on the specific MPC5674 part in use
                     'size': 0,
                     'addr': 0x40000000,
+                    # Indicates how much of the ram is preserved during resets
+                    'standby_size': 0x8000,
                 },
                 'FlexCAN_A': {
                     'host': None,
@@ -365,6 +431,7 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
                 'SRAM': {
                     'size': 'Amount of SRAM available (differs depending on specific MPC5674 version)',
                     'addr': 'Physical address of SRAM',
+                    'standby_size': 'Size of SRAM that is preserved across device resets',
                 },
                 'FlexCAN_A': {
                     'host': 'Host IP address for FlexCAN_A IO server',
@@ -417,26 +484,31 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
     def __init__(self, defconfig=None, docconfig=None, args=None):
         # Before initializing the VivProject, add any MPC5674-specific options
         exename = os.path.basename(sys.modules['__main__'].__file__)
-        parser = argparse.ArgumentParser(prog=exename, add_help=False)
-        ppc_parser = parser.add_argument_group('PowerPC Emulator Options')
-        ppc_parser.add_argument('-I', '--init-flash', action='store_true',
+        parser = argparse.ArgumentParser(prog=exename)
+        parser.add_argument('-I', '--init-flash', action='store_true',
                             help='Copy binary flash image to configuration directory (-c)')
-        ppc_parser.add_argument('flash_image', nargs='?',
+        parser.add_argument('-N', '--no-backup', action='store_true',
+                            help='run without a flash backup file, flash writes will be lost')
+        # TODO: make a "clear" backup instead of just "no" backup?
+        parser.add_argument('flash_image', nargs='?',
                             help='Binary flash image to load in the emulator')
 
         # Open up the workspace and read the project configuration
-        project.VivProject.__init__(self, defconfig, docconfig, args, parser)
-        e200z7.PPC_e200z7.__init__(self, self.vw)
+        project.VivProject.__init__(self)
+        vw, args = self.open_project_config(defconfig, docconfig, args, parser)
+
+        del parser
+
+        # the self.vw attribute will get created when the e200z7 class calls the
+        # workspace emulator initializer.
+        e200z7.PPC_e200z7.__init__(self, vw)
 
         # Now that the standard options have been parsed process anything
         # leftover
-        self._process_args()
+        self._process_args(args)
 
         # The backup file is assumed to be located in the "project directory"
         self.flash = FLASH(self)
-
-        # eTPU2 has a complex memory map like flash
-        #self.tpu = ETPU2(self)
 
         ########################################
 
@@ -458,16 +530,16 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
 
         self.fmpll = FMPLL(self, 0xC3F80000)
         self.ebi = EBI(self, 0xC3F84000)
+
+        # Now the FLASH configuration regions
         self.flash.setAddr(self, FlashDevice.FLASH_A_CONFIG, 0xC3F88000)
         self.flash.setAddr(self, FlashDevice.FLASH_B_CONFIG, 0xC3F8C000)
+
         self.siu = SIU(self, 0xC3F90000)
-        #self.mios = EMIOS(self, 0xC3FA0000)
+        self.mios = eMIOS200(self, 0xC3FA0000)
         #self.pmc = PMC(self, 0xC3FBC000)
-        #self.tpu.setAddr(self, ETPU2Device.Registers, 0xC3FC0000)
-        #self.tpu.setAddr(self, ETPU2Device.ParamRAM,0xC3FC8000)
-        #self.tpu.setAddr(self, ETPU2Device.ParamRAMMirror, 0xC3FCC000)
-        #self.tpu.setAddr(self, ETPU2Device.CodeRAM, 0xC3FD0000)
-        #self.pit = PIT_RTI(self, 0xC3FF0000)
+        self.tpu = eTPU2(self, 0xC3FC0000)
+        self.pit = PIT(self, 0xC3FF0000)
 
         ########################################
         # PBRIDGE_B
@@ -478,14 +550,14 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         self.swt = SWT(self, 0xFFF38000)
         # self.stm = STM(self, 0xFFF3C000)
         self.ecsm = ECSM(self, 0xFFF40000)
-        #self.dma = (
-        #        EDMA('eDMA_A', self, 0xFFF44000),
-        #        EDMA('eDMA_B', self, 0xFFF54000),
-        #)
+        self.dma = (
+                eDMA('eDMA_A', self, 0xFFF44000),
+                eDMA('eDMA_B', self, 0xFFF54000),
+        )
         self.intc = INTC(self, 0xFFF48000)
         self.eqadc = (
-            EQADC('eQADC_A', self, 0xFFF80000),
-            EQADC('eQADC_B', self, 0xFFF84000),
+            eQADC('eQADC_A', self, 0xFFF80000),
+            eQADC('eQADC_B', self, 0xFFF84000),
         )
         self.decfilt = (
             DECFILT('DECFILT_A', self, 0xFFF88000),
@@ -503,11 +575,11 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
             DSPI('DSPI_C', self, 0xFFF98000),
             DSPI('DSPI_D', self, 0xFFF9C000),
         )
-        #self.sci = (
-        #    ESCI('eSCI_A', self, 0xFFFB0000),
-        #    ESCI('eSCI_B', self, 0xFFFB4000),
-        #    ESCI('eSCI_C', self, 0xFFFB8000),
-        #)
+        self.sci = (
+            eSCI('eSCI_A', self, 0xFFFB0000),
+            eSCI('eSCI_B', self, 0xFFFB4000),
+            eSCI('eSCI_C', self, 0xFFFB8000),
+        )
         self.can = (
             FlexCAN('FlexCAN_A', self, 0xFFFC0000),
             FlexCAN('FlexCAN_B', self, 0xFFFC4000),
@@ -527,6 +599,8 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
 
         # Complete initialization of the e200z7 core
         self.init_core()
+
+        return
 
         # TODO: Initialize stack memory base address, taints, etc.
 
@@ -592,7 +666,7 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
                     raise envi.SegmentationViolation('Bad Memory Access: 0x%x', va) from exc
             self.vw.getByteDef = types.MethodType(_getByteDef, self.vw)
 
-    def _process_args(self):
+    def _process_args(self, args):
         """
         Indicate that the supplied file can be used as an initial flash image if
         - The file is large enough to contain the main and shadow flash A & B
@@ -604,8 +678,6 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         2. Update the workspace configuration to indicate if main flash and
            shadow flash data, or only main flash will be loaded from the file
         """
-        args = self.vw.getTransMeta('ProjectCliArgs')
-
         # Track if this is a new configuration directory or not (needed by
         # init_flash)
         if args.config_dir != False and not os.path.isdir(self.vw.vivhome):
@@ -616,12 +688,17 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         else:
             new_config = False
 
+        # Use the EnviConfig.cfginfo attribute directly so we can overwrite the
+        # running configuration values for a specific run of the emulator. Such
+        # as a overwriting a valid 'fwFilename' path temporarily when the
+        # "--init-flash" argument is provided but no "flash_image" is provided
+        # (indicating an empty firmware should be initialized).
         cfg = self.vw.config.project.MPC5674.FLASH.cfginfo
         orig_flash_file = cfg['fwFilename']
         cfg_flash_file = self.get_project_path(DEFAULT_FLASH_FILENAME)
 
         mode = self.vw.getTransMeta("ProjectMode")
-        updated_config = getFlashOffsets(args.flash_image, cfg)
+        updated_config = getFlashOffsets(args.flash_image)
 
         if args.config_dir != False and args.init_flash:
             # Update the configuration in the workspace with the values
@@ -679,27 +756,27 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         if not cfg['fwFilename'] and mode != 'test':
             logger.critical('No flash file provided, unable to load flash image')
 
-    def reset_ram(self):
+        # Lastly, if the --no-backup option was provided, remove the backup file
+        # name from the config for this run
+        if args.no_backup:
+            # Set to an empty string instead of None because otherwise
+            # retreiving this field through project.MPC5674.FLASH.backup throws
+            # an error
+            cfg['backup'] = ''
+
+    def reset(self):
+        logger.info("RESET")
+
         # Clear or initialize SRAM and external RAM
         size = self.vw.config.project.MPC5674.SRAM.size
         addr = self.vw.config.project.MPC5674.SRAM.addr
-        if size and addr:
-            for i in range(len(self._map_defs)):
-                mva, mmaxva, mmap, _ = self._map_defs[i]
-                if mva == addr:
-                    logger.debug("reset: clearing 0x%x bytes SRAM at BASE: 0x%x", size, addr)
-                    # Each map entry is a tuple so we must replace the entire
-                    # entry
-                    self._map_defs[i] = (mva, mmaxva, mmap, b'\0' * size)
-                    break
-            else:
-               # The initial SRAM memory block must be created
-                logger.debug("reset: Initializing 0x%x bytes SRAM at BASE: 0x%x", size, addr)
-                self.addMemoryMap(addr, e_mem.MM_RWX, 'SRAM', b'\0' * size)
+        standby_size = self.vw.config.project.MPC5674.SRAM.standby_size
 
-    def reset(self):
-        # Clear RAM
-        self.reset_ram()
+        start = addr + standby_size
+        end = addr + size
+        logger.debug("reset: clearing SRAM 0x%08x - 0x%08x",
+                addr + standby_size, addr + size)
+        self.writeMemory(start, b'\x00' * (end - start))
 
         # Reset the e200z7 core
         self.reset_core()
@@ -709,7 +786,7 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         load firmware into the emulator
         '''
         # Get the FLASH configuration info as a dict
-        cfg = self.vw.config.project.MPC5674.FLASH.cfginfo
+        cfg = self.vw.config.project.MPC5674.FLASH
 
         # Assume that the filenames are files in the project directory
 
@@ -725,7 +802,7 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
                 logger.info("Loading Firmware Blob from %r @ 0x%x", path, cfg['baseaddr'])
                 self.flash.load(FlashDevice.FLASH_MAIN, path, cfg['baseaddr'])
             else:
-                logger.critical("Starting emulator without valid firmware, please update config: %s" % self.vw.vivhome)
+                logger.critical("Starting emulator without valid firmware, please update config: %s", self.vw.vivhome)
 
         if cfg['shadowAFilename']:
             # First check if the file can be found without adding the project
@@ -759,7 +836,17 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
             self.flash.load_complete()
 
     def init_core(self):
-        self.reset_ram()
+        logger.info('INIT')
+
+        # Create the initial RAM data (it isn't all cleared out during reset)
+        size = self.vw.config.project.MPC5674.SRAM.size
+        addr = self.vw.config.project.MPC5674.SRAM.addr
+
+        # The initial SRAM memory block must be created
+        logger.debug("init: Initializing SRAM 0x%08x - 0x%08x",
+                addr, addr + size)
+        self.addMemoryMap(addr, e_mem.MM_RWX, 'SRAM', b'\x00' * size)
+
         e200z7.PPC_e200z7.init_core(self)
 
 
@@ -784,7 +871,6 @@ class int_test:
             if not item.startswith('test_'):
                 continue
             results = getattr(self, item)(count=count)
-            print("%-30s: %r" % (item, results))
 
 
     def test_static(self, count=10000000):

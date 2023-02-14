@@ -20,14 +20,18 @@ BAM_RCHW_SIZE     = 8
 class RCHW(VBitField):
     def __init__(self):
         VBitField.__init__(self)
-        self.rsvd = v_bits(4)
-        self.swt = v_bits(1)
-        self.wte = v_bits(1)
-        self.ps0 = v_bits(1)
-        self.vle = v_bits(1)
-        self.bootid = v_bits(8)
-        self._pad0 = v_bits(16)
-        self.entry_point = v_bits(32)
+
+        # VBitField doesn't use the bigend parameter so we must set it manually.
+        # Because this is used during boot the PPC RCHW will _always_ be big
+        # endian.
+        self.rsvd = v_bits(4, bigend=True)
+        self.swt = v_bits(1, bigend=True)
+        self.wte = v_bits(1, bigend=True)
+        self.ps0 = v_bits(1, bigend=True)
+        self.vle = v_bits(1, bigend=True)
+        self.bootid = v_bits(8, bigend=True)
+        self._pad0 = v_bits(16, bigend=True)
+        self.entry_point = v_bits(32, bigend=True)
 
 
 class BAM(MMIOPeripheral):
@@ -39,8 +43,6 @@ class BAM(MMIOPeripheral):
     '''
     def __init__(self, emu, mmio_addr):
         super().__init__(emu, 'BAM', mmio_addr, 0x4000)
-
-        self._siuconfig = emu.vw.config.project.MPC5674.SIU
 
         # Values that are populated after the boot target has been found
         self.rchw = RCHW()
@@ -81,7 +83,7 @@ class BAM(MMIOPeripheral):
         #
         # TODO: Theoretically this should support both external and internal
         # boot targets.
-        if self._siuconfig.bootcfg == 0b00:
+        if self.emu.siu.bootcfg == 0b00:
             # BOOTCFG == 0b00 means internal boot
             for offset in (0x0000, 0x4000, 0x10000, 0x1C000, 0x20000, 0x30000):
                 # BAM needs to set the initial MMU/TLB config so until that
@@ -97,7 +99,7 @@ class BAM(MMIOPeripheral):
                     self.rchw.vsParse(self.emu.flash.readMemory(offset, BAM_RCHW_SIZE))
                     return True
         else:
-            raise NotImplementedError('BOOTCFG 0b%s not yet supported' % bin(self._siuconfig.bootcfg))
+            raise NotImplementedError('BOOTCFG 0b%s not yet supported' % bin(self.emu.siu.bootcfg))
 
         mode = self.emu.vw.getTransMeta("ProjectMode")
         if mode != 'test':

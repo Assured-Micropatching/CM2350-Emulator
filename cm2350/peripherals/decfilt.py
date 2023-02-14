@@ -49,7 +49,7 @@ class DECFILT_x_MCR(PeriphRegister):
         self.ftype = v_bits(2)
         self._pad2 = v_const(1)
         self.scal = v_bits(2)
-        self.idis = v_defaultbits(1, 1)
+        self.idis = v_bits(1, 1)
         self.sat = v_bits(1)
         self.io_sel = v_bits(2)
         self.dec_rate = v_bits(4)
@@ -240,8 +240,8 @@ class DECFILT_x_COUNT(PeriphRegister):
         self.count = v_const(32)
 
 class DECFILT_REGISTERS(PeripheralRegisterSet):
-    def __init__(self, emu=None):
-        super().__init__(emu)
+    def __init__(self):
+        super().__init__()
 
         self.mcr     = (DECFILT_MCR_OFFSET,     DECFILT_x_MCR())
         self.msr     = (DECFILT_MSR_OFFSET,     DECFILT_x_MSR())
@@ -249,8 +249,8 @@ class DECFILT_REGISTERS(PeripheralRegisterSet):
         self.mxsr    = (DECFILT_MXSR_OFFSET,    DECFILT_x_MXSR())
         self.ib      = (DECFILT_IB_OFFSET,      DECFILT_x_IB())
         self.ob      = (DECFILT_OB_OFFSET,      DECFILT_x_OB())
-        self.coef    = (DECFILT_COEF_OFFSET,    VArray([DECFILT_x_VALUE() for i in range(DECFILT_NUM_COEF)]))
-        self.tap     = (DECFILT_TAP_OFFSET,     VArray([DECFILT_x_VALUE() for i in range(DECFILT_NUM_TAP)]))
+        self.coef    = (DECFILT_COEF_OFFSET,    VTuple([DECFILT_x_VALUE() for i in range(DECFILT_NUM_COEF)]))
+        self.tap     = (DECFILT_TAP_OFFSET,     VTuple([DECFILT_x_VALUE() for i in range(DECFILT_NUM_TAP)]))
         self.edid    = (DECFILT_EDID_OFFSET,    DECFILT_x_EDID())
         self.fintval = (DECFILT_FINTVAL_OFFSET, DECFILT_x_VALUE())
         self.fintcnt = (DECFILT_FINTCNT_OFFSET, DECFILT_x_COUNT())
@@ -265,7 +265,7 @@ class DECFILT(MMIOPeripheral):
         self.registers.vsAddParseCallback('mcr', self.mcrUpdate)
         self.registers.vsAddParseCallback('mxcr', self.mxcrUpdate)
         self.registers.vsAddParseCallback('ib', self.ibUpdate)
-        self.registers.vsAddParseCallback('by_idx_coef', self.coefUpdate)
+        self.registers.coef.vsAddParseCallback('by_idx', self.coefUpdate)
 
     def softReset(self):
         """
@@ -292,7 +292,7 @@ class DECFILT(MMIOPeripheral):
     def ibUpdate(self, thing):
         self.newInput()
 
-    def coefUpdate(self, thing, idx, size):
+    def coefUpdate(self, thing, idx, size, **kwargs):
         # Take the 24-bit 2's compliment value and sign extend it
         coef = self.registers.coef[idx].value
         if coef & DECFILT_COEF_SIGN:

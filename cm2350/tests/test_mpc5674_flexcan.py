@@ -1,25 +1,19 @@
-import unittest
-import random
-import queue
-import time
+import gc
 import os
+import time
 import random
 import struct
-import gc
-import sys
-
-from .. import CM2350
-from cm2350 import intc_exc
-
-import envi.archs.ppc.const as eapc
-import envi.archs.ppc.regs as eapr
+import unittest
 
 from .. import intc_exc
 from ..peripherals import flexcan
 from ..ppc_peripherals import ExternalIOClient
 
+from .helpers import MPC5674_Test
+
 import logging
 logger = logging.getLogger(__name__)
+
 
 FLEXCAN_DEVICES = (
     ('FlexCAN_A', 0XFFFC0000),
@@ -212,51 +206,7 @@ def read_mb_data(emu, dev, mb):
     return b''.join(emu.readMemory(a, size) for a in range(start, stop, size))
 
 
-class MPC5674_FlexCAN_Test(unittest.TestCase):
-    def get_random_pc(self):
-        start, end, perms, filename = self.emu.getMemoryMap(0)
-        return random.randrange(start, end, 4)
-
-    def setUp(self):
-        # Specify mode "test" and a non-existing directory for the configuration
-        # location to use (so the user's configuration is not used)
-        if os.environ.get('LOG_LEVEL', 'INFO') == 'DEBUG':
-            args = ['-m', 'test', '-c', '-vvv']
-        else:
-            args = ['-m', 'test', '-c']
-        self.ECU = CM2350(args)
-        self.emu = self.ECU.emu
-
-        # Set the INTC[CPR] to 0 to allow all peripheral (external) exception
-        # priorities to happen
-        self.emu.intc.registers.cpr.pri = 0
-        msr_val = self.emu.getRegister(eapr.REG_MSR)
-
-        # Enable all possible Exceptions so if anything happens it will be
-        # detected by the _getPendingExceptions utility
-        msr_val |= eapc.MSR_EE_MASK | eapc.MSR_CE_MASK | eapc.MSR_ME_MASK | eapc.MSR_DE_MASK
-        self.emu.setRegister(eapr.REG_MSR, msr_val)
-
-        # Enable the timebase (normally done by writing a value to HID0)
-        self.emu.enableTimebase()
-
-    def _getPendingExceptions(self):
-        pending_excs = []
-        for intq in self.emu.mcu_intc.intqs[1:]:
-            try:
-                while True:
-                    pending_excs.append(intq.get_nowait())
-            except queue.Empty:
-                pass
-        return pending_excs
-
-    def tearDown(self):
-        # Ensure that there are no unprocessed exceptions
-        pending_excs = self._getPendingExceptions()
-        for exc in pending_excs:
-            print('Unhanded PPC Exception %s' % exc)
-        self.assertEqual(pending_excs, [])
-
+class MPC5674_FlexCAN_Test(MPC5674_Test):
     def set_sysclk_240mhz(self):
         # Default PLL clock based on the PCB params selected for these tests is
         # 60 MHz
@@ -400,6 +350,7 @@ class MPC5674_FlexCAN_Test(unittest.TestCase):
 
         # CAN A
         self.emu.can[0]._timer.start()
+        time.sleep(0.1)
         self.assertNotEqual(self.emu.readMemory(test_addrs[0], 4), b'\x00\x00\x00\x00')
         self.assertNotEqual(self.emu.readMemValue(test_addrs[0], 4), 0x00000000)
 
@@ -416,6 +367,7 @@ class MPC5674_FlexCAN_Test(unittest.TestCase):
 
         # CAN B
         self.emu.can[1]._timer.start()
+        time.sleep(0.1)
         self.assertNotEqual(self.emu.readMemory(test_addrs[1], 4), b'\x00\x00\x00\x00')
         self.assertNotEqual(self.emu.readMemValue(test_addrs[1], 4), 0x00000000)
 
@@ -432,6 +384,7 @@ class MPC5674_FlexCAN_Test(unittest.TestCase):
 
         # CAN C
         self.emu.can[2]._timer.start()
+        time.sleep(0.1)
         self.assertNotEqual(self.emu.readMemory(test_addrs[2], 4), b'\x00\x00\x00\x00')
         self.assertNotEqual(self.emu.readMemValue(test_addrs[2], 4), 0x00000000)
 
@@ -448,6 +401,7 @@ class MPC5674_FlexCAN_Test(unittest.TestCase):
 
         # CAN D
         self.emu.can[3]._timer.start()
+        time.sleep(0.1)
         self.assertNotEqual(self.emu.readMemory(test_addrs[3], 4), b'\x00\x00\x00\x00')
         self.assertNotEqual(self.emu.readMemValue(test_addrs[3], 4), 0x00000000)
 
@@ -469,7 +423,7 @@ class MPC5674_FlexCAN_Test(unittest.TestCase):
 
             self.assertEqual(self.emu.readMemory(addr, 4), b'\xff\xff\xff\xff')
             self.assertEqual(self.emu.readMemValue(addr, 4), 0xffffffff)
-            self.assertEqual(self.emu.can[idx].registers.rxgmask.mask, 0xffffffff)
+            self.assertEqual(self.emu.can[idx].registers.rxgmask, 0xffffffff)
 
     def test_flexcan_rx14mask_defaults(self):
         for idx in range(4):
@@ -478,7 +432,7 @@ class MPC5674_FlexCAN_Test(unittest.TestCase):
 
             self.assertEqual(self.emu.readMemory(addr, 4), b'\xff\xff\xff\xff')
             self.assertEqual(self.emu.readMemValue(addr, 4), 0xffffffff)
-            self.assertEqual(self.emu.can[idx].registers.rx14mask.mask, 0xffffffff)
+            self.assertEqual(self.emu.can[idx].registers.rx14mask, 0xffffffff)
 
     def test_flexcan_rx15mask_defaults(self):
         for idx in range(4):
@@ -487,7 +441,7 @@ class MPC5674_FlexCAN_Test(unittest.TestCase):
 
             self.assertEqual(self.emu.readMemory(addr, 4), b'\xff\xff\xff\xff')
             self.assertEqual(self.emu.readMemValue(addr, 4), 0xffffffff)
-            self.assertEqual(self.emu.can[idx].registers.rx15mask.mask, 0xffffffff)
+            self.assertEqual(self.emu.can[idx].registers.rx15mask, 0xffffffff)
 
     def test_flexcan_ecr_defaults(self):
         for idx in range(4):
@@ -531,22 +485,22 @@ class MPC5674_FlexCAN_Test(unittest.TestCase):
             # IMASK1
             self.assertEqual(self.emu.readMemory(addr1, 4), b'\x00\x00\x00\x00')
             self.assertEqual(self.emu.readMemValue(addr1, 4), 0x00000000)
-            self.assertEqual(self.emu.can[idx].registers.imask1.mask, 0x00000000)
+            self.assertEqual(self.emu.can[idx].registers.imask1, 0x00000000)
 
             self.emu.writeMemory(addr1, b'\xff\xff\xff\xff')
             self.assertEqual(self.emu.readMemory(addr1, 4), b'\xff\xff\xff\xff')
             self.assertEqual(self.emu.readMemValue(addr1, 4), 0xffffffff)
-            self.assertEqual(self.emu.can[idx].registers.imask1.mask, 0xffffffff)
+            self.assertEqual(self.emu.can[idx].registers.imask1, 0xffffffff)
 
             # IMASK2
             self.assertEqual(self.emu.readMemory(addr2, 4), b'\x00\x00\x00\x00')
             self.assertEqual(self.emu.readMemValue(addr2, 4), 0x00000000)
-            self.assertEqual(self.emu.can[idx].registers.imask2.mask, 0x00000000)
+            self.assertEqual(self.emu.can[idx].registers.imask2, 0x00000000)
 
             self.emu.writeMemory(addr2, b'\xff\xff\xff\xff')
             self.assertEqual(self.emu.readMemory(addr2, 4), b'\xff\xff\xff\xff')
             self.assertEqual(self.emu.readMemValue(addr2, 4), 0xffffffff)
-            self.assertEqual(self.emu.can[idx].registers.imask2.mask, 0xffffffff)
+            self.assertEqual(self.emu.can[idx].registers.imask2, 0xffffffff)
 
     def test_flexcan_iflag_defaults(self):
         for idx in range(4):
@@ -557,48 +511,48 @@ class MPC5674_FlexCAN_Test(unittest.TestCase):
             # IFLAG1
             self.assertEqual(self.emu.readMemory(addr1, 4), b'\x00\x00\x00\x00')
             self.assertEqual(self.emu.readMemValue(addr1, 4), 0x00000000)
-            self.assertEqual(self.emu.can[idx].registers.iflag1.flag, 0x00000000)
+            self.assertEqual(self.emu.can[idx].registers.iflag1, 0x00000000)
 
             # Ensure the flag1 register are w1c and can't be set by writing
             self.emu.writeMemory(addr1, b'\xff\xff\xff\xff')
             self.assertEqual(self.emu.readMemory(addr1, 4), b'\x00\x00\x00\x00')
             self.assertEqual(self.emu.readMemValue(addr1, 4), 0x00000000)
-            self.assertEqual(self.emu.can[idx].registers.iflag1.flag, 0x00000000)
+            self.assertEqual(self.emu.can[idx].registers.iflag1, 0x00000000)
 
-            self.emu.can[idx].registers.iflag1.vsOverrideValue('flag', 0xffffffff)
+            self.emu.can[idx].registers.vsOverrideValue('iflag1', 0xffffffff)
 
             self.assertEqual(self.emu.readMemory(addr1, 4), b'\xff\xff\xff\xff')
             self.assertEqual(self.emu.readMemValue(addr1, 4), 0xffffffff)
-            self.assertEqual(self.emu.can[idx].registers.iflag1.flag, 0xffffffff)
+            self.assertEqual(self.emu.can[idx].registers.iflag1, 0xffffffff)
 
             # Clear some flags
             self.emu.writeMemory(addr1, b'\xa5\xa5\xa5\xa5')
             self.assertEqual(self.emu.readMemory(addr1, 4), b'\x5a\x5a\x5a\x5a')
             self.assertEqual(self.emu.readMemValue(addr1, 4), 0x5a5a5a5a)
-            self.assertEqual(self.emu.can[idx].registers.iflag1.flag, 0x5a5a5a5a)
+            self.assertEqual(self.emu.can[idx].registers.iflag1, 0x5a5a5a5a)
 
             # IFLAG2
             self.assertEqual(self.emu.readMemory(addr2, 4), b'\x00\x00\x00\x00')
             self.assertEqual(self.emu.readMemValue(addr2, 4), 0x00000000)
-            self.assertEqual(self.emu.can[idx].registers.iflag2.flag, 0x00000000)
+            self.assertEqual(self.emu.can[idx].registers.iflag2, 0x00000000)
 
             # Ensure the flag2 register are w1c and can't be set by writing
             self.emu.writeMemory(addr2, b'\xff\xff\xff\xff')
             self.assertEqual(self.emu.readMemory(addr2, 4), b'\x00\x00\x00\x00')
             self.assertEqual(self.emu.readMemValue(addr2, 4), 0x00000000)
-            self.assertEqual(self.emu.can[idx].registers.iflag2.flag, 0x00000000)
+            self.assertEqual(self.emu.can[idx].registers.iflag2, 0x00000000)
 
-            self.emu.can[idx].registers.iflag2.vsOverrideValue('flag', 0xffffffff)
+            self.emu.can[idx].registers.vsOverrideValue('iflag2', 0xffffffff)
 
             self.assertEqual(self.emu.readMemory(addr2, 4), b'\xff\xff\xff\xff')
             self.assertEqual(self.emu.readMemValue(addr2, 4), 0xffffffff)
-            self.assertEqual(self.emu.can[idx].registers.iflag2.flag, 0xffffffff)
+            self.assertEqual(self.emu.can[idx].registers.iflag2, 0xffffffff)
 
             # Clear some flags
             self.emu.writeMemory(addr2, b'\x5a\x5a\x5a\x5a')
             self.assertEqual(self.emu.readMemory(addr2, 4), b'\xa5\xa5\xa5\xa5')
             self.assertEqual(self.emu.readMemValue(addr2, 4), 0xa5a5a5a5)
-            self.assertEqual(self.emu.can[idx].registers.iflag2.flag, 0xa5a5a5a5)
+            self.assertEqual(self.emu.can[idx].registers.iflag2, 0xa5a5a5a5)
 
     def test_flexcan_modes(self):
         for idx in range(4):
@@ -1031,7 +985,7 @@ class MPC5674_FlexCAN_Test(unittest.TestCase):
                 expected_ticks = int(self.emu.can[dev].speed * tx_delay * self.emu._systime_scaling) & 0xFFFF
 
                 ts_offset = (mb * FLEXCAN_MBx_SIZE) + 2
-                timestamp = struct.unpack_from('>H', self.emu.can[dev].registers.mb, ts_offset)[0]
+                timestamp = struct.unpack_from('>H', self.emu.can[dev].registers.mb.value, ts_offset)[0]
 
                 self.assertAlmostEqual(timestamp, expected_ticks, delta=margin, msg=testmsg)
 
@@ -1057,7 +1011,7 @@ class MPC5674_FlexCAN_Test(unittest.TestCase):
                             flexcan.FLEXCAN_CODE_TX_INACTIVE, msg=testmsg)
 
                     ts_offset = (mb * FLEXCAN_MBx_SIZE) + 2
-                    timestamp = struct.unpack_from('>H', self.emu.can[dev].registers.mb, ts_offset)[0]
+                    timestamp = struct.unpack_from('>H', self.emu.can[dev].registers.mb.value, ts_offset)[0]
                     self.assertEqual(timestamp, 0, msg=testmsg)
                     ts_addr = baseaddr + FLEXCAN_MB_OFFSET + ts_offset
                     self.assertEqual(self.emu.readMemValue(ts_addr, 2), 0, msg=testmsg)
@@ -1169,7 +1123,7 @@ class MPC5674_FlexCAN_Test(unittest.TestCase):
                 expected_ticks = int(self.emu.can[dev].speed * rx_delay * self.emu._systime_scaling) & 0xFFFF
 
                 ts_offset = (mb * FLEXCAN_MBx_SIZE) + 2
-                timestamp = struct.unpack_from('>H', self.emu.can[dev].registers.mb, ts_offset)[0]
+                timestamp = struct.unpack_from('>H', self.emu.can[dev].registers.mb.value, ts_offset)[0]
                 self.assertAlmostEqual(timestamp, expected_ticks, delta=margin, msg=testmsg)
 
                 last_mb = mb
@@ -1423,56 +1377,14 @@ class MPC5674_FlexCAN_Test(unittest.TestCase):
         pass
 
 
-class MPC5674_FlexCAN_RealIO(unittest.TestCase):
-    def setUp(self):
-        # This test does not specify the "test" mode so that the normal
-        # peripheral IO can happen
-        #
-        # Specify non-existing directory for the configuration
-        # location to use (so the user's configuration is not used)
-        #
-        # Also explicitly supply the FlexCAN server port numbers here
-        args = [
-            '-c',
-            '-O', 'project.MPC5674.FlexCAN_A.port=10001',
-            '-O', 'project.MPC5674.FlexCAN_B.port=10002',
-            '-O', 'project.MPC5674.FlexCAN_C.port=10003',
-            '-O', 'project.MPC5674.FlexCAN_D.port=10004',
-        ]
-        if os.environ.get('LOG_LEVEL', 'INFO') == 'DEBUG':
-            args.append('-vvv')
-        self.ECU = CM2350(args)
-        self.emu = self.ECU.emu
-
-        # Set the INTC CPR[PRI] to 0 to allow all peripheral (external)
-        # exception priorities to happen
-        self.emu.intc.registers.cpr.pri = 0
-
-        # Enable all possible Exceptions so if anything happens it will be
-        # detected by the _getPendingExceptions utility
-        msr_val = self.emu.getRegister(eapr.REG_MSR)
-        msr_val |= eapc.MSR_EE_MASK | eapc.MSR_CE_MASK | eapc.MSR_ME_MASK | eapc.MSR_DE_MASK
-        self.emu.setRegister(eapr.REG_MSR, msr_val)
-
-        # Enable the timebase (normally done by writing a value to HID0)
-        self.emu.enableTimebase()
-
-    def _getPendingExceptions(self):
-        pending_excs = []
-        for intq in self.emu.mcu_intc.intqs[1:]:
-            try:
-                while True:
-                    pending_excs.append(intq.get_nowait())
-            except queue.Empty:
-                pass
-        return pending_excs
-
-    def tearDown(self):
-        # Ensure that there are no unprocessed exceptions
-        pending_excs = self._getPendingExceptions()
-        for exc in pending_excs:
-            print('Unhanded PPC Exception %s' % exc)
-        self.assertEqual(pending_excs, [])
+class MPC5674_FlexCAN_RealIO(MPC5674_Test):
+    args = [
+        '-c',
+        '-O', 'project.MPC5674.FlexCAN_A.port=10001',
+        '-O', 'project.MPC5674.FlexCAN_B.port=10002',
+        '-O', 'project.MPC5674.FlexCAN_C.port=10003',
+        '-O', 'project.MPC5674.FlexCAN_D.port=10004',
+    ]
 
     def set_sysclk_240mhz(self):
         # Default PLL clock based on the PCB params selected for these tests is
@@ -1642,7 +1554,7 @@ class MPC5674_FlexCAN_RealIO(unittest.TestCase):
             self.emu.stepi()
             cur_pc = pc + 4
             self.assertEqual(self.emu.getProgramCounter(), cur_pc, devname)
-            self.assertEqual(self.emu.mcu_intc.exc_count, 0, devname)
+            self.assertEqual(len(self.emu.mcu_intc.pending), 0, devname)
             self.assertEqual(self.emu.intc._cur_exc, None, devname)
 
             # Confirm that INTC CPR is 0
@@ -1659,8 +1571,7 @@ class MPC5674_FlexCAN_RealIO(unittest.TestCase):
             # after the first instruction in the handler
             self.emu.stepi()
             self.assertEqual(self.emu.getProgramCounter(), mb0_handler_addr, devname)
-            # TODO: is exc_count tracking what I thought it was?
-            self.assertEqual(self.emu.mcu_intc.exc_count, 1, devname)
+            self.assertEqual(len(self.emu.mcu_intc.pending), 1, devname)
             self.assertEqual(self.emu.intc._cur_exc, mb0_int, devname)
 
             # Because we are using hardware vectoring the INTC CPR should
@@ -1688,7 +1599,7 @@ class MPC5674_FlexCAN_RealIO(unittest.TestCase):
             self.emu.stepi()
             self.assertEqual(self.emu.getProgramCounter(), cur_pc, devname)
             # The loopback Rx interrupt should be pending now
-            self.assertEqual(self.emu.mcu_intc.exc_count, 1, devname)
+            self.assertEqual(len(self.emu.mcu_intc.pending), 1, devname)
             # But it is not yet being processed
             self.assertEqual(self.emu.intc._cur_exc, None, devname)
 
@@ -1698,7 +1609,7 @@ class MPC5674_FlexCAN_RealIO(unittest.TestCase):
             self.assertEqual(self.emu.getProgramCounter(), mb1_handler_addr, devname)
             # Now that the external interrupt is being processed there is no
             # longer 1 pending PPC Exception
-            self.assertEqual(self.emu.mcu_intc.exc_count, 0, devname)
+            self.assertEqual(len(self.emu.mcu_intc.pending), 0, devname)
             self.assertEqual(self.emu.intc._cur_exc, mb1_int, devname)
 
             # Confirm INTC CPR is now the MB1 priority
@@ -1714,7 +1625,7 @@ class MPC5674_FlexCAN_RealIO(unittest.TestCase):
             # Verify the received message data (this should match the message
             # that was transmitted from MB0
             mb1_idx = 1 * FLEXCAN_MBx_SIZE
-            rcvd_msg = flexcan.CanMsg.from_mb(self.emu.can[dev].registers.mb, offset=mb1_idx)
+            rcvd_msg = flexcan.CanMsg.from_mb(self.emu.can[dev].registers.mb.value, offset=mb1_idx)
             self.assertEqual(rcvd_msg, tx_msg, devname)
 
             # To mimic the way an ISR should work write to EOIR now
@@ -1727,7 +1638,7 @@ class MPC5674_FlexCAN_RealIO(unittest.TestCase):
             # to the previous PC
             self.emu.stepi()
             self.assertEqual(self.emu.getProgramCounter(), cur_pc, devname)
-            self.assertEqual(self.emu.mcu_intc.exc_count, 0, devname)
+            self.assertEqual(len(self.emu.mcu_intc.pending), 0, devname)
             self.assertEqual(self.emu.intc._cur_exc, None, devname)
 
             # Ensure that this message was correctly received by the client
@@ -1766,7 +1677,7 @@ class MPC5674_FlexCAN_RealIO(unittest.TestCase):
                 # which means that the exception count is still 0
                 # TODO: this may be 0 or 1 depending on if the exception is
                 # queued yet
-                #self.assertEqual(self.emu.mcu_intc.exc_count, 0, devname)
+                #self.assertEqual(len(self.emu.mcu_intc.pending), 0, devname)
                 self.assertEqual(self.emu.intc._cur_exc, None, devname)
 
                 # one more instruction
@@ -1776,7 +1687,7 @@ class MPC5674_FlexCAN_RealIO(unittest.TestCase):
             self.assertEqual(self.emu.getProgramCounter(), mb1_handler_addr, devname)
             # Now that the external interrupt is being processed there is no
             # longer 1 pending PPC Exception
-            self.assertEqual(self.emu.mcu_intc.exc_count, 0, devname)
+            self.assertEqual(len(self.emu.mcu_intc.pending), 0, devname)
             self.assertEqual(self.emu.intc._cur_exc, mb1_int, devname)
 
             # Confirm INTC CPR is now the MB1 priority
@@ -1792,7 +1703,7 @@ class MPC5674_FlexCAN_RealIO(unittest.TestCase):
             # Verify the received message data (this should match the message
             # that was transmitted from the client
             mb1_idx = 1 * FLEXCAN_MBx_SIZE
-            rcvd_msg = flexcan.CanMsg.from_mb(self.emu.can[dev].registers.mb, offset=mb1_idx)
+            rcvd_msg = flexcan.CanMsg.from_mb(self.emu.can[dev].registers.mb.value, offset=mb1_idx)
             self.assertEqual(rcvd_msg, rx_msg, devname)
 
             # To mimic the way an ISR should work write to EOIR now
@@ -1805,7 +1716,7 @@ class MPC5674_FlexCAN_RealIO(unittest.TestCase):
             # to the previous PC
             self.emu.stepi()
             self.assertEqual(self.emu.getProgramCounter(), cur_pc, devname)
-            self.assertEqual(self.emu.mcu_intc.exc_count, 0, devname)
+            self.assertEqual(len(self.emu.mcu_intc.pending), 0, devname)
             self.assertEqual(self.emu.intc._cur_exc, None, devname)
 
             client.close()

@@ -3,7 +3,6 @@ logger = logging.getLogger(__name__)
 
 import envi
 import envi.memory as e_mem
-from vstruct.bitfield import *
 from envi.archs.ppc.regs import rctx64, REG_TSR, REG_TCR, REG_HID0, REG_HID1, REG_TBU, REG_TB, REG_TBU_WO, REG_TBL_WO
 from .ppc_vstructs import BitFieldSPR, v_const
 
@@ -23,8 +22,8 @@ __all__ = [
 # e200z4-specific SPRs
 
 class HID0(BitFieldSPR):
-    def __init__(self, emu, bigend=True):
-        BitFieldSPR.__init__(self, REG_HID0, emu, bigend)
+    def __init__(self, emu):
+        BitFieldSPR.__init__(self, REG_HID0, emu)
         self.emcp = v_bits(1)
         self._pad0 = v_const(13)
         self.icr = v_bits(1)
@@ -38,8 +37,8 @@ class HID0(BitFieldSPR):
         self.nopti = v_bits(1)
 
 class HID1(BitFieldSPR):
-    def __init__(self, emu, bigend=True):
-        BitFieldSPR.__init__(self, REG_HID1, emu, bigend)
+    def __init__(self, emu):
+        BitFieldSPR.__init__(self, REG_HID1, emu)
         self.pad0 = v_bits(22)
         self.hp_nor = v_bits(1)
         self.hp_nmi = v_bits(1)
@@ -52,7 +51,7 @@ class TSR(BitFieldSPR):
 
     Note: the VBitField stored here is *not* the real register value
     '''
-    def __init__(self, emu, bigend=True):
+    def __init__(self, emu):
         VBitField.__init__(self)
         self.enw = v_bits(1)
         self.wis = v_bits(1)
@@ -67,7 +66,7 @@ class TCR(BitFieldSPR):
 
     Note: the VBitField stored here is *not* the real register value
     '''
-    def __init__(self, emu, bigend=True):
+    def __init__(self, emu):
         VBitField.__init__(self)
         self.wp = v_bits(2)
         self.wrc = v_bits(2)

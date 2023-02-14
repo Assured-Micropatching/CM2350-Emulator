@@ -32,7 +32,7 @@ class FMPLL_ESYNCR1(PeriphRegister):
         self._pad1 = v_const(8)
         self.eprediv = v_bits(4)
         self._pad2 = v_const(8)
-        self.emfd = v_defaultbits(8, 0x20)
+        self.emfd = v_bits(8, 0x20)
 
 class FMPLL_ESYNCR2(PeriphRegister):
     def __init__(self):
@@ -49,7 +49,7 @@ class FMPLL_ESYNCR2(PeriphRegister):
         self._pad2 = v_const(4)
         self.edepth = v_bits(3)
         self._pad3 = v_const(2)
-        self.erfd = v_defaultbits(6, 0x07)
+        self.erfd = v_bits(6, 0x07)
 
 class FMPLL_SYNFMCR(PeriphRegister):
     def __init__(self):
@@ -62,8 +62,8 @@ class FMPLL_SYNFMCR(PeriphRegister):
 
 
 class FMPLL_REGISTERS(PeripheralRegisterSet):
-    def __init__(self, emu=None):
-        super().__init__(emu)
+    def __init__(self):
+        super().__init__()
 
         self.synsr   = (0x0004, FMPLL_SYNSR())
         self.esyncr1 = (0x0008, FMPLL_ESYNCR1())
@@ -79,10 +79,10 @@ class FMPLL(MMIOPeripheral):
         # need to hook a MMIO mmiodev at 0xc3f80000 of size 0x4000
         super().__init__(emu, 'FMPLL', mmio_addr, 0x4000, regsetcls=FMPLL_REGISTERS)
 
-        self._config = emu.vw.config.project.MPC5674.FMPLL
-        self._siu_config = emu.vw.config.project.MPC5674.SIU
+        # Create attribute to hold configured external oscillator value
+        self.extal = self._config.extal
 
-        # Place to save ESYNCR1[CLKCFG] to restore later if that field is 
+        # Place to save ESYNCR1[CLKCFG] to restore later if that field is
         # updated when it shouldn't be
         self._saved_clkcfg = None
 
@@ -130,19 +130,19 @@ class FMPLL(MMIOPeripheral):
 
         # If extal == 40MHz then PLLCFG[2] should be 1, if it is from 8MHz to
         # 20MHz then PLLCFG[2] should be 0
-        if ((self._siu_config.pllcfg & 1) == 1 and self._config.extal != 40000000) or \
-                ((self._siu_config.pllcfg & 1) == 0 and \
-                (self._config.extal < 8000000 or self._config.extal > 40000000)):
-            logger.warning('INVALID PLLCFG (%s) for external clock %f MHz', bin(self._siu_config.pllcfg), self._config.extal / 1000000)
+        if ((self.emu.siu.pllcfg & 1) == 1 and self.extal != 40000000) or \
+                ((self.emu.siu.pllcfg & 1) == 0 and \
+                (self.extal < 8000000 or self.extal > 40000000)):
+            logger.warning('INVALID PLLCFG (%s) for external clock %f MHz', bin(self.emu.siu.pllcfg), self.extal / 1000000)
 
         # Set the default ESYNCR1[CLKCFG] reset value
-        if self._siu_config.pllcfg & 0b110 == 0b000:
+        if self.emu.siu.pllcfg & 0b110 == 0b000:
             self.registers.esyncr1.clkcfg = 0b000
-        elif self._siu_config.pllcfg & 0b110 == 0b010:
+        elif self.emu.siu.pllcfg & 0b110 == 0b010:
             self.registers.esyncr1.clkcfg = 0b110
-        elif self._siu_config.pllcfg & 0b110 == 0b100:
+        elif self.emu.siu.pllcfg & 0b110 == 0b100:
             self.registers.esyncr1.clkcfg = 0b111
-        elif self._siu_config.pllcfg & 0b110 == 0b110:
+        elif self.emu.siu.pllcfg & 0b110 == 0b110:
             self.registers.esyncr1.clkcfg = 0b100
 
         # Save the current ESYNCR1[CLKCFG] value
@@ -151,13 +151,13 @@ class FMPLL(MMIOPeripheral):
         # The default ESYNCR1[EPREDIV] value is based on PLLCFG[2]:
         #   ESYNCR1[EPREDIV] = 0b0001 if PLLCFG[2] is 0
         #   ESYNCR1[EPREDIV] = 0b0011 if PLLCFG[2] is 1
-        if self._siu_config.pllcfg & 0b001 == 0b000:
+        if self.emu.siu.pllcfg & 0b001 == 0b000:
             self.registers.esyncr1.eprediv = 0b0001
         else:
             self.registers.esyncr1.eprediv = 0b0011
 
         # Normally the configClock() method is called by the esyncr1Update(), or
-        # esyncr2Update() write handlers, but since we set the reset values 
+        # esyncr2Update() write handlers, but since we set the reset values
         # directly, manually call the clockConfig() function now.
         self.configClock()
 
@@ -208,20 +208,20 @@ class FMPLL(MMIOPeripheral):
         #   PLL Off    | f_pll = f_extal
         #   Normal PLL | f_pll = (f_extal*(EMFD+16)) / ((EPREDIV+1)*(ERFD+1))
         if self.registers.synsr.pllsel:
-            freq = (self._config.extal * (self.registers.esyncr1.emfd+16)) / \
+            freq = (self.extal * (self.registers.esyncr1.emfd+16)) / \
                 ((self.registers.esyncr1.eprediv+1) * (self.registers.esyncr2.erfd+1))
 
-            # freq is a float already because of the division in the above 
+            # freq is a float already because of the division in the above
             # calculation
             self.pll = freq
         else:
             # Ensure that the system PLL is a floating point value
-            self.pll = float(self._config.extal)
+            self.pll = float(self.extal)
 
         logger.debug('FMPLL: Setting PLL to %f MHz', self.pll / 1000000)
 
     def esyncr1Update(self, thing):
-        # Only allow clkcfg to change if ESYNCR2[CLKCFG_DIS] is 0, if 
+        # Only allow clkcfg to change if ESYNCR2[CLKCFG_DIS] is 0, if
         # ESYNCR2[CLKCFG_DIS] is 1 restore the previously saved ESYNCR1[CLKCFG]
         if self.registers.esyncr2.clkcfg_dis == 1:
             self.registers.esyncr1.clkcfg = self._saved_clkcfg
@@ -229,14 +229,14 @@ class FMPLL(MMIOPeripheral):
             # Save the current ESYNCR1[CLKCFG] in case we need to it later
             self._saved_clkcfg = self.registers.esyncr1.clkcfg
 
-        # TODO: Trigger loss of clock interrupts if enabled and the clock values 
+        # TODO: Trigger loss of clock interrupts if enabled and the clock values
         # are changed
 
         # Re-run the clock configuration
         self.configClock()
 
     def esyncr2Update(self, thing):
-        # TODO: Trigger loss of clock interrupts if enabled and the clock values 
+        # TODO: Trigger loss of clock interrupts if enabled and the clock values
         # are changed
 
         # Re-run the clock configuration
@@ -253,4 +253,4 @@ class FMPLL(MMIOPeripheral):
         Utility function that allows other peripherals to get external
         oscillator clock frequency
         """
-        return float(self._config.extal)
+        return float(self.extal)

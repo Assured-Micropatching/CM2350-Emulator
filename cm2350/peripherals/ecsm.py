@@ -6,7 +6,7 @@ import envi.archs.ppc.regs as eapr
 
 from ..ppc_vstructs import *
 from ..ppc_peripherals import *
-from ..intc_exc import ExternalException, INTC_SRC
+from ..intc_exc import INTC_EVENT
 from ..ppc_mmu import PpcTlbFlags
 
 import logging
@@ -119,8 +119,8 @@ class ECSM_ATTRS(PeriphRegister):
 
 
 class ECSM_REGISTERS(PeripheralRegisterSet):
-    def __init__(self, emu=None):
-        super().__init__(emu)
+    def __init__(self):
+        super().__init__()
 
         self.pct   = (ECSM_PCT_OFFSET,   ECSM_16BIT_CONST(0xE760))
         self.rev   = (ECSM_REV_OFFSET,   ECSM_16BIT_CONST(0x0000))
@@ -304,11 +304,11 @@ ECSM_EERBIT_VALUES = {
 # According to "Table 9-8. Interrupt Request Sources" in MPC5674FRM.pdf the
 # 1-bit errors do not trigger interrupts even if set?  The non-correctable
 # errors use the same interrupt source
-ECSM_INT_SRCS = {
-    'r1br': None,
-    'f1br': None,
-    'rncr': INTC_SRC.ECSM,
-    'fncr': INTC_SRC.ECSM,
+ECSM_INT_EVENTS = {
+    'r1br': INTC_EVENT.ECSM_ESR_R1BE,
+    'f1br': INTC_EVENT.ECSM_ESR_F1BE,
+    'rncr': INTC_EVENT.ECSM_ESR_RNCE,
+    'fncr': INTC_EVENT.ECSM_ESR_FNCE,
 }
 
 # FEAT/REAT[SIZE] values, based on size of write/read data that caused the error
@@ -334,7 +334,9 @@ class ECSM(MMIOPeripheral):
     perform ECC simulation at this time.
     '''
     def __init__(self, emu, mmio_addr):
-        super().__init__(emu, 'ECSM', mmio_addr, 0x4000, regsetcls=ECSM_REGISTERS)
+        super().__init__(emu, 'ECSM', mmio_addr, 0x4000,
+                regsetcls=ECSM_REGISTERS,
+                isrstatus='esr', isrflags='ecr', isrevents=ECSM_INT_EVENTS)
 
         # Callback for the EEGR register that can force RAM ECC write errors
         self.registers.vsAddParseCallback('eegr', self.eegrUpdate)
@@ -352,16 +354,11 @@ class ECSM(MMIOPeripheral):
         self._fr1nci = None
 
     def init(self, emu):
-        # Do the normal MMIOPeripheral things, except for calling reset()
-        logger.debug('init: %s module', self.devname)
-        self.emu = emu
+        super().init(emu)
 
-        # Normally a module's init function calls it's reset function.  In this
-        # case init is different so we can set the MRSR[POR] bit accurately
-        self.registers.reset(self.emu)
-
-        # MRSR[POR] should be 1 after initial power on
+        # MRSR[POR] should be 1 and MRSR[DIR] should be 0 after initial power on
         self.registers.mrsr.vsOverrideValue('por', 1)
+        self.registers.mrsr.vsOverrideValue('dir', 0)
 
     def reset(self, emu):
         super().reset(emu)
@@ -378,31 +375,12 @@ class ECSM(MMIOPeripheral):
         # Indicates that a reset is because of a software watchdog timeout
         self._swt_reset = True
 
-    def event(self, name, value):
-        """
-        Takes in a name for an event, updates the status register (ESR) field of
-        the matching name, and if the value is "1" queues a corresponding
-        interrupt if there is a valid interrupt source configured.
-
-        Setting an event value of 0 has no effect, and setting an event value of
-        1 when the ESR field is already 1 has no effect.
-        """
-        if value and self.registers.esr.vsGetField(name) == 0:
-            self.registers.esr.vsOverrideValue(name, int(value))
-
-            if self.registers.ecr.vsGetField(name) == 1:
-                intsrc = ECSM_INT_SRCS[name]
-                if intsrc:
-                    self.emu.queueException(ExternalException(intsrc))
-                else:
-                    logger.warning('Ignoring %s event because no valid INT_SRC configured', name)
-
     def _getAddrAttrs(self, addr, instr):
         flags = 0
         if instr:
-            tlb_entry = self.emu.mmu.getInstrEntry(addr)
+            ts, pid, tlb_entry = self.emu.mmu.getInstrEntry(addr)
         else:
-            tlb_entry = self.emu.mmu.getDataEntry(addr)
+            ts, pid, tlb_entry = self.emu.mmu.getDataEntry(addr)
 
         # This address is in a cache able region if the I (Cache Inhibited flag)
         # is not set

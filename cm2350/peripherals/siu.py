@@ -23,6 +23,7 @@ class SIU_MIDR(ReadOnlyRegister):
         self.masknum_major =  v_const(4)
         self.masknum_minor = v_const(4)
 
+
 class SIU_RSR(PeriphRegister):
     # TODO: SYSTEM_RESET reasons should eventually be linked to the e200z7
     # setException API.
@@ -49,6 +50,7 @@ class SIU_RSR(PeriphRegister):
         self.bootcfg = v_const(2, bootcfg)
         self.rgf = v_w1c(1)
 
+
 class SIU_SRCR(PeriphRegister):  # System Reset Control Register...
     # TODO: might need to hook this one with some special logic
     def __init__(self):
@@ -57,6 +59,7 @@ class SIU_SRCR(PeriphRegister):  # System Reset Control Register...
         self.ser = v_bits(1)
         self._pad0 = v_const(30)
 
+
 class SIU_EISR(PeriphRegister):  # External Interrupt Status Register
     # TODO: bit 0 should be linked to the NMI exception handling
     def __init__(self):
@@ -64,6 +67,7 @@ class SIU_EISR(PeriphRegister):  # External Interrupt Status Register
         self.nmi = v_w1c(1)
         self._pad0 = v_const(15)
         self.eif = v_w1c(16)
+
 
 class SIU_DIRER(PeriphRegister):     # DMA/Interrupt Request Enable Register
     # TODO: bit 0 & 8 should be linked to the NMI exception handling
@@ -75,11 +79,13 @@ class SIU_DIRER(PeriphRegister):     # DMA/Interrupt Request Enable Register
         self._pad1 = v_const(7)
         self.eire = v_bits(16)
 
+
 class SIU_DIRSR(PeriphRegister):
     def __init__(self):
         super().__init__()
         self._pad0 = v_const(28)
         self.dirs = v_bits(4)
+
 
 class SIU_OSR(PeriphRegister):
     def __init__(self):
@@ -87,17 +93,13 @@ class SIU_OSR(PeriphRegister):
         self._pad0 = v_const(16)
         self.ovf = v_bits(16)
 
+
 class SIU_ORER(PeriphRegister):
     def __init__(self):
         super().__init__()
         self._pad0 = v_const(16)
         self.ore = v_bits(16)
 
-class SIU_IREER(PeriphRegister):
-    def __init__(self):
-        super().__init__()
-        self._pad0 = v_const(16)
-        self.ore = v_bits(16)
 
 class SIU_IREER(PeriphRegister):
     def __init__(self):
@@ -106,6 +108,7 @@ class SIU_IREER(PeriphRegister):
         self._pad0 = v_const(15)
         self.iree = v_bits(16)
 
+
 class SIU_IFEER(PeriphRegister):
     def __init__(self):
         super().__init__()
@@ -113,11 +116,13 @@ class SIU_IFEER(PeriphRegister):
         self._pad0 = v_const(15)
         self.ifee = v_bits(16)
 
+
 class SIU_IDFR(PeriphRegister):
     def __init__(self):
         super().__init__()
         self._pad0 = v_const(28)
         self.dfl = v_bits(4)
+
 
 class SIU_IFIR(PeriphRegister):
     def __init__(self):
@@ -125,6 +130,7 @@ class SIU_IFIR(PeriphRegister):
         self.ifi_nmi = v_bits(1)
         self._pad0 = v_const(15)
         self.ifi = v_bits(16)
+
 
 class SIU_PCRn(PeriphRegister):
     def __init__(self, pa=None, obe=None, ibe=None, dsc=None, ode=None, hys=None, src=None, wpe=None, wps=None):
@@ -140,47 +146,48 @@ class SIU_PCRn(PeriphRegister):
         if pa is None:
             self.pa = v_const(3)
         else:
-            self.pa = v_defaultbits(3, pa)
+            self.pa = v_bits(3, pa)
 
         if obe is None:
             self.obe = v_const(1)
         else:
-            self.obe = v_defaultbits(1, obe)
+            self.obe = v_bits(1, obe)
 
         if ibe is None:
             self.ibe = v_const(1)
         else:
-            self.ibe = v_defaultbits(1, ibe)
+            self.ibe = v_bits(1, ibe)
 
         if dsc is None:
             self.dsc = v_const(2)
         else:
-            self.dsc = v_defaultbits(2, dsc)
+            self.dsc = v_bits(2, dsc)
 
         if ode is None:
             self.ode = v_const(1)
         else:
-            self.ode = v_defaultbits(1, ode)
+            self.ode = v_bits(1, ode)
 
         if hys is None:
             self.hys = v_const(1)
         else:
-            self.hys = v_defaultbits(1, hys)
+            self.hys = v_bits(1, hys)
 
         if src is None:
             self.src = v_const(2)
         else:
-            self.src = v_defaultbits(2, src)
+            self.src = v_bits(2, src)
 
         if wpe is None:
             self.wpe = v_const(1)
         else:
-            self.wpe = v_defaultbits(1, wpe)
+            self.wpe = v_bits(1, wpe)
 
         if wps is None:
             self.wps = v_const(1)
         else:
-            self.wps = v_defaultbits(1, wps)
+            self.wps = v_bits(1, wps)
+
 
 class SIU_GPDOn(PeriphRegister):
     def __init__(self):
@@ -188,27 +195,32 @@ class SIU_GPDOn(PeriphRegister):
         self._pad0 = v_const(7)
         self.pdo = v_bits(1)
 
+
 class SIU_GPDIn(ReadOnlyRegister):
     def __init__(self):
         super().__init__()
         self._pad0 = v_const(7)
         self.pdi = v_bits(1)
 
+
 class SIU_PGPDOn(PeriphRegister):
     def __init__(self):
         super().__init__()
         self.data = v_bits(32)
+
 
 class SIU_PGPDIn(ReadOnlyRegister):
     def __init__(self):
         super().__init__()
         self.data = v_bits(32)
 
+
 class SIU_MPGPDOn(WriteOnlyRegister):
     def __init__(self):
         super().__init__()
         self.mask = v_bits(16)
         self.data = v_bits(16)
+
 
 class SIU_EIISR(PeriphRegister):
     def __init__(self):
@@ -230,6 +242,7 @@ class SIU_EIISR(PeriphRegister):
         self.esel1 = v_bits(2)
         self.esel0 = v_bits(2)
 
+
 class SIU_DISR(PeriphRegister):
     def __init__(self):
         super().__init__()
@@ -250,6 +263,7 @@ class SIU_DISR(PeriphRegister):
         self.sckseld = v_bits(2)
         self.trigseld = v_bits(2)
 
+
 class SIU_ISEL4(PeriphRegister):
     def __init__(self):
         super().__init__()
@@ -262,6 +276,7 @@ class SIU_ISEL4(PeriphRegister):
         self._pad3 = v_const(1)
         self.cTSEL2_0 = v_bits(7)
 
+
 class SIU_ISEL5(PeriphRegister):
     def __init__(self):
         super().__init__()
@@ -270,6 +285,7 @@ class SIU_ISEL5(PeriphRegister):
         self._pad1 = v_const(1)
         self.cTSEL0_0 = v_bits(7)
         self._pad2 = v_const(16)
+
 
 class SIU_ISEL6(PeriphRegister):
     def __init__(self):
@@ -283,6 +299,7 @@ class SIU_ISEL6(PeriphRegister):
         self._pad3 = v_const(1)
         self.cTSEL2_1 = v_bits(7)
 
+
 class SIU_ISEL7(PeriphRegister):
     def __init__(self):
         super().__init__()
@@ -291,6 +308,7 @@ class SIU_ISEL7(PeriphRegister):
         self._pad1 = v_const(1)
         self.cTSEL0_1 = v_bits(7)
         self._pad2 = v_const(16)
+
 
 class SIU_ISEL8(PeriphRegister):
     def __init__(self):
@@ -308,11 +326,13 @@ class SIU_ISEL8(PeriphRegister):
         self._pad5 = v_const(3)
         self.eTPU24 = v_bits(1)
 
+
 class SIU_ISEL9(PeriphRegister):
     def __init__(self):
         super().__init__()
         self._pad0 = v_const(27)
         self.eTSEL0A = v_bits(5)
+
 
 class SIU_DECFIL(PeriphRegister):
     def __init__(self):
@@ -325,6 +345,7 @@ class SIU_DECFIL(PeriphRegister):
         self.hselg = v_bits(4)
         self.zselh = v_bits(4)
         self.hselh = v_bits(4)
+
 
 class SIU_CCR(PeriphRegister):
     def __init__(self, match=0, disnex=0):
@@ -344,26 +365,30 @@ class SIU_CCR(PeriphRegister):
         self._pad1 = v_const(15)
         self.test = v_bits(1)
 
+
 class SIU_ECCR(PeriphRegister):
     def __init__(self):
         super().__init__()
         self._pad0 = v_const(16)
-        self.engdiv = v_defaultbits(8, 0x10)
+        self.engdiv = v_bits(8, 0x10)
         self.ecss = v_bits(1)
         self._pad1 = v_const(3)
         self.ebts = v_bits(1)
         self._pad2 = v_const(1)
-        self.ebdf = v_defaultbits(2, 0x1)
+        self.ebdf = v_bits(2, 0x1)
+
 
 class SIU_CBRH(PeriphRegister):
     def __init__(self):
         super().__init__()
         self.cmpbh = v_bits(32)
 
+
 class SIU_CBRL(PeriphRegister):
     def __init__(self):
         super().__init__()
         self.cmpbl = v_bits(32)
+
 
 class SIU_SYSDIV(PeriphRegister):
     def __init__(self):
@@ -371,23 +396,26 @@ class SIU_SYSDIV(PeriphRegister):
         self._pad0 = v_const(22)
         self.ipclkdiv = v_bits(2)
         self._pad1 = v_const(3)
-        self.bypass = v_defaultbits(1, 1)
+        self.bypass = v_bits(1, 1)
         self.sysclkdiv = v_bits(2)
         self._pad2 = v_const(2)
+
 
 class SIU_HLT(PeriphRegister):
     def __init__(self):
         super().__init__()
         self.hlt = v_bits(32)
 
+
 class SIU_HLTACK(PeriphRegister):
     def __init__(self):
         super().__init__()
         self.hltack = v_bits(32)
 
+
 class SIU_REGISTERS(PeripheralRegisterSet):
-    def __init__(self, wkpcfg, bootcfg, emu=None):
-        super().__init__(emu)
+    def __init__(self, wkpcfg, bootcfg):
+        super().__init__()
 
         #############################################
 
@@ -474,15 +502,17 @@ class SIU_REGISTERS(PeripheralRegisterSet):
         self.idfr    = (0x0030, SIU_IDFR())
         self.ifir    = (0x0034, SIU_IFIR())
 
+
         # PCR (Pin Control Registers)
         # PCR registers must be initialized using the PCR_DEFAULT values because
         # not all PCR fields can be modified for all pins.
-        self.pcr     = (0x0040, VArray([SIU_PCRn() if c is None else SIU_PCRn(**c) for c in self._pcr_defaults]))
+        self.pcr     = (0x0040, VTuple([SIU_PCRn() if c is None else SIU_PCRn(**c) for c in self._pcr_defaults]))
+
         # Legacy GPDO
-        self.gpdo    = (0x0600, VArray([SIU_GPDOn() for i in range(NUM_GPDIO_PINS)]))
+        self.gpdo    = (0x0600, VTuple([SIU_GPDOn() for i in range(NUM_GPDIO_PINS)]))
 
         # Legacy GPDI (only first 256 pins)
-        self.gpdi    = (0x0800, VArray([SIU_GPDIn() for i in range(NUM_GPDIO_PINS // 2)]))
+        self.gpdi    = (0x0800, VTuple([SIU_GPDIn() for i in range(NUM_GPDIO_PINS // 2)]))
 
         self.eiisr   = (0x0904, SIU_EIISR())
         self.disr    = (0x0908, SIU_DISR())
@@ -504,22 +534,22 @@ class SIU_REGISTERS(PeripheralRegisterSet):
 
         # Parallel GPDO
         # 4 bytes for every 32 pins
-        self.pgpdo   = (0x0C00, VArray([SIU_PGPDOn() for i in range(NUM_GPDIO_PINS // 32)]))
+        self.pgpdo   = (0x0C00, VTuple([SIU_PGPDOn() for i in range(NUM_GPDIO_PINS // 32)]))
 
         # Parallel GPDI
         # 4 bytes for every 32 pins
-        self.pgpdi   = (0x0C40, VArray([SIU_PGPDIn() for i in range(NUM_GPDIO_PINS // 32)]))
+        self.pgpdi   = (0x0C40, VTuple([SIU_PGPDIn() for i in range(NUM_GPDIO_PINS // 32)]))
 
         # Masked Parallel GPDO
         # 2 bytes of mask and 2 bytes of data for every 16 pins
-        self.mpgpdo  = (0x0C80, VArray([SIU_MPGPDOn() for i in range(NUM_GPDIO_PINS // 16)]))
+        self.mpgpdo  = (0x0C80, VTuple([SIU_MPGPDOn() for i in range(NUM_GPDIO_PINS // 16)]))
 
         # 0x0D00-0x0E00 is unimplemented (related to DSPI or eTPU functionality)
-        # 0x100 bytes / 32 bits per register = 64 placeholder registers
-        self.tbd     = (0x0D00, VArray([PlaceholderRegister(32) for i in range(64)]))
+        # 0x100 * 8 bits = size of the placeholder
+        self.tbd     = (0x0D00, VTuple([PlaceholderRegister(8) for i in range(0x100)]))
 
         # Legacy GPDI (full range)
-        self.gpdi_full = (0x0E00, VArray([SIU_GPDIn() for i in range(NUM_GPDIO_PINS)]))
+        self.gpdi_full = (0x0E00, VTuple([SIU_GPDIn() for i in range(NUM_GPDIO_PINS)]))
 
     def reset(self, emu):
         # TODO: Will probably need to set some other register values based on
@@ -591,10 +621,13 @@ class SIU(MMIOPeripheral):
     def __init__(self, emu, mmio_addr):
         super().__init__(emu, 'SIU', mmio_addr, 0x4000)
 
-        self._config = emu.vw.config.project.MPC5674.SIU
+        # Create attributes for boot parameter settings (PLLCFG, etc.)
+        self.pllcfg = self._config.pllcfg
+        self.bootcfg = self._config.bootcfg
+        self.wkpcfg = self._config.wkpcfg
 
         # Create the register set now
-        self.registers = SIU_REGISTERS(wkpcfg=self._config.wkpcfg, bootcfg=self._config.bootcfg)
+        self.registers = SIU_REGISTERS(wkpcfg=self.wkpcfg, bootcfg=self.bootcfg)
 
         # GPIO 75-82 are available to be used as GPIO pins only when the NDI
         # peripheral is configured to operate in Reduced-Port (or Disabled-Port)
@@ -635,12 +668,12 @@ class SIU(MMIOPeripheral):
         #   GPIO212 = BOOTCFG1
         #   GPIO213 = WPKCFG
         #
-        self.connectGPIO(208, (self._config.pllcfg >> 2) & 1)
-        self.connectGPIO(209, (self._config.pllcfg >> 1) & 1)
-        self.connectGPIO(210, self._config.pllcfg & 1)
-        self.connectGPIO(211, (self._config.bootcfg >> 1) & 1)
-        self.connectGPIO(212, self._config.bootcfg & 1)
-        self.connectGPIO(213, self._config.wkpcfg)
+        self.connectGPIO(208, (self.pllcfg >> 2) & 1)
+        self.connectGPIO(209, (self.pllcfg >> 1) & 1)
+        self.connectGPIO(210, self.pllcfg & 1)
+        self.connectGPIO(211, (self.bootcfg >> 1) & 1)
+        self.connectGPIO(212, self.bootcfg & 1)
+        self.connectGPIO(213, self.wkpcfg)
 
         # The SIU peripheral generates the following output clocks based on the
         # FMPLL output:
@@ -690,10 +723,10 @@ class SIU(MMIOPeripheral):
 
         # Attach the callback functions to handle writes that need to cause GPIO
         # value updates
-        self.registers.vsAddParseCallback('by_idx_pcr', self.pcrUpdate)
-        self.registers.vsAddParseCallback('by_idx_gpdo', self.gpdoUpdate)
-        self.registers.vsAddParseCallback('by_idx_pgpdo', self.pgpdoUpdate)
-        self.registers.vsAddParseCallback('by_idx_mpgpdo', self.mpgpdoUpdate)
+        self.registers.pcr.vsAddParseCallback('by_idx', self.pcrUpdate)
+        self.registers.gpdo.vsAddParseCallback('by_idx', self.gpdoUpdate)
+        self.registers.pgpdo.vsAddParseCallback('by_idx', self.pgpdoUpdate)
+        self.registers.mpgpdo.vsAddParseCallback('by_idx', self.mpgpdoUpdate)
 
     def reset(self, emu):
         """
@@ -777,7 +810,7 @@ class SIU(MMIOPeripheral):
         else:
             self._default_value[idx] &= ~pinmask
 
-    def pcrUpdate(self, thing, idx, size):
+    def pcrUpdate(self, thing, idx, size, **kwargs):
         """
         Update the GPIO(s) that correspond to the PCR that was just set (the
         PCR index == the GPIO pin number)
@@ -785,7 +818,7 @@ class SIU(MMIOPeripheral):
         self.updateMasksFromPCR(idx)
         self.refreshPinValue(idx)
 
-    def gpdoUpdate(self, thing, idx, size):
+    def gpdoUpdate(self, thing, idx, size, **kwargs):
         """
         Update the output value for then pin controlled by the specified GPDO register
         """
@@ -803,7 +836,7 @@ class SIU(MMIOPeripheral):
         self.registers.pgpdo[pgpdo_idx].data = pgpdo_val
         self.refreshPinValue(pin)
 
-    def pgpdoUpdate(self, thing, idx, size):
+    def pgpdoUpdate(self, thing, idx, size, **kwargs):
         """
         Update the output value for pins controlled by the specified PGPDO register
         """
@@ -818,7 +851,7 @@ class SIU(MMIOPeripheral):
 
         self.refreshBlockValue(idx)
 
-    def mpgpdoUpdate(self, thing, idx, size):
+    def mpgpdoUpdate(self, thing, idx, size, **kwargs):
         # There are 2 MPGPDO registers for every PGPDO register, 8-byte aligned
         # addresses map to the upper 15 bits of the PGPDO register, the next
         # register maps to the lower 16 bits of the PGPDO register.

@@ -1,18 +1,12 @@
-import struct
-import unittest
-import random
 import os
-import queue
-import time
+import struct
 import itertools
 
-import envi.archs.ppc.const as eapc
-import envi.archs.ppc.regs as eapr
-
 import envi.bits as e_bits
+
 from cm2350 import intc_exc
 
-from .. import CM2350
+from .helpers import MPC5674_Test
 
 
 # The SIU memory range is confusing, there are sub ranges with different valid
@@ -243,68 +237,11 @@ PCR_FIELDS = {
 PCR_PAD_BITS_MASK = 0xE000
 
 
-class MPC5674_SIU_Test(unittest.TestCase):
-
-    ##################################################
-    # Standard unittest functions
-    ##################################################
-
-    def setUp(self):
-        import os
-        if os.environ.get('LOG_LEVEL', 'INFO') == 'DEBUG':
-            args = ['-m', 'test', '-c', '-vvv']
-        else:
-            args = ['-m', 'test', '-c']
-        self.ECU = CM2350(args)
-        self.emu = self.ECU.emu
-
-        # Set the INTC[CPR] to 0 to allow all peripheral (external) exception
-        # priorities to happen
-        self.emu.intc.registers.cpr.pri = 0
-        msr_val = self.emu.getRegister(eapr.REG_MSR)
-
-        # Enable all possible Exceptions so if anything happens it will be
-        # detected by the _getPendingExceptions utility
-        msr_val |= eapc.MSR_EE_MASK | eapc.MSR_CE_MASK | eapc.MSR_ME_MASK | eapc.MSR_DE_MASK
-        self.emu.setRegister(eapr.REG_MSR, msr_val)
-
-        # Enable the timebase (normally done by writing a value to HID0)
-        self.emu.enableTimebase()
-
-    def _getPendingExceptions(self):
-        pending_excs = []
-        for intq in self.emu.mcu_intc.intqs[1:]:
-            try:
-                while True:
-                    pending_excs.append(intq.get_nowait())
-            except queue.Empty:
-                pass
-        return pending_excs
-
-    def tearDown(self):
-        # Ensure that there are no unprocessed exceptions
-        pending_excs = self._getPendingExceptions()
-        for exc in pending_excs:
-            print('Unhanded PPC Exception %s' % exc)
-        self.assertEqual(pending_excs, [])
+class MPC5674_SIU_Test(MPC5674_Test):
 
     ##################################################
     # Useful utilities for tests
     ##################################################
-
-    def get_random_pc(self):
-        start, end, perms, filename = self.emu.getMemoryMap(0)
-        return random.randrange(start, end, 4)
-
-    def set_random_pc(self):
-        pc = self.get_random_pc()
-        self.emu.setProgramCounter(pc)
-        return pc
-
-    def get_random_val(self, size):
-        val = random.getrandbits(size * 8)
-        val_bytes = e_bits.buildbytes(val, size, self.emu.getEndian())
-        return (val, val_bytes)
 
     def validate_invalid_addr_noexc(self, addr, size):
         '''
@@ -323,59 +260,6 @@ class MPC5674_SIU_Test(unittest.TestCase):
         # Confirm no read or write exceptions occured
         msg = 'Invalid read from 0x%x (size %d) confirming no exceptions' % (addr, size)
         self.assertEqual(self._getPendingExceptions(), [], msg)
-
-    def validate_invalid_read(self, addr, size):
-        '''
-        For testing addresses that raise a bus error on read
-        '''
-        pc = self.get_random_pc()
-        self.emu.setProgramCounter(pc)
-
-        msg = 'invalid read from 0x%x' % (addr)
-        with self.assertRaises(intc_exc.MceDataReadBusError, msg=msg) as cm:
-            self.emu.readMemValue(addr, size)
-
-        args = {
-            'va': addr,
-            'pc': pc,
-            'data': b'',
-        }
-        self.assertEqual(cm.exception.kwargs, args)
-
-    def validate_invalid_write(self, addr, size, msg=None):
-        '''
-        For testing addresses that raise a bus error on write (like read-only
-        memory locations)
-        '''
-        value, value_bytes = self.get_random_val(size)
-
-        pc = self.get_random_pc()
-        self.emu.setProgramCounter(pc)
-
-        if msg is None:
-            msg = 'invalid write of 0x%x to 0x%x' % (value, addr)
-        else:
-            msg = 'invalid write of 0x%x to 0x%x (%s)' % (value, addr, msg)
-
-        with self.assertRaises(intc_exc.MceWriteBusError, msg=msg) as cm:
-            self.emu.writeMemValue(addr, value, size)
-
-        args = {
-            'va': addr,
-            'pc': pc,
-            'data': value_bytes,
-            'written': 0,
-        }
-        self.assertEqual(cm.exception.kwargs, args)
-
-    def validate_invalid_addr(self, addr, size):
-        '''
-        "Invalid" has multiple meanings for the SIU, this function tests that
-        addresses within the SIU range produce bus errors for both reads and
-        writes
-        '''
-        self.validate_invalid_read(addr, size)
-        self.validate_invalid_write(addr, size)
 
     def get_pcr_defaults(self):
         # PCR defaults
@@ -974,21 +858,9 @@ class MPC5674_SIU_Test(unittest.TestCase):
 
         # Read PCR 213 with odd size, this should generate an ALIGNMENT
         # exception (reading 5 bytes from a 2-byte aligned offset)
-        pc = self.get_random_pc()
-        self.emu.setProgramCounter(pc)
-
-        # Expected data that will have been raed to generate the error
+        # Expected data that will have been read before generating the error
         align_err_data = struct.pack('>HHH', pcr213_val, pcr214_val, 0)
-
-        with self.assertRaises(intc_exc.AlignmentException) as cm:
-            self.emu.readMemory(pcr213_addr, 5)
-
-        args = {
-            'va': pcr213_addr,
-            'pc': pc,
-            'data': align_err_data,
-        }
-        self.assertEqual(cm.exception.kwargs, args)
+        self.validate_unaligned_read(pcr213_addr, 5, data=align_err_data)
 
         # Read PCRs 213 and 214 together
         # Read PCRs 214 and 215 together
@@ -1020,18 +892,7 @@ class MPC5674_SIU_Test(unittest.TestCase):
         )
 
         for addr, size, read_data in test_vals:
-            pc = self.set_random_pc()
-
-            msg = 'reading %d bytes from 0x%x' % (size, addr)
-            with self.assertRaises(intc_exc.AlignmentException, msg=msg) as cm:
-                self.emu.readMemory(addr, size)
-
-            args = {
-                'va': addr,
-                'pc': pc,
-                'data': read_data,
-            }
-            self.assertEqual(cm.exception.kwargs, args)
+            self.validate_unaligned_read(addr, size, data=read_data)
 
     def test_siu_unaligned_write(self):
         pcr_range, size = SIU_PCR
@@ -1049,21 +910,7 @@ class MPC5674_SIU_Test(unittest.TestCase):
             (base + (215 * size),     5, 4),
         )
         for addr, size, written in test_vals:
-            pc = self.set_random_pc()
-
-            data = os.urandom(size)
-
-            msg = 'writing %s to 0x%x' % (data.hex(), addr)
-            with self.assertRaises(intc_exc.AlignmentException, msg=msg) as cm:
-                self.emu.writeMemory(addr, data)
-
-            args = {
-                'va': addr,
-                'pc': pc,
-                'data': data,
-                'written': written,
-            }
-            self.assertEqual(cm.exception.kwargs, args)
+            self.validate_unaligned_write(addr, size=size, written=written)
 
     # GPIO tests
 
@@ -1088,7 +935,7 @@ class MPC5674_SIU_Test(unittest.TestCase):
                 # Attempting to write to the read locations should produce an
                 # error
                 msg = 'GPDI(%d) write' % pin
-                self.validate_invalid_write(test['addr'], test['align'], msg)
+                self.validate_invalid_write(test['addr'], test['align'], msg=msg)
 
             # If this GPIO is able to act as an input change the pin_value
             # to be the opposite of the default value and verify that the
@@ -1564,13 +1411,13 @@ class MPC5674_SIU_Test(unittest.TestCase):
         )
         for sysdiv_val, sysckldiv_val, ipclkdiv_val, sys_freq, cpu_freq, periph_freq, etpu_freq in tests:
             self.emu.writeMemValue(addr, sysdiv_val, size)
-            self.assertEqual(self.emu.siu.registers.sysdiv.ipclkdiv, ipclkdiv_val)
-            self.assertEqual(self.emu.siu.registers.sysdiv.bypass, 1)
-            self.assertEqual(self.emu.siu.registers.sysdiv.sysclkdiv, sysckldiv_val)
-            self.assertEqual(self.emu.siu.f_sys(), sys_freq)
-            self.assertEqual(self.emu.siu.f_cpu(), cpu_freq)
-            self.assertEqual(self.emu.siu.f_periph(), periph_freq)
-            self.assertEqual(self.emu.siu.f_etpu(), etpu_freq)
+            self.assertEqual(self.emu.siu.registers.sysdiv.ipclkdiv, ipclkdiv_val, msg=hex(sysdiv_val))
+            self.assertEqual(self.emu.siu.registers.sysdiv.bypass, 1, msg=hex(sysdiv_val))
+            self.assertEqual(self.emu.siu.registers.sysdiv.sysclkdiv, sysckldiv_val, msg=hex(sysdiv_val))
+            self.assertEqual(self.emu.siu.f_sys(), sys_freq, msg=hex(sysdiv_val))
+            self.assertEqual(self.emu.siu.f_cpu(), cpu_freq, msg=hex(sysdiv_val))
+            self.assertEqual(self.emu.siu.f_periph(), periph_freq, msg=hex(sysdiv_val))
+            self.assertEqual(self.emu.siu.f_etpu(), etpu_freq, msg=hex(sysdiv_val))
 
         # When bypass is disabled the system clock is the FMPLL clock divided
         # down based on SYSDIV[SYSCLKDIV]:
@@ -1764,20 +1611,7 @@ class MPC5674_SIU_Test(unittest.TestCase):
         # NotImplementedErrors
         addr_range, size = SIU_PERIPH
         for addr in addr_range:
-            pc = self.set_random_pc()
-            read_errmsg = '0x%x:  %s: BAD READ [%x:%d]' % (pc, 'SIU', addr, size)
-            msg = 'Read unimplemented memory @ 0x%08x' % addr
-            with self.assertRaises(NotImplementedError, msg=msg) as cm:
-                self.emu.readMemValue(addr, size)
-            self.assertEqual(str(cm.exception), read_errmsg)
-
-            pc = self.set_random_pc()
-            val, val_bytes = self.get_random_val(size)
-            msg = 'Write unimplemented memory @ 0x%08x' % addr
-            write_errmsg = '0x%x:  %s: BAD WRITE [%x:%r]' % (pc, 'SIU', addr, val_bytes)
-            with self.assertRaises(NotImplementedError, msg=msg) as cm:
-                self.emu.writeMemValue(addr, val, size)
-            self.assertEqual(str(cm.exception), write_errmsg)
+            self.validate_unimplemented_addrs(addr, size)
 
     def test_siu_external_gpio(self):
         # Ensure that the default GPIO values can be read by all valid input

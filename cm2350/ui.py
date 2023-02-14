@@ -238,10 +238,10 @@ class TestEmulator:
     def printStats(self, i):
         curtime = time.time()
         dtime = curtime - self.startRun
-        print("since start: %d instructions in %.3f secs: %3f ops/sec" % \
-                (i, dtime, i//dtime))
+        print("since start: %d instructions in %.3f secs: %.3f ops/sec" % \
+                (i, dtime, i/dtime))
 
-    def run(self, maxstep=None, follow=True, showafter=True, runTil=None, pause=True, silent=False, finish=0, tracedict=None, haltonerror=False):
+    def run(self, maxstep=None, follow=True, showafter=True, pause=True, silent=False, finish=0, tracedict=None, haltonerror=False):
         '''
         run() is the core "debugging" functionality for this emulation-helper.  it's goal is to
         provide a single-step interface somewhat like what you might get from a GDB experience.
@@ -321,12 +321,15 @@ class TestEmulator:
                 break
             try:
                 skip = skipop = False
-                i += 1
 
                 pc = emu.getProgramCounter()
-                if pc in (runTil, finish):
+                # If i is 0 don't break yet, this makes handling loops easier
+                # with the same command.
+                if pc == finish and i > 0:
                     print("PC reached 0x%x." % pc)
                     break
+
+                i += 1
 
                 op = emu.parseOpcode(pc)
                 self.op = op    # store it for later in case of post-mortem
@@ -378,7 +381,7 @@ class TestEmulator:
                     extra = self.getNameRefs(op)
 
                     opbytes = emu.readMemory(pc,len(op))
-                    print("%.4x\t%20s\t%s\t%s"%(pc,hexlify(opbytes),mcanv.strval, extra))
+                    print("%.4x\t%20s\t%s\t%s"%(pc,hexlify(opbytes).decode(),mcanv.strval, extra))
 
                     print("---------")
                     prompt = "q<enter> - exit, eval code to execute, 'skip' an instruction, 'b'ranch, 'go [+]#' to va or +# instrs or enter to continue: "
@@ -564,30 +567,38 @@ class TestEmulator:
                         self.dbgprint( " handler for call to (0x%x): %r" % (brva, handler))
                         if handler is not None:
                             handler(emu, op)
-                            skipop = True
+                            skip = True
 
                     # Special post/prehook handling for function call/return for
                     # functions that did not have a special call handler
-                    if follow and not skip and op.iflags & (envi.IF_CALL | envi.IF_RET):
-                        # use the emulator to execute the call
-                        starteip = emu.getProgramCounter()
-                        if hasattr(emu, 'emumon') and emu.emumon is not None:
-                            emu.emumon.prehook(emu, op, starteip)
+                    #if follow and not skip and op.iflags & (envi.IF_CALL | envi.IF_RET):
+                    #    # use the emulator to execute the call
+                    #    starteip = emu.getProgramCounter()
+                    #    if hasattr(emu, 'emumon') and emu.emumon is not None:
+                    #        emu.emumon.prehook(emu, op, starteip)
 
-                        emu.executeOpcode(op)
-                        endeip = emu.getProgramCounter()
-                        i += 1
-                        if hasattr(emu, 'emumon') and emu.emumon is not None:
-                            emu.emumon.posthook(emu, op, endeip)
+                    #    #emu.executeOpcode(op)
+                    #    emu.stepi()
 
-                        self.dbgprint("starteip: 0x%x, endeip: 0x%x  -> %s" % (starteip, endeip, emu.vw.getName(endeip)))
-                        if hasattr(emu, 'curpath'):
-                            vg_path.getNodeProp(emu.curpath, 'valist').append(starteip)
-                        skip = True
+                    #    endeip = emu.getProgramCounter()
+                    #    i += 1
+                    #    if hasattr(emu, 'emumon') and emu.emumon is not None:
+                    #        emu.emumon.posthook(emu, op, endeip)
+
+                    #    self.dbgprint("starteip: 0x%x, endeip: 0x%x  -> %s" % (starteip, endeip, emu.vw.getName(endeip)))
+                    #    if hasattr(emu, 'curpath'):
+                    #        vg_path.getNodeProp(emu.curpath, 'valist').append(starteip)
+                    #    skip = True
 
                 # if not already emulated a call, execute the instruction here...
                 if not skip and not skipop:
+                    #if hasattr(emu, 'emumon') and emu.emumon is not None:
+                    starteip = emu.getProgramCounter()
+                    emu.emumon.prehook(emu, op, starteip)
                     emu.stepi()
+                    i += 1
+                    endeip = emu.getProgramCounter()
+                    emu.emumon.posthook(emu, op, endeip)
 
                     # print the updated latest stuff....
                     if showafter:
@@ -610,9 +621,7 @@ class TestEmulator:
 
             except KeyboardInterrupt:
                 ### pause the emulation
-                emu.halt_time()
-
-                self.printStats(i)
+                print()
                 break
 
             except envi.SegmentationViolation:
@@ -623,10 +632,11 @@ class TestEmulator:
             except:
                 import sys
                 sys.excepthook(*sys.exc_info())
-                if haltonerror: break
+                if haltonerror:
+                    break
 
+        emu.halt_time()
         self.printStats(i)
-
 
     def dbgprint(self, *args, **kwargs):
         if self.verbose:

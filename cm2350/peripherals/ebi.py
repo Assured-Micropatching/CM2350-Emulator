@@ -58,8 +58,8 @@ class EBI_BMCR(PeriphRegister):
     def __init__(self):
         super().__init__()
         self._pad0 = v_const(16)
-        self.bmt = v_defaultbits(8, 0xFF)
-        self.bme = v_defaultbits(1, 1)
+        self.bmt = v_bits(8, 0xFF)
+        self.bme = v_bits(1, 1)
         self._pad1 = v_const(7)
 
 
@@ -77,7 +77,7 @@ class EBI_CAL_BRx(PeriphRegister):
         self.tbdip = v_bits(1)
         self._pad2 = v_const(1)
         self.seta = v_bits(1)
-        self.bi = v_defaultbits(1, 1)
+        self.bi = v_bits(1, 1)
         self.vi = v_bits(1)
 
 
@@ -94,8 +94,8 @@ class EBI_CAL_ORx(PeriphRegister):
 
 
 class EBI_REGISTERS(PeripheralRegisterSet):
-    def __init__(self, emu=None):
-        super().__init__(emu)
+    def __init__(self):
+        super().__init__()
 
         self.mcr  = (EBI_MCR_OFFSET,     EBI_MCR())
         self.tesr = (EBI_TESR_OFFSET,    EBI_TESR())
@@ -127,9 +127,10 @@ class ExternalRAMBank:
 
 class EBI(MMIOPeripheral):
     '''
-    This is the External Bus Interface module.  This just provides a access to
-    a valid set of registers.  The configuration of the registers in this
-    peripheral don't impact the available external memory.  That requires the addi
+    This is the External Bus Interface module.  These registers change the base
+    address and size used to access external RAM.  This only affects the valid
+    physical address it does not modify any MMU entries to make external RAM be
+    accessible.
     '''
     def __init__(self, emu, mmio_addr):
         # need to hook a MMIO mmiodev at 0xFFFEC000 of size 0x4000
@@ -215,7 +216,7 @@ class EBI(MMIOPeripheral):
                 old_start = self.bank_config[bank].addr
                 old_end = old_start + self.bank_config[bank].size
                 logger.debug('%s[%d] removing old memory map 0x%x - 0x%x', self.devname, bank, old_start, old_end)
-                self.emu.delMemoryMap(addr)
+                self.emu.delMemoryMap(old_start)
 
         self.bank_config[bank].update(addr, size, valid)
 

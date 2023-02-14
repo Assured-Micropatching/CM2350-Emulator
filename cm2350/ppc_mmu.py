@@ -3,9 +3,12 @@ import enum
 import envi
 from envi.archs.ppc.regs import *
 from envi.archs.ppc.const import *
-from vstruct.bitfield import v_bits
 
-from .ppc_vstructs import BitFieldSPR, v_const, v_defaultbits
+from .ppc_vstructs import BitFieldSPR, v_const
+from .intc_exc import DataTlbException, InstructionTlbException
+
+import logging
+logger = logging.getLogger(__name__)
 
 
 __all__ = [
@@ -104,6 +107,33 @@ _tlb_address_mask = (
     0x00000000,  # [22]   4GB Pages
 )
 
+# TLB entry size debug msg strings
+_tlb_size_str = (
+    '1kB',
+    '2kB',
+    '4kB',
+    '8kB',
+    '16kB',
+    '32kB',
+    '64kB',
+    '128kB',
+    '256kB',
+    '512kB',
+    '1MB',
+    '2MB',
+    '4MB',
+    '8MB',
+    '16MB',
+    '32MB',
+    '64MB',
+    '128MB',
+    '256MB',
+    '512MB',
+    '1GB',
+    '2GB',
+    '4GB',
+)
+
 
 # Read-only SPRs that report information about the MMU/TLB configuration
 
@@ -161,7 +191,7 @@ MAS1_VALID_MASK    = 0x80000000
 MAS1_IPROT_MASK    = 0x40000000
 MAS1_TID_MASK      = 0x007F0000
 MAS1_TS_MASK       = 0x00001000
-MAS1_TSIZ_MASK     = 0x00000F10
+MAS1_TSIZ_MASK     = 0x00000F80
 
 MAS1_VALID_SHIFT   = 31
 MAS1_IPROT_SHIFT   = 30
@@ -188,9 +218,7 @@ MAS3_PERM_MASK     = 0x0000003F
 MAS3_USER_SHIFT    = 6
 MAS3_PERM_SHIFT    = 0
 
-# TODO: MAS4 is used only during the TLB Miss exception handler. This module
-# does not currently implement any special handling related to MAS4 and in
-# theory it won't need to.
+# MAS4 is used only during the TLB Miss exception handler
 MAS4_TLBSELD_MASK  = 0x30000000
 MAS4_TIDSELD_MASK  = 0x00030000
 MAS4_TSIZED_MASK   = 0x00000F80
@@ -219,22 +247,21 @@ class PpcTLBEntry:
         self.iprot = iprot
         self.tid = tid
         self.ts = ts
-        self.tsiz = tsiz
+        self.tsiz = PpcTlbPageSize(tsiz)
         self.epn = epn
-        self.flags = flags
+        self.flags = PpcTlbFlags(flags)
         self.rpn = rpn
         self.user = user
-        self.perm = perm
+        self.perm = PpcTlbPerm(perm)
 
-    def mask(self):
-        '''
-        Helper function that returns an address mask based on this TLB
-        entry's page size
-        '''
-        return _tlb_address_mask[self.tsiz]
+        # Calculate the mask now
+        self.mask = _tlb_address_mask[self.tsiz]
 
-    def vle(self):
-        return bool(self.flags & PpcTlbFlags.VLE)
+        self.vle = bool(self.flags & PpcTlbFlags.VLE)
+
+    def size(self):
+        # Used in debug messages
+        return _tlb_size_str[self.tsiz]
 
     def read(self):
         '''
@@ -264,16 +291,16 @@ class PpcTLBEntry:
         # just from being invalidated by the tlbivax instruction or by setting
         # the MMUCSR0[TLB1_FI] bit.
 
-        self.valid = (mas1 & MAS1_VALID_MASK) >> MAS1_VALID_SHIFT
-        self.iprot = (mas1 & MAS1_IPROT_MASK) >> MAS1_IPROT_SHIFT
-        self.tid   = (mas1 & MAS1_TID_MASK) >> MAS1_TID_SHIFT
-        self.ts    = (mas1 & MAS1_TS_MASK) >> MAS1_TS_SHIFT
-        self.tsiz  = (mas1 & MAS1_TSIZ_MASK) >> MAS1_TSIZ_SHIFT
-        self.epn   = mas2 & EPN_MASK
-        self.flags = (mas2 & MAS2_FLAGS_MASK) >> MAS2_FLAGS_SHIFT
-        self.rpn   = mas3 & EPN_MASK
-        self.user  = (mas3 & MAS3_USER_MASK) >> MAS3_USER_SHIFT
-        self.perm  = (mas3 & MAS3_PERM_MASK) >> MAS3_PERM_SHIFT
+        self.config(valid=(mas1 & MAS1_VALID_MASK) >> MAS1_VALID_SHIFT,
+                    iprot=(mas1 & MAS1_IPROT_MASK) >> MAS1_IPROT_SHIFT,
+                    tid=(mas1 & MAS1_TID_MASK) >> MAS1_TID_SHIFT,
+                    ts=(mas1 & MAS1_TS_MASK) >> MAS1_TS_SHIFT,
+                    tsiz=(mas1 & MAS1_TSIZ_MASK) >> MAS1_TSIZ_SHIFT,
+                    epn=mas2 & EPN_MASK,
+                    flags=(mas2 & MAS2_FLAGS_MASK) >> MAS2_FLAGS_SHIFT,
+                    rpn=mas3 & EPN_MASK,
+                    user=(mas3 & MAS3_USER_MASK) >> MAS3_USER_SHIFT,
+                    perm=(mas3 & MAS3_PERM_MASK) >> MAS3_PERM_SHIFT)
 
     def invalidate(self):
         '''
@@ -326,6 +353,12 @@ class PpcMMU:
         mas0 = self.emu.getRegister(REG_MAS0)
         esel = (mas0 & MAS0_ESEL_MASK) >> MAS0_ESEL_SHIFT
 
+        logger.debug('MMU: read mapping %d: 0x%08x -> 0x%08x (%s %s %s)',
+                esel, self._tlb[esel].rpn, self._tlb[esel].epn,
+                self._tlb[esel].size(),
+                'VLE' if self._tlb[esel].vle else 'BookE',
+                self._tlb[esel].perm.name)
+
         mas1, mas2, mas3 = self._tlb[esel].read()
 
         self.emu.setRegister(REG_MAS1, mas1)
@@ -345,6 +378,12 @@ class PpcMMU:
         mas3 = self.emu.getRegister(REG_MAS3)
 
         self._tlb[esel].write(mas1, mas2, mas3)
+
+        logger.debug('MMU: write mapping %d: 0x%08x -> 0x%08x (%s %s %s)',
+                esel, self._tlb[esel].rpn, self._tlb[esel].epn,
+                self._tlb[esel].size(),
+                'VLE' if self._tlb[esel].vle else 'BookE',
+                self._tlb[esel].perm.name)
 
     def i_tlbsx(self, op):
         '''
@@ -368,6 +407,10 @@ class PpcMMU:
         entry = self.tlbFindEntry(ea, ts=sas, tid=spid)
         if entry is not None:
             mas1, mas2, mas3 = entry.read()
+
+            logger.debug('MMU: search found mapping %d: 0x%08x -> 0x%08x (%s %s %s)',
+                    entry.esel, entry.rpn, entry.epn, entry.size(),
+                    'VLE' if entry.vle else 'BookE', entry.perm.name)
 
             # Update MAS0 to indicate which entry this is
             mas0 = (1 << MAS0_TBSEL_SHIFT) | (entry.esel << MAS0_ESEL_SHIFT)
@@ -403,12 +446,13 @@ class PpcMMU:
             # Per the same section the TS and PID values are not used to
             # identify the TLB entry to invalidate, so all entries that match
             # should be invalidated.
-            #
-            # TODO: Best as I can tell the epn should be masked by the entry's
-            # page-size determiend mask
-            matching_entries = [e for e in self._tlb if ea & e.mask() == e.epn & e.mask()]
+            matching_entries = [e for e in self._tlb if ea & e.mask == e.epn & e.mask]
 
         for entry in matching_entries:
+            logger.debug('MMU: invalidating mapping %d: 0x%08x -> 0x%08x (%s %s %s)',
+                    entry.esel, entry.rpn, entry.epn, entry.size(),
+                    'VLE' if entry.vle else 'BookE', entry.perm.name)
+
             entry.invalidate()
 
     def i_tlbsync(self, op):
@@ -456,7 +500,7 @@ class PpcMMU:
                 # Not sure if this is necessary, but mask the EPN value as well
                 # to ensure that only the bits that should be compared are
                 # checked.
-                if va & entry.mask() == entry.epn & entry.mask():
+                if va & entry.mask == entry.epn & entry.mask:
                     return entry
         return None
 
@@ -471,6 +515,12 @@ class PpcMMU:
         values.
         '''
         self._tlb[esel].config(valid, iprot, tid, ts, tsiz, epn, flags, rpn, user, perm)
+
+        logger.debug('MMU: configured mapping %d: 0x%08x -> 0x%08x (%s %s %s)',
+                esel, self._tlb[esel].rpn, self._tlb[esel].epn,
+                self._tlb[esel].size(),
+                'VLE' if self._tlb[esel].vle else 'BookE',
+                self._tlb[esel].perm.name)
 
     def tlbMiss(self, va, ts, tid):
         # Per "10.6.5 TLB miss exception update" (e200z759CRM.pdf page 570):
@@ -492,8 +542,8 @@ class PpcMMU:
         # NOTE: It appears that older PPC implementations used a
         # MAS4[TIDSELD] field that could be used to pull a process ID from
         # one or more PIDx SPRs. However the e200z7 only appears to have a
-        # PID0 SPR, and # the MAS4 documentation states that values other
-        # than 0 should not be used.
+        # PID0 SPR, and the MAS4 documentation states that values other than 0
+        # should not be used.
         #
         # Newer versions of the PowerPC ISA/EREF no longer have this field.
         #
@@ -520,37 +570,31 @@ class PpcMMU:
         Return the physical address that matches the supplied virtual address
         based on the current PID and MSR[DS] flag.
         '''
-        entry = self.getDataEntry(va)
+        ts, pid, entry = self.getDataEntry(va)
         if entry is not None:
-            return entry.rpn | (va & ~entry.mask())
+            return entry.rpn | (va & ~entry.mask)
 
         else:
-            # TODO: replace standard envi SegmentationViolation with the correct
-            # PowerPC-specific exception type.
-
             # Set the DEAR SPR to the address that caused the TLB miss
-            #self.emu.setRegister(REG_DEAR, va)
-            #self.tlbMiss(va, ts, pid)
-            raise envi.SegmentationViolation(va)
+            self.emu.setRegister(REG_DEAR, va)
+            self.tlbMiss(va, ts, pid)
+            raise DataTlbException()
 
     def translateInstrAddr(self, va):
         '''
         Return the physical address and VLE mode that matches the supplied
         virtual address based on the current PID and MSR[IS] flag.
         '''
-        entry = self.getInstrEntry(va)
+        ts, pid, entry = self.getInstrEntry(va)
         if entry is not None:
-            ea = entry.rpn | (va & ~entry.mask())
-            return (ea, entry.vle())
+            ea = entry.rpn | (va & ~entry.mask)
+            return (ea, entry.vle)
 
         else:
-            # TODO: replace standard envi SegmentationViolation with the correct
-            # PowerPC-specific exception type.
-
             # Set the DEAR SPR to the address that caused the TLB miss
-            #self.emu.setRegister(REG_DEAR, va)
-            #self.tlbMiss(va, ts, pid)
-            raise envi.SegmentationViolation(va)
+            self.emu.setRegister(REG_DEAR, va)
+            self.tlbMiss(va, ts, pid)
+            raise InstructionTlbException()
 
     def getDataEntry(self, va):
         '''
@@ -559,7 +603,7 @@ class PpcMMU:
         ts = (self.emu.getRegister(REG_MSR) & MSR_DS_MASK) >> MSR_DS_SHIFT
         pid = self.emu.getRegister(REG_PID)
         entry = self.tlbFindEntry(va, ts=ts, tid=pid)
-        return entry
+        return ts, pid, entry
 
     def getInstrEntry(self, va):
         '''
@@ -568,4 +612,4 @@ class PpcMMU:
         ts = (self.emu.getRegister(REG_MSR) & MSR_IS_MASK) >> MSR_IS_SHIFT
         pid = self.emu.getRegister(REG_PID)
         entry = self.tlbFindEntry(va, ts=ts, tid=pid)
-        return entry
+        return ts, pid, entry

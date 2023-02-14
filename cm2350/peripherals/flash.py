@@ -4,11 +4,10 @@ import hashlib
 import os.path
 
 import envi
-import envi.memory as e_mem
 import envi.bits as e_bits
-import envi.config as e_config
+import envi.memory as e_mem
 
-from .. import mmio, e200z7
+from .. import mmio
 from ..ppc_vstructs import *
 from ..intc_exc import MceDataReadBusError, MceWriteBusError
 
@@ -118,7 +117,7 @@ FLASH_DEVICE_MMIO_SIZE = {
 
 
 # Utility
-def getFlashOffsets(filename, default_config):
+def getFlashOffsets(filename):
     """
     Determine if a supplied file is the right size to contain either just main
     flash or all of flash.
@@ -191,8 +190,8 @@ def getFlashOffsets(filename, default_config):
 
 
 class FLASH_MCR(PeriphRegister):
-    def __init__(self, las, mas):
-        PeriphRegister.__init__(self)
+    def __init__(self, las, mas, bigend=True):
+        PeriphRegister.__init__(self, bigend=bigend)
         self._pad0 = v_const(5)
         self.size = v_const(3, 0b101)
         self._pad1 = v_const(1)
@@ -214,8 +213,8 @@ class FLASH_MCR(PeriphRegister):
         self.ehv = v_bits(1)
 
 class FLASH_LMLR(PeriphRegister):
-    def __init__(self):
-        PeriphRegister.__init__(self)
+    def __init__(self, bigend=True):
+        PeriphRegister.__init__(self, bigend=bigend)
         self.lme = v_const(1)
         self._pad0 = v_const(10)
         self.slock = v_bits(1)
@@ -225,15 +224,15 @@ class FLASH_LMLR(PeriphRegister):
         self.llock = v_bits(10)
 
 class FLASH_HLR(PeriphRegister):
-    def __init__(self):
-        PeriphRegister.__init__(self)
+    def __init__(self, bigend=True):
+        PeriphRegister.__init__(self, bigend=bigend)
         self.hbe = v_const(1)
         self._pad0 = v_const(21)
         self.hlock = v_bits(10)
 
 class FLASH_SLMLR(PeriphRegister):
-    def __init__(self):
-        PeriphRegister.__init__(self)
+    def __init__(self, bigend=True):
+        PeriphRegister.__init__(self, bigend=bigend)
         self.sle = v_const(1)
         self._pad0 = v_const(10)
         self.sslock = v_bits(1)
@@ -243,30 +242,30 @@ class FLASH_SLMLR(PeriphRegister):
         self.sllock = v_bits(10)
 
 class FLASH_LMSR(PeriphRegister):
-    def __init__(self):
-        PeriphRegister.__init__(self)
+    def __init__(self, bigend=True):
+        PeriphRegister.__init__(self, bigend=bigend)
         self._pad0 = v_const(14)
         self.msel = v_bits(2)
         self._pad1 = v_const(6)
         self.lsel = v_bits(10)
 
 class FLASH_HSR(PeriphRegister):
-    def __init__(self):
-        PeriphRegister.__init__(self)
+    def __init__(self, bigend=True):
+        PeriphRegister.__init__(self, bigend=bigend)
         self._pad0 = v_const(26)
         self.hsel = v_bits(6)
 
 class FLASH_AR(PeriphRegister):
-    def __init__(self):
-        PeriphRegister.__init__(self)
+    def __init__(self, bigend=True):
+        PeriphRegister.__init__(self, bigend=bigend)
         self.sad = v_const(1)
         self._pad0 = v_const(13)
         self.addr = v_bits(15)
         self._pad1 = v_const(3)
 
 class FLASH_BIUCR(PeriphRegister):
-    def __init__(self):
-        PeriphRegister.__init__(self)
+    def __init__(self, bigend=True):
+        PeriphRegister.__init__(self, bigend=bigend)
         self._pad0 = v_const(7)
         self.m8pfe = v_bits(1)
         self._pad1 = v_const(1)
@@ -275,9 +274,9 @@ class FLASH_BIUCR(PeriphRegister):
         self.m4pfe = v_bits(1)
         self._pad2 = v_const(3)
         self.m0pfe = v_bits(1)
-        self.apc = v_defaultbits(3, 0b111)
-        self.wwsc = v_defaultbits(2, 0b11)
-        self.rwsc = v_defaultbits(3, 0b111)
+        self.apc = v_bits(3, 0b111)
+        self.wwsc = v_bits(2, 0b11)
+        self.rwsc = v_bits(3, 0b111)
         self._pad3 = v_const(1)
         self.dpfen = v_bits(1)
         self._pad4 = v_const(1)
@@ -287,8 +286,8 @@ class FLASH_BIUCR(PeriphRegister):
         self.bfen = v_bits(1)
 
 class FLASH_BIUAPR(PeriphRegister):
-    def __init__(self):
-        PeriphRegister.__init__(self)
+    def __init__(self, bigend=True):
+        PeriphRegister.__init__(self, bigend=bigend)
         # The pad fields in this register aren't v_const because the
         # documentation seems to indicate that the values read may be 1 if
         # shadow flash has been erased
@@ -297,33 +296,33 @@ class FLASH_BIUAPR(PeriphRegister):
         # what is shown in the documentation.  Even though this is the only
         # register in the flash controller that seems to be this way.  So I
         # suspect this is probably a documentation bug.
-        self._pad0 = v_defaultbits(14, 0x3FFF)
-        self.m8ap = v_defaultbits(2, 0b11)
-        self._pad1 = v_defaultbits(2, 0b11)
-        self.m6ap = v_defaultbits(2, 0b11)
-        self.m5ap = v_defaultbits(2, 0b11)
-        self.m4ap = v_defaultbits(2, 0b11)
-        self._pad2 = v_defaultbits(6, 0x3F)
-        self.m0ap = v_defaultbits(2, 0b11)
+        self._pad0 = v_bits(14, 0x3FFF)
+        self.m8ap = v_bits(2, 0b11)
+        self._pad1 = v_bits(2, 0b11)
+        self.m6ap = v_bits(2, 0b11)
+        self.m5ap = v_bits(2, 0b11)
+        self.m4ap = v_bits(2, 0b11)
+        self._pad2 = v_bits(6, 0x3F)
+        self.m0ap = v_bits(2, 0b11)
 
 class FLASH_BIUCR2(PeriphRegister):
-    def __init__(self):
+    def __init__(self, bigend=True):
         # The pad fields in this register aren't v_const because the
         # documentation seems to indicate that the values read may be 1 if
         # shadow flash has been erased
-        PeriphRegister.__init__(self)
+        PeriphRegister.__init__(self, bigend=bigend)
         self.lbcfg = v_bits(2)
         self._pad0 = v_bits(30)
 
 class FLASH_UT0(PeriphRegister):
-    def __init__(self):
-        PeriphRegister.__init__(self)
+    def __init__(self, bigend=True):
+        PeriphRegister.__init__(self, bigend=bigend)
         self.ute = v_bits(1)
         self.scbe = v_bits(1)
         self._pad0 = v_const(6)
         self.dsi = v_bits(8)
         self._pad1 = v_const(8)
-        self.ea = v_defaultbits(1, 1)
+        self.ea = v_bits(1, 1)
         self._pad2 = v_const(1)
         self.mre = v_bits(1)
         self.mrv = v_bits(1)
@@ -333,13 +332,13 @@ class FLASH_UT0(PeriphRegister):
         self.aid = v_const(1, 1)
 
 class FLASH_UT1(PeriphRegister):
-    def __init__(self):
-        PeriphRegister.__init__(self)
+    def __init__(self, bigend=True):
+        PeriphRegister.__init__(self, bigend=bigend)
         self.dai = v_bits(32)
 
 class FLASH_UT2(PeriphRegister):
-    def __init__(self):
-        PeriphRegister.__init__(self)
+    def __init__(self, bigend=True):
+        PeriphRegister.__init__(self, bigend=bigend)
         self.dai = v_bits(32)
 
 
@@ -393,7 +392,7 @@ def _loadFromFile(filename, offset, size):
 
 
 class FlashArray:
-    def __init__(self, flashdev, device):
+    def __init__(self, flashdev, device, bigend=True):
         self.flashdev = flashdev
         self.device = device
         self.shadow = None
@@ -456,18 +455,18 @@ class FlashArray:
             errmsg = 'Invalid %s device: %r' % (self.__class__.__name__, device)
             raise Exception(errmsg)
 
-        self.lmlr = FLASH_LMLR()
-        self.hlr = FLASH_HLR()
-        self.slmlr = FLASH_SLMLR()
-        self.lmsr = FLASH_LMSR()
-        self.hsr = FLASH_HSR()
-        self.ar = FLASH_AR()
-        self.biucr = FLASH_BIUCR()
-        self.biuapr = FLASH_BIUAPR()
-        self.biucr2 = FLASH_BIUCR2()
-        self.ut0 = FLASH_UT0()
-        self.ut1 = FLASH_UT1()
-        self.ut2 = FLASH_UT2()
+        self.lmlr = FLASH_LMLR(bigend=bigend)
+        self.hlr = FLASH_HLR(bigend=bigend)
+        self.slmlr = FLASH_SLMLR(bigend=bigend)
+        self.lmsr = FLASH_LMSR(bigend=bigend)
+        self.hsr = FLASH_HSR(bigend=bigend)
+        self.ar = FLASH_AR(bigend=bigend)
+        self.biucr = FLASH_BIUCR(bigend=bigend)
+        self.biuapr = FLASH_BIUAPR(bigend=bigend)
+        self.biucr2 = FLASH_BIUCR2(bigend=bigend)
+        self.ut0 = FLASH_UT0(bigend=bigend)
+        self.ut1 = FLASH_UT1(bigend=bigend)
+        self.ut2 = FLASH_UT2(bigend=bigend)
 
         # TODO: At the moment all read/write operations are assumed to be coming
         # from the Z7 core (Bus Master ID 0), need to provide a method for other
@@ -665,6 +664,7 @@ class FlashArray:
         # If the value being written is 0xA1A11111 set the LMLR[LME] bit
         if data == b'\xA1\xA1\x11\x11':
             self.lmlr.vsOverrideValue('lme', 1)
+            logger.debug("%s[%s] low/mid blocks unlocked for writing", self.__class__.__name__, self.name)
         elif self.lmlr.lme == 1:
             # If the LMLR[LME] bit is set then the lock fields can be modified
             self.lmlr.vsParse(data)
@@ -673,6 +673,7 @@ class FlashArray:
         # If the value being written is 0xB2B22222 set the HLR[HBE] bit
         if data == b'\xB2\xB2\x22\x22':
             self.hlr.vsOverrideValue('hbe', 1)
+            logger.debug("%s[%s] high blocks unlocked for writing", self.__class__.__name__, self.name)
         elif self.hlr.hbe == 1:
             # If the HLR[HBE] bit is set then the lock field can be modified
             self.hlr.vsParse(data)
@@ -681,12 +682,12 @@ class FlashArray:
         # If the value being written is 0xC3C33333 set the SLMLR[SLE] bit
         if data == b'\xC3\xC3\x33\x33':
             self.slmlr.vsOverrideValue('sle', 1)
+            logger.debug("%s[%s] shadow blocks unlocked for writing", self.__class__.__name__, self.name)
         elif self.slmlr.sle == 1:
             # If the SLMLR[SLE] bit is set then the lock fields can be modified
             self.slmlr.vsParse(data)
 
     def _mmio_read(self, va, offset, size):
-        logger.debug("0x%x:  %s[%s]: read [%x:%r]", self.flashdev.emu.getProgramCounter(), self.__class__.__name__, self.name, va, size)
 
         reg_idx = offset//4
         try:
@@ -716,10 +717,15 @@ class FlashArray:
             # This shouldn't happen
             raise Exception('Invalid FLASH CONFIG register @ 0x%x: %r' % (va, vst))
 
+        logger.debug("0x%x:  %s[%s] read  [%x:%r] (%r)",
+                     self.flashdev.emu.getProgramCounter(),
+                     self.__class__.__name__, self.name, va, size, val)
         return val
 
     def _mmio_write(self, va, offset, bytez):
-        logger.debug("0x%x:  %s[%s]: [%x] = %r", self.flashdev.emu.getProgramCounter(), self.__class__.__name__, self.name, va, bytez)
+        logger.debug("0x%x:  %s[%s] write [%x] = %r",
+                     self.flashdev.emu.getProgramCounter(),
+                     self.__class__.__name__, self.name, va, bytez)
         try:
             vst = self._write_registers[offset//4]
         except IndexError:
@@ -817,6 +823,8 @@ class FlashArray:
 
             # Ensure that the block has can be modified
             if self.checkBlockWritable(block):
+                logger.debug("%s[%s] programming %s @ 0x%08x (%d bytes)",
+                        self.__class__.__name__, self.name, block.name, offset, len(data))
                 if block.value[0] == FlashBlockType.HIGH:
                     # high blocks are interleaved every 16 bytes. So and write
                     # the data in 16-byte chunks.
@@ -833,12 +841,13 @@ class FlashArray:
                         flash_offset += 16
 
                     self.flashdev.save(device, offset, size*2)
-                else:
-                    if device == FlashDevice.FLASH_MAIN:
-                        self.flashdev.data[offset:offset+size] = data
-                    else:
-                        self.shadow[offset:offset+size] = data
 
+                elif device == FlashDevice.FLASH_MAIN:
+                    self.flashdev.data[offset:offset+size] = data
+                    self.flashdev.save(device, offset, size)
+
+                else:
+                    self.shadow[offset:offset+size] = data
                     self.flashdev.save(device, offset, size)
 
             else:
@@ -862,6 +871,8 @@ class FlashArray:
 
                 # Ensure that the block has can be modified
                 if self.checkBlockWritable(block):
+                    logger.debug("%s[%s] erasing %s (%d bytes)",
+                            self.__class__.__name__, self.name, block.name, size)
 
                     if block.value[0] == FlashBlockType.HIGH:
                         # high blocks are interleaved every 16 bytes. So just
@@ -881,34 +892,65 @@ class FlashArray:
                             flash_offset += 16
 
                         self.flashdev.save(device, offset, size*2)
-                    else:
-                        if device == FlashDevice.FLASH_MAIN:
-                            self.flashdev.data[offset:offset+size] = _genErasedBytes(size)
-                        else:
-                            self.shadow[offset:offset+size] = _genErasedBytes(size)
 
+                    elif device == FlashDevice.FLASH_MAIN:
+                        self.flashdev.data[offset:offset+size] = _genErasedBytes(size)
                         self.flashdev.save(device, offset, size)
+
+                    else:
+                        self.shadow[offset:offset+size] = _genErasedBytes(size)
+                        self.flashdev.save(device, offset, size)
+
                 else:
                     # It isn't clear from the documentation what should happen if a
                     # block wasn't selected?
                     logger.error('[%s]%s flash erase failed, block %s locked',
-                            self.name, device.name, block.name)
+                            self.__class__.__name__, self.name, block.name)
 
             # Regardless of how well things went clear out the saved write
             # information
             self._write_data = None
 
     def write(self, block, offset, bytez):
+        if not self.checkBlockWritable(block) and not self.mcr.ers:
+            logger.debug('[%s]%s ignoring write to block %s, not writable',
+                    self.__class__.__name__, self.name, block.name)
+            return
+
         # If this is the first write create the buffer holding the data to
         # be written
-        size = self._block_map[block][2]
+        device, block_offset, size = self._block_map[block]
         if self._write_data is None:
+            # If this block is being programmed, copy the current block's data,
+            # and then save the initial data that is being written.  If this
+            # block is being erased then the write is just used to identify
+            # (confirm?) which block is being modified and no data needs to be
+            # saved.
             if self.mcr.pgm:
-                # If this block is being programmed, save the initial data that
-                # is being written.  If this block is being erased then the
-                # write is just used to identify (confirm?) which block is being
-                # modified and no data needs to be saved.
-                self._write_data = (block, bytearray(_genErasedBytes(size)))
+                logger.debug('[%s]%s copying block %s data for programming',
+                        self.__class__.__name__, self.name, block.name)
+
+                if block.value[0] == FlashBlockType.HIGH:
+                    # high blocks are interleaved every 16 bytes. So copy every
+                    # other 16-byte chunk.
+                    #
+                    # TODO: It seems like there should be a better way
+                    if self.device == FlashDevice.FLASH_B_CONFIG:
+                        block_offset |= 0x00000010
+
+                    block_data = bytearray()
+                    for i in range(0, size, 16):
+                        start = block_offset + i
+                        block_data += self.flashdev.data[start:start+16]
+                        block_offset += 16
+
+                elif device == FlashDevice.FLASH_MAIN:
+                    block_data = self.flashdev.data[block_offset:block_offset+size]
+
+                else:
+                    block_data = self.shadow[block_offset:block_offset+size]
+
+                self._write_data = (block, block_data)
 
             elif self.mcr.ers:
                 # If the shadow block is selected, set the MCR[PEAS] bit
@@ -927,7 +969,7 @@ class FlashArray:
             # being written.  If this block is being erased then the write is
             # just used to identify (confirm?) which block is being modified and
             # no data needs to be saved.
-            end = offset + size
+            end = offset + len(bytez)
             self._write_data[1][offset:end] = bytez
 
         # TODO: Should an exception be produced if write is attempted and not
@@ -953,8 +995,8 @@ class FLASH(mmio.MMIO_DEVICE):
 
         # Initialize the A and B flash arrays.  These objects handle both the
         # configuration registers and the shadow flash.
-        self.A = FlashArray(self, FlashDevice.FLASH_A_CONFIG)
-        self.B = FlashArray(self, FlashDevice.FLASH_B_CONFIG)
+        self.A = FlashArray(self, FlashDevice.FLASH_A_CONFIG, bigend=emu.getEndian())
+        self.B = FlashArray(self, FlashDevice.FLASH_B_CONFIG, bigend=emu.getEndian())
 
         # Flash memory for blocks A and B are distributed oddly
         # (from "Table 11-1. Memory Map" MPC5674FRM.pdf page 366):
@@ -1325,9 +1367,12 @@ class FLASH(mmio.MMIO_DEVICE):
     ##########################################
 
     def _flash_read(self, va, offset, size):
-        return self.data[offset:offset+size]
+        value = self.data[offset:offset+size]
+        #logger.debug("0x%x:  FLASH read  [%x:%r] (%r)", self.emu.getProgramCounter(), offset, size, value)
+        return value
 
     def _flash_write(self, va, offset, bytez):
+        #logger.debug("0x%x:  FLASH write [%x] = %r", self.emu.getProgramCounter(), va, bytez)
         # The array corresponding to the block being modified must be identified
         # because the writes are cached by the sub-array until the MCR[EHV] bit
         # is written which causes the cached data to be written to the flash
@@ -1343,9 +1388,12 @@ class FLASH(mmio.MMIO_DEVICE):
     ##########################################
 
     def _shadow_A_read(self, va, offset, size):
-        return self.A.shadow[offset:offset+size]
+        value = self.A.shadow[offset:offset+size]
+        #logger.debug("0x%x:  ShadowFlash[A] read  [%x:%r] (%r)", self.emu.getProgramCounter(), va, size, value)
+        return value
 
     def _shadow_A_write(self, va, offset, bytez):
+        #logger.debug("0x%x:  ShadowFlash[A] write [%x] = %r", self.emu.getProgramCounter(), va, bytez)
         self.A.write(FlashBlock.S0, offset, bytez)
 
     def _shadow_A_bytes(self):
@@ -1356,9 +1404,12 @@ class FLASH(mmio.MMIO_DEVICE):
     ##########################################
 
     def _shadow_B_read(self, va, offset, size):
-        return self.B.shadow[offset:offset+size]
+        value = self.B.shadow[offset:offset+size]
+        #logger.debug("0x%x:  ShadowFlash[B] read  [%x:%r] (%r)", self.emu.getProgramCounter(), va, size, value)
+        return value
 
     def _shadow_B_write(self, va, offset, bytez):
+        #logger.debug("0x%x:  ShadowFlash[B] write [%x] = %r", self.emu.getProgramCounter(), va, bytez)
         self.B.write(FlashBlock.S0, offset, bytez)
 
     def _shadow_B_bytes(self):

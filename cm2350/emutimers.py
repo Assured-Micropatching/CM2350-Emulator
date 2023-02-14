@@ -71,6 +71,10 @@ class EmuTimer:
         # default values may be
         if freq is not None:
             self.freq = freq
+        elif self.freq is None:
+            # If no frequency was provided when the timer was created or in this
+            # start function, use the current timebase frequency
+            self.freq = self._emutime.getSystemFreq()
 
         if period is not None:
             self.period = period
@@ -81,7 +85,8 @@ class EmuTimer:
             # at the specified frequency
             duration = self.period / self.freq
             self.target = now + duration
-            logger.debug('[%s] %s timer started: %s @ %s Hz == %s', now, self.name, self.period, self.freq, duration)
+            logger.debug('[%s] %s timer started: %s @ %s Hz == %s',
+                    now, self.name, self.period, self.freq, duration)
         else:
             # If either frequency or period is 0 then ensure that the timer is
             # not running
@@ -154,9 +159,15 @@ class EmuTimer:
 
     def __lt__(self, other):
         '''
-        comparison function so a list of timers can easily be sorted
+        comparison function so a list of timers can easily be sorted. Timers
+        that aren't running get moved to the end of the list.
         '''
-        return self.running() and self.target < other.target
+        if not self.running():
+            return False
+        elif not other.running():
+            return True
+
+        return self.target < other.target
 
     def __eq__(self, other):
         '''
@@ -171,7 +182,6 @@ class EmulationTime:
     time, and to allow the creation and management of multiple timers with
     callbacks, and allows the emulator time to be halted and resumed.
     '''
-
     def __init__(self, systime_scaling=1.0):
         '''
         Creates a separate thread to track which timer has the least amount of
@@ -195,12 +205,27 @@ class EmulationTime:
         self._timer_update = threading.Condition()
         self._stop = threading.Event()
 
-        # Thread to run the timers
-        self._tb_thread = threading.Thread(target=self._tb_run)
+        # Thread to run the timers. This thread should get cleaned up properly
+        # when the EmulationTime object is deleted
+        #
+        # For some bizzare reason ipython just absolutely will hang up
+        # when exiting unless these are marked as daemon threads. There
+        # is some sort of check happening in check in
+        # /usr/lib/python3.9/threading.py that is run before the atexit
+        # handler and is halting cleanup. This is some sort of weird
+        # behavior with ipython + SimpleQueue + Threads. However we have
+        # no need to add "task tracking" to this design so we don't want
+        # to add in the extra complexity of using full Queues.
+        #
+        # So to work around this we just set the daemon flag, even
+        # though I don't like it.
+        args = {
+            'name': 'tb',
+            'target': self._tb_run,
+            'daemon': True,
+        }
+        self._tb_thread = threading.Thread(**args)
 
-        # This thread should get cleaned up properly when the EmulationTime
-        # object is deleted, but just in case set this as a daemon thread
-        self._tb_thread.setDaemon(True)
         self._tb_thread.start()
 
         # Variables to let us track how long the emulated system has been
@@ -215,6 +240,9 @@ class EmulationTime:
         self.freq = None
 
     def __del__(self):
+        self.haltEmuTimeThread()
+
+    def shutdown(self):
         '''
         Stops the timer management thread and cleanly exits the system.  This
         is done to ensure that when an EmulationTime object is deleted that the
@@ -222,25 +250,29 @@ class EmulationTime:
         especially during testing.
         '''
         # Stop and deallocate all the timers
-        try:
+        if hasattr(self, '_tb_thread') and self._tb_thread:
             self._stop.set()
 
             # Stop all of the timers
-            with self._timer_update:
-                for t in self._timers:
-                    t._stop()
+            if self._timers:
+                with self._timer_update:
+                    for t in self._timers:
+                        # This will cause a timer to be "stopped"
+                        t.target = None
 
-                # Signal the timer re-check condition as well which will force the
-                # thread to re-evaluate which timer is next and it will notice it should
-                # halt
-                self._timer_update.notify()
+                    # Signal the timer re-check condition as well which will force the
+                    # thread to re-evaluate which timer is next and it will notice it should
+                    # halt
+                    self._timer_update.notify()
+                self._timers = []
 
             # Wait for the thread to exit
-            self._tb_thread.join()
-        except AttributeError:
-            # Most likely means the emulator object did not fully initialize, so
-            # don't add extra errors here
-            pass
+            self._tb_thread.join(1)
+
+            if self._tb_thread.is_alive():
+                logger.error('Failed to stop system time thread')
+            else:
+                self._tb_thread = None
 
     def enableTimebase(self, start_paused=False):
         '''
@@ -317,13 +349,22 @@ class EmulationTime:
         The system clock frequency is only required to determine the number of
         clock ticks that have elapsed while the system has been running.
         '''
-        self._systemFreq = freq
+        if self.hid0.sel_tbclk:
+            self._systemFreq = self.fmpll.extal
+        else:
+            self._systemFreq = self.siu.f_periph()
 
     def getSystemFreq(self):
         '''
         Returns the configured system clock frequency.
         '''
         return self._systemFreq
+
+    def getSystemScaling(self):
+        '''
+        Returns the configured scaling factor for the emulation clock.
+        '''
+        return self._systime_scaling
 
     def systime(self):
         '''

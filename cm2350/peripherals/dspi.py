@@ -4,7 +4,7 @@ import envi.bits as e_bits
 
 from ..ppc_vstructs import *
 from ..ppc_peripherals import *
-from ..intc_exc import ExternalException, INTC_SRC
+from ..intc_exc import INTC_EVENT
 
 import logging
 logger = logging.getLogger(__name__)
@@ -99,40 +99,38 @@ DSPI_MODE_CSI_UNSUPPORTED = (DSPI_MODE.CSI_CNTRLR, DSPI_MODE.CSI_PERIPH)
 
 # Mapping of interrupt types based on the supporting DSPI peripherals and the
 # corresponding SR flag field names
-# The "OVERRUN" interrupt source is used for both the Rx overflow and Tx
-# underflow conditions
-DSPI_INT_SRCS = {
+DSPI_INT_EVENTS = {
     'DSPI_A': {
-        'eoqf': INTC_SRC.DSPI_A_TX_EOQ,
-        'tfff': INTC_SRC.DSPI_A_TX_FILL,
-        'tcf':  INTC_SRC.DSPI_A_TX_CMPLT,
-        'tfuf': INTC_SRC.DSPI_A_OVERRUN,
-        'rfdf': INTC_SRC.DSPI_A_RX_DRAIN,
-        'rfof': INTC_SRC.DSPI_A_OVERRUN,
+        'eoqf': INTC_EVENT.DSPI_A_TX_EOQ,
+        'tfff': INTC_EVENT.DSPI_A_TX_FILL,
+        'tcf':  INTC_EVENT.DSPI_A_TX_CMPLT,
+        'tfuf': INTC_EVENT.DSPI_A_TFUF,
+        'rfdf': INTC_EVENT.DSPI_A_RX_DRAIN,
+        'rfof': INTC_EVENT.DSPI_A_RFOF,
     },
     'DSPI_B': {
-        'eoqf': INTC_SRC.DSPI_B_TX_EOQ,
-        'tfff': INTC_SRC.DSPI_B_TX_FILL,
-        'tcf':  INTC_SRC.DSPI_B_TX_CMPLT,
-        'tfuf': INTC_SRC.DSPI_B_OVERRUN,
-        'rfdf': INTC_SRC.DSPI_B_RX_DRAIN,
-        'rfof': INTC_SRC.DSPI_B_OVERRUN,
+        'eoqf': INTC_EVENT.DSPI_B_TX_EOQ,
+        'tfff': INTC_EVENT.DSPI_B_TX_FILL,
+        'tcf':  INTC_EVENT.DSPI_B_TX_CMPLT,
+        'tfuf': INTC_EVENT.DSPI_B_TFUF,
+        'rfdf': INTC_EVENT.DSPI_B_RX_DRAIN,
+        'rfof': INTC_EVENT.DSPI_B_RFOF,
     },
     'DSPI_C': {
-        'eoqf': INTC_SRC.DSPI_C_TX_EOQ,
-        'tfff': INTC_SRC.DSPI_C_TX_FILL,
-        'tcf':  INTC_SRC.DSPI_C_TX_CMPLT,
-        'tfuf': INTC_SRC.DSPI_C_OVERRUN,
-        'rfdf': INTC_SRC.DSPI_C_RX_DRAIN,
-        'rfof': INTC_SRC.DSPI_C_OVERRUN,
+        'eoqf': INTC_EVENT.DSPI_C_TX_EOQ,
+        'tfff': INTC_EVENT.DSPI_C_TX_FILL,
+        'tcf':  INTC_EVENT.DSPI_C_TX_CMPLT,
+        'tfuf': INTC_EVENT.DSPI_C_TFUF,
+        'rfdf': INTC_EVENT.DSPI_C_RX_DRAIN,
+        'rfof': INTC_EVENT.DSPI_C_RFOF,
     },
     'DSPI_D': {
-        'eoqf': INTC_SRC.DSPI_D_TX_EOQ,
-        'tfff': INTC_SRC.DSPI_D_TX_FILL,
-        'tcf':  INTC_SRC.DSPI_D_TX_CMPLT,
-        'tfuf': INTC_SRC.DSPI_D_OVERRUN,
-        'rfdf': INTC_SRC.DSPI_D_RX_DRAIN,
-        'rfof': INTC_SRC.DSPI_D_OVERRUN,
+        'eoqf': INTC_EVENT.DSPI_D_TX_EOQ,
+        'tfff': INTC_EVENT.DSPI_D_TX_FILL,
+        'tcf':  INTC_EVENT.DSPI_D_TX_CMPLT,
+        'tfuf': INTC_EVENT.DSPI_D_TFUF,
+        'rfdf': INTC_EVENT.DSPI_D_RX_DRAIN,
+        'rfof': INTC_EVENT.DSPI_D_RFOF,
     },
 }
 
@@ -157,7 +155,7 @@ class DSPI_x_MCR(PeriphRegister):
         self.clr_rxf = v_bits(1)
         self.smpl_pt = v_bits(2)
         self._pad1 = v_const(7)
-        self.halt = v_defaultbits(1, 1)
+        self.halt = v_bits(1, 1)
 
 
 class DSPI_x_TCR(PeriphRegister):
@@ -171,7 +169,7 @@ class DSPI_x_CTAR(PeriphRegister):
     def __init__(self):
         super().__init__()
         self.dbr = v_bits(1)
-        self.fmsz = v_defaultbits(4, 0xF)
+        self.fmsz = v_bits(4, 0xF)
         self.cpol = v_bits(1)
         self.cpha = v_bits(1)
         self.lsbfe = v_bits(1)
@@ -206,14 +204,13 @@ class DSPI_x_SR(PeriphRegister):
         self.popnxtptr = v_const(4)
 
 
+# The RSER register bit fields have the same name as the SR register with a
+# "_RE" suffix, but to make interrupt mask checking easier use the same exact
+# field names as DSPI_x_SR (at least for bits that have an exact match between
+# the registers)
 class DSPI_x_RSER(PeriphRegister):
     def __init__(self):
         super().__init__()
-
-        # The RSER register bit fields have the same name as the SR register
-        # with a "_RE" suffix, but to make interrupt mask checking easier use
-        # the same exact field names as DSPI_x_SR (at least for bits that have
-        # an exact match between the registers)
 
         self.tcf = v_bits(1)
         self._pad0 = v_const(2)
@@ -275,13 +272,13 @@ class DSPI_REGISTERS(PeripheralRegisterSet):
     """
     Register set for DSPI peripherals.
     """
-    def __init__(self, emu=None):
-        super().__init__(emu)
+    def __init__(self):
+        super().__init__()
 
         # Basic SPI operation
         self.mcr    = (DSPI_MCR_OFFSET,    DSPI_x_MCR())
         self.tcr    = (DSPI_TCR_OFFSET,    DSPI_x_TCR())
-        self.ctar   = (DSPI_CTAR_OFFSET,   VArray([DSPI_x_CTAR() for x in range(DSPI_CTAS_MAX)]))
+        self.ctar   = (DSPI_CTAR_OFFSET,   VTuple([DSPI_x_CTAR() for x in range(DSPI_CTAS_MAX)]))
         self.sr     = (DSPI_SR_OFFSET,     DSPI_x_SR())
         self.rser   = (DSPI_RSER_OFFSET,   DSPI_x_RSER())
 
@@ -319,16 +316,9 @@ class DSPI(ExternalIOPeripheral):
         DSPI constructor.  Each processor has multiple DSPI peripherals so the
         devname parameter must be unique.
         """
-        self._config = emu.vw.config.project.MPC5674.getSubConfig(devname)
-
-        # Get the host IP and port to use from the configuration, use the
-        # cfginfo/dict method to read these because the host defaults to "None",
-        # in which case we want to actually read None, not get an EnviConfig
-        # error.
-        host = self._config.cfginfo['host']
-        port = self._config.cfginfo['port']
-
-        super().__init__(emu, devname, host, port, mmio_addr, 0x4000, regsetcls=DSPI_REGISTERS)
+        super().__init__(emu, devname, mmio_addr, 0x4000,
+                regsetcls=DSPI_REGISTERS,
+                isrstatus='sr', isrflags='rser', isrevents=DSPI_INT_EVENTS)
 
         self.mode = None
         self._tx_fifo = None
@@ -338,23 +328,17 @@ class DSPI(ExternalIOPeripheral):
         # size
         self._rx_fifo_size = 0
 
+        # TODO: read from a fixed-log or buffer, for now we make this match
+        # what the real CM2350 reads from the DSPI buses
+        if self.devname == 'DSPI_D':
+            self._popr_empty_data = b'\x00\x00\x87\xad'
+        else:
+            self._popr_empty_data = b'\x00\x00\xff\xff'
+        logger.debug('[%s] setting 0x%s as data to return when receive queue is empty',
+                     self.devname, self._popr_empty_data)
+
         # Update the state of the peripheral based on MCR writes
         self.registers.vsAddParseCallback('mcr', self.mcrUpdate)
-
-    def event(self, name, value):
-        """
-        Takes in a name for an event, updates the status register (SR) field of
-        the matching name, and if the value is "1" queues a corresponding
-        interrupt.
-
-        Setting an event value of 0 has no effect, and setting an event value of
-        1 when the SR field is already 1 has no effect.
-        """
-        if value and self.registers.sr.vsGetField(name) == 0:
-            self.registers.sr.vsOverrideValue(name, int(value))
-
-            if self.registers.rser.vsGetField(name) == 1:
-                self.emu.queueException(ExternalException(DSPI_INT_SRCS[self.devname][name]))
 
     def reset(self, emu):
         """
@@ -389,9 +373,9 @@ class DSPI(ExternalIOPeripheral):
 
         elif offset in DSPI_POPR_RANGE:
             # Any size read in the POPR register address range causes a new
-            # element to be shifted into POPR from the Rx FIFO.
-            idx = offset - DSPI_POPR_OFFSET
-            return self.popRx()[idx:idx+size]
+            # element to be shifted into POPR from the Rx FIFO, but reads of 2
+            # bytes or 1 byte should read from the lower part of the data.
+            return self.popRx()[-size:]
 
         elif offset in DSPI_TXFR_RANGE:
             idx = offset - DSPI_TXFR_OFFSET
@@ -557,14 +541,7 @@ class DSPI(ExternalIOPeripheral):
             return data
 
         else:
-            # TODO: read from a fixed-log or buffer, for now we make this match
-            # what the real CM2350 reads from the DSPI buses
-            if self.devname == 'DSPI_D':
-                data = b'\x00\x00\x87\xad'
-            else:
-                data = b'\x00\x00\xff\xff'
-            logger.debug('%s (%s): No available data, returning 0x%s', self.devname, self.mode, data.hex())
-            return data
+            return self._popr_empty_data
 
     def popTx(self):
         """

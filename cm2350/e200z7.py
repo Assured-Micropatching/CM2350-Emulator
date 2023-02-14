@@ -16,15 +16,18 @@ e200z7 is responsible for defining:
 '''
 import sys
 import queue
+import threading
+
 import logging
 import threading
 logger = logging.getLogger(__name__)
 
 import envi
+import envi.bits as e_bits
 import envi.memory as e_mem
-from vstruct.bitfield import *
-from envi.archs.ppc.regs import REG_MCSR, REG_MSR, REG_TSR, REG_TCR, REG_HID0, REG_HID1, REG_TBU, REG_TB, REG_TBU_WO, REG_TBL_WO
-from .ppc_vstructs import BitFieldSPR, v_const, v_w1c
+from envi.archs.ppc.regs import REG_MCSR, REG_MSR, REG_TSR, REG_TCR, REG_DEC, \
+        REG_DECAR, REG_HID0, REG_HID1, REG_TBU, REG_TB, REG_TBU_WO, REG_TBL_WO
+from .ppc_vstructs import BitFieldSPR, v_const, v_w1c, v_bits
 
 from . import emutimers, mmio, ppc_mmu, e200_intc, e200_gdb
 from .const import *
@@ -71,14 +74,14 @@ class HID1(BitFieldSPR):
 
 
 class TSR(BitFieldSPR):
-    def __init__(self, emu, bigend=True):
+    def __init__(self, emu):
         super().__init__(REG_TSR, emu)
-        self.enw = v_bits(1)
-        self.wis = v_bits(1)
-        self.wrs = v_bits(2)
-        self.dis = v_bits(1)
-        self.fis = v_bits(1)
-        self._pad0 = v_bits(26)
+        self.enw = v_w1c(1)
+        self.wis = v_w1c(1)
+        self.wrs = v_w1c(2)
+        self.dis = v_w1c(1)
+        self.fis = v_w1c(1)
+        self._pad0 = v_const(26)
 
 
 class TCR(BitFieldSPR):
@@ -100,7 +103,6 @@ class TCR(BitFieldSPR):
 class MCSR(BitFieldSPR):
     def __init__(self, emu):
         super().__init__(REG_MCSR, emu)
-        # Don't block out the specific fields, we don't need them
         self.flags = v_w1c(32)
 
 
@@ -108,7 +110,7 @@ class PpcEmulationTime(emutimers.EmulationTime):
     '''
     PowerPC specific emulator time and timer handling.
     '''
-    def __init__(self, systime_scaling=1.0):
+    def __init__(self, systime_scaling=0.01):
         super().__init__(systime_scaling)
 
         # The time base can be written to which is supposed to reset the point
@@ -210,9 +212,9 @@ class PpcEmulationTime(emutimers.EmulationTime):
 
 
 import envi.archs.ppc.emu as eape
-import vivisect.impemu.emulator as vimp_emu
+import vivisect.impemu.platarch.ppc as vimp_ppc_emu
 #class PPC_e200z7(mmio.ComplexMemoryMap, eape.Ppc32EmbeddedEmulator, PpcEmulationTime):
-class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator, eape.Ppc32EmbeddedEmulator, PpcEmulationTime):
+class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.Ppc32EmbeddedEmulator, PpcEmulationTime):
     def __init__(self, vw):
         # module registry
         self.modules = {}
@@ -233,20 +235,38 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator, eape.Ppc32Em
         # class the PPC_e200z7 is designed so that the core vivisect workspace
         # emulator can be removed in the future to improve performance (at the
         # cost of analysis/inspection/live debug capabilities).
-        vimp_emu.WorkspaceEmulator.__init__(self, vw, nostack=True, funconly=False)
+        #
+        # TODO: CLI enabled logread/logwrite functionality?
+        #vimp_ppc_emu.PpcWorkspaceEmulator.__init__(self, vw, nostack=True, funconly=False, logread=True, logwrite=True)
+        vimp_ppc_emu.PpcWorkspaceEmulator.__init__(self, vw, nostack=True, funconly=False)
 
         #PpcEmulationTime.__init__(self, 0.1)
         PpcEmulationTime.__init__(self)
 
-        self.tcr = TCR(self)
-        self.tsr = TSR(self)
-        self.mcsr = MCSR(self)
+        # MCU timers
+        self.mcu_wdt = None
+        self.mcu_fit = None
+        self.mcu_dec = None
 
-        self.hid0 = HID0(self)
+        # The TCR register controls the MCU watchdog, Decrementer and
+        # Fixed-Interval Timers.
+        self.tcr = TCR(self)
+        self.tcr.vsAddParseCallback('wie', self._tcrWIEUpdate)
+        self.tcr.vsAddParseCallback('fie', self._tcrFIEUpdate)
+        self.tcr.vsAddParseCallback('die', self._tcrDIEUpdate)
+
+        self.tsr = TSR(self)
+
+        self.addSprReadHandler(REG_DEC, self._readDec)
+        self.addSprWriteHandler(REG_DEC, self._writeDec)
+
         # Attach a callback to HID0[TBEN] that can start/stop timebase
-        self.hid0.vsAddParseCallback('tben', self._tbUpdate)
+        self.hid0 = HID0(self)
+        self.hid0.vsAddParseCallback('tben', self._hid0TBUpdate)
 
         self.hid1 = HID1(self)
+
+        self.mcsr = MCSR(self)
 
         # Create the MMU peripheral and then redirect the TLB instruction
         # handlers to the MMU
@@ -257,7 +277,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator, eape.Ppc32Em
         self.mcu_intc = e200_intc.e200INTC(emu=self, ivors=True)
 
         # Create GDBSTUB Server
-        self.gdbstub = e200_gdb.e200GDB(self)
+        #self.gdbstub = e200_gdb.e200GDB(self)
         self._pause_queue = queue.Queue()
         self._pausers = queue.Queue()
 
@@ -283,16 +303,171 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator, eape.Ppc32Em
         self._read_callbacks = {}
         self._write_callbacks = {}
 
-    def _tbUpdate(self, thing):
+    def __del__(self):
+        self.shutdown()
+
+    def shutdown(self):
+        # Call the emutime shutdown function
+        super().shutdown()
+
+        if hasattr(self, 'modules') and self.modules:
+            # Go through each peripheral and if any of them have a server thread
+            # running, stop it now
+            for mname in list(self.modules):
+                if hasattr(self.modules[mname], 'stop'):
+                    self.modules[mname].stop()
+                del self.modules[mname]
+
+    def _mcuWDTHandler(self):
+        # From "Figure 8-1. Watchdog State Machine" (EREF_RM.pdf page 886)
+        if not self.tsr.enw:
+            # If TSR[ENW] and TSR[WIS] are both cleared, set TSR[ENW] and start
+            # the watchdog timer again
+            self.tsr.vsOverrideValue('enw', 1)
+            self.watchdog.start()
+
+        elif not self.tsr.wis:
+            # If TSR[ENW] is set but not TSR[WIS], set WIS and start the
+            # watchdog timer again
+            self.tsr.vsOverrideValue('wis', 1)
+            self.watchdog.start()
+
+            # Trigger the watchdog exception
+            self.queueException(intc_exc.WatchdogTimerException())
+
+        elif self.tcr.wrc:
+            # Any value in TCR[WRC] when TSR[ENW] and TSR[WIS] are set causes a
+            # reset to happen
+            self.queueException(intc_exc.ResetException())
+
+    def _mcuFITHandler(self):
+        # Indicate that a fixed-interval timer event has occured
+        self.tsr.vsOverrideValue('fis', 1)
+
+        # Trigger the fixed-interval timer exception
+        self.queueException(intc_exc.FixedIntervalTimerException())
+
+    def _mcuDECHandler(self):
+        # Indicate that a decrementer event has occured
+        self.tsr.vsOverrideValue('dis', 1)
+
+        # Trigger the decrementer exception, unless there already is one pending
+        if not self.isExceptionActive(intc_exc.DecrementerException):
+            self.queueException(intc_exc.DecrementerException())
+
+        # If automatic reload is enabled (TCR[ARE]), load DEC from DECAR
+        if self.tcr.are:
+            value = self.getRegister(REG_DECAR)
+            logger.debug('Reloading DEC from DECAR: 0x%08x', value)
+            self.setRegister(REG_DEC, value)
+
+    def _startMCUWDT(self):
+        # The watchdog period is determined by the TCR[WP] and TCR[WPEXT] values
+        # concatenated together. These identify which bit of the TB to trigger a
+        # watchdog event on.  0 being the MSB, 63 being the LSB.
+        wdt_bit = self.tcr.wp << 4 | self.tcr.wpext
+
+        # Determine the actual bit number and then the bit mask is the period
+        self.mcu_wdt.start(period=e_bits.b_mask[63 - wdt_bit])
+
+    def _startMCUFIT(self):
+        # The fixed-interval period is determined by the TCR[WP] and TCR[WPEXT]
+        # values concatenated together. These identify which bit of the TB to
+        # trigger a fixed-interval event on.  0 being the MSB, 63 being the LSB.
+        fit_bit = self.tcr.fp << 4 | self.tcr.fpext
+
+        # Determine the actual bit number and then the bit mask is the period
+        self.mcu_fit.start(period=e_bits.b_mask[63 - fit_bit])
+
+    def _startMCUDEC(self):
+        # If there is a queued or active decrementer exception already, attach a
+        # cleanup function to it to start start the timer again.  The real
+        # processor would just do this immediately but because of variations in
+        # how long it may take to execute the handler we have to do it this way
+        # for now.
+        exc = self.nextPendingException(intc_exc.DecrementerException)
+        if exc is not None:
+            # There is an active or pending decremeter exception, attach this
+            # function as a cleanup function.
+            exc.setCleanup(self._startMCUDEC)
+        else:
+            # There is no active decrementer exception, so start the timer
+            self.mcu_dec.start(period=self.getRegister(REG_DEC))
+
+    def _tcrWIEUpdate(self, tcr):
+        if self.tcr.wie and self.systimeRunning():
+            self._startMCUWDT()
+        else:
+            self.mcu_wdt.stop()
+
+    def _tcrFIEUpdate(self, tcr):
+        if self.tcr.fie and self.systimeRunning():
+            self._startMCUFIT()
+        else:
+            self.mcu_fit.stop()
+
+    def _tcrDIEUpdate(self, tcr):
+        if self.tcr.die and self.systimeRunning():
+            self._startMCUDEC()
+        else:
+            self.mcu_dec.stop()
+
+    def _readDec(self, emu, op):
+        # If the decremeter is running return how many ticks are remaining.
+        if self.mcu_dec.running():
+            return self.mcu_dec.ticks()
+        else:
+            # If we return None then the existing REG_DEC value will be used.
+            return None
+
+    def _writeDec(self, emu, op):
+        value = self.getOperValue(op, 1)
+
+        # If the decrementer is enabled, restart it.
+        if self.tcr.die:
+            self.mcu_dec.start(period=value)
+
+        return value
+
+    def _hid0TBUpdate(self, hid0):
         if self.hid0.tben:
             self.enableTimebase()
+
+            # When the timebase is enabled also check if the WDT, FIT or DEC
+            # timers should be started
+            if self.tcr.wie:
+                self._startMCUWDT()
+            if self.tcr.fie:
+                self._startMCUFIT()
+            if self.tcr.die:
+                self._startMCUWDT()
+
         else:
             self.disableTimebase()
+
+            # If any of the timebase-run MCU timers are running, stop them now
+            if self.tcr.wie:
+                self.mcu_wdt.stop()
+            if self.tcr.fie:
+                self.mcu_fit.stop()
+            if self.tcr.die:
+                self.mcu_dec.stop()
 
     def init_core(self):
         '''
         Setup the Peripherals supported on this chip
         '''
+        # Create the MCU timers
+        self.mcu_wdt = self.registerTimer('MCU_WDT', self._mcuWDTHandler)
+        self.mcu_fit = self.registerTimer('MCU_FIT', self._mcuFITHandler)
+        self.mcu_dec = self.registerTimer('MCU_DEC', self._mcuDECHandler)
+
+        # Create a queue to use for any extra processing that must occur before
+        # instructions are processed. This should be more efficient than having
+        # required checks each cycle.
+        self.extra_processing = []
+        self.extra_processing_lock = threading.RLock()
+
         # Create the queue that external IO threads can use to queue up message
         # for processing
         # WHY DOES NOTHING SIMPLE EVER WORK RIGHT IN PYTHON ANYMORE?
@@ -312,6 +487,18 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator, eape.Ppc32Em
         Peripherals that should be returned to some pre-determined state when
         the processor resets should implement this function.
         '''
+        # TODO: move MCU timers into the official PowerPC "timebase" class
+        self.disableTimebase()
+
+        # Clear out all pending extra processing
+        with self.extra_processing_lock:
+            self.extra_processing = []
+
+        # Stop all MCU timers
+        self.mcu_wdt.stop()
+        self.mcu_fit.stop()
+        self.mcu_dec.stop()
+
         # First reset the system emulation time, then reset all modules
         self.systimeReset()
         for key, module in self.modules.items():
@@ -463,8 +650,17 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator, eape.Ppc32Em
         Data Read
         '''
         ea = self.mmu.translateDataAddr(va)
-        data = mmio.ComplexMemoryMap.readMemory(self, ea, size)
+
+        # Translate Segmentation Violation exceptions into the correct PPC
+        # Data Read Exception
+        try:
+            data = mmio.ComplexMemoryMap.readMemory(self, ea, size)
+        except envi.SegmentationViolation:
+            raise intc_exc.MceDataReadBusError(pc=self.getProgramCounter(),
+                                               data=b'', va=va)
+
         self._checkReadCallbacks(ppc_xbar.XBAR_MASTER.CORE0, ea, data=data)
+
         return data
 
     def writeMemory(self, va, bytez):
@@ -472,7 +668,12 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator, eape.Ppc32Em
         Data Write
         '''
         ea = self.mmu.translateDataAddr(va)
-        mmio.ComplexMemoryMap.writeMemory(self, ea, bytez)
+        try:
+            mmio.ComplexMemoryMap.writeMemory(self, ea, bytez)
+        except envi.SegmentationViolation:
+            raise intc_exc.MceWriteBusError(pc=self.getProgramCounter(),
+                                               data=b'', va=va)
+
         self._checkWriteCallbacks(ppc_xbar.XBAR_MASTER.CORE0, ea, bytez)
 
         # If the physical address being written to has cached instructions ,
@@ -495,6 +696,9 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator, eape.Ppc32Em
         ea = self.mmu.translateDataAddr(va)
         return mmio.ComplexMemoryMap.getByteDef(self, ea)
 
+    def isValidPointer(self, va):
+        return self.mmu.getDataEntry(va)[2] is not None
+
     def putIO(self, devname, obj):
         """
         enqueue new IO data to be processed by a peripheral
@@ -514,6 +718,21 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator, eape.Ppc32Em
                 self.modules[devname].processReceivedData(obj)
         except queue.Empty:
             pass
+
+        # Only do one extra processing function call per tick.  If this
+        # function needs to be run in future cycles it should requeue
+        # itself.
+        with self.extra_processing_lock:
+            try:
+                self.extra_processing.pop(0)()
+            except IndexError:
+                pass
+
+    def addExtraProcessing(self, func):
+        with self.extra_processing_lock:
+            # Don't double-add extra processing functions
+            if func not in self.extra_processing:
+                self.extra_processing.append(func)
 
     def stepi(self):
         """
@@ -582,14 +801,24 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator, eape.Ppc32Em
             except intc_exc.INTCException as exc:
                 # If any PowerPC-specific exception occurs, queue it to be handled
                 # on the next call
-                logger.warning("INTCExc: %r", exc)
                 self.queueException(exc)
 
     def queueException(self, exception):
-        '''
-        redirect exceptions to the MCU exception handler
-        '''
         self.mcu_intc.queueException(exception)
+
+    def isExceptionActive(self, exctype):
+        return self.mcu_intc.isExceptionActive(exctype)
+
+    def nextPendingException(self, exctype):
+        try:
+            return next(self.mcu_intc.findPendingException(exctype))
+        except StopIteration:
+            return None
+
+    def dmaRequest(self, request):
+        logger.debug('DMA request for %s (%s)', request.name, request.value)
+        devname, channel = request.value
+        self.modules[devname].dmaRequest(channel)
 
     def parseOpcode(self, va, arch=envi.ARCH_PPC_E32, skipcache=False):
         '''

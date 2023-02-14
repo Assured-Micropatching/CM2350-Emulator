@@ -48,9 +48,6 @@ class e200GDB(vtp_gdb.GdbServerStub):
         logger.info("e200GDB Initialized.")
         self.state = STATE_CONNECTED
 
-        # register to receive Interrupts/Exceptions
-        emu.registerInterruptCb(self.handleInterrupts)
-
         if self.runthread is None:
             logger.info("starting GDBServer runthread")
             self.runthread = threading.Thread(target=self.runServer)
@@ -62,8 +59,11 @@ class e200GDB(vtp_gdb.GdbServerStub):
         # This is a single-threaded GDB Server
         self.curThread = 1
 
-
     def handleInterrupts(self, interrupt):
+        '''
+        Translate system interrupts/exceptions into GDB signals/events.
+        If debugging is active some signals should cause execution to halt.
+        '''
         print("FIXME: e200GDB: HANDLE INTERRUPTs: %r" % interrupt)
 
     def generateRegFmt(self, emu=None):
@@ -78,6 +78,8 @@ class e200GDB(vtp_gdb.GdbServerStub):
         return regfmt
 
     def _postClientAttach(self, addr):
+        # TODO: Watch for signals that should cause execution to halt.
+
         logger.info("Client attached: %r", repr(addr))
         logger.info("Halting processor")
         self._halt_reason = HALT_ATTACH

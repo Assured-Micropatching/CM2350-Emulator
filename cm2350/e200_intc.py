@@ -1,9 +1,13 @@
 import queue
 import logging
+import operator
+import threading
 import traceback
+
+from envi.archs.ppc import regs as ppcregs
+
 from .intc_const import *
 from . import intc_exc
-from .internal.envi.archs.ppc import regs as ppcregs
 
 logger = logging.getLogger(__name__)
 
@@ -41,16 +45,16 @@ class e200INTC:
 
         # callback handlers
         self._callbacks = {}
-        self._callbacks_ext = {}
 
-        self.stack = []     # track current and preempted exceptions
+        self.lock = threading.RLock()
+
+        # track current and preempted exceptions
+        self.stack = []
         self._external_intc = None
 
-        # attributes for handling interrupts
-        self.intqs = None
-        self.exc_count = 0
+        # Track exceptions yet to be handled
+        self.pending = []
         self.hasInterrupt = False
-        self.canHandleNextInterrupt = True
 
     def registerExtINTC(self, extintc):
         '''
@@ -62,15 +66,10 @@ class e200INTC:
         self._external_intc = extintc
 
     def init(self, emu):
+        '''
+        Support the CPU init/reset functions.
+        '''
         logger.debug('init: e200INTC module (Interrupt Controller)')
-
-        # each type of exception has their own queue.
-        #FIXME: how does the MPC5674F's 16 priority
-        self.srq = queue.SimpleQueue()    # non-critical
-        self.gq = queue.SimpleQueue()     # guest
-        self.csq = queue.SimpleQueue()    # critical
-        self.mcq = queue.SimpleQueue()    # machine-check
-        self.dbgq = queue.SimpleQueue()   # debug
 
         self.reset(emu)
 
@@ -78,26 +77,17 @@ class e200INTC:
         '''
         Clear out any pending exceptions and restore the machine to it's initial state
         '''
-        self.intqs = (
-                None,
-                self.srq,
-                self.gq,
-                self.csq,
-                self.mcq,
-                self.dbgq,
-                )
+        # Clear out the pending and active interrupts
+        with self.lock:
+            self.stack = []
+            self.pending = []
 
-        # fast-check status variables (warning, no thread-safety-checks for speed... be very cautious):
-        self.exc_count = 0
-
-        # use instance variable to keep the run loop tight.  this must be only used in one thread.
+        # use instance variable to keep the run loop tight.  this must be only
+        # used in one thread.
         self.hasInterrupt = False
 
-        # maintain whether a new interrupt *can* be handled yet...
-        self.canHandleNextInterrupt = True
-
         # Default priority level
-        self.curlvl = INTC_STATE_NORMAL
+        self.curlvl = INTC_LEVEL_NONE
 
     def queueException(self, exception):
         '''
@@ -111,76 +101,71 @@ class e200INTC:
             logger.warning('not handling exception: %r', exception)
             return
 
-        logger.debug('queuing exception: %r', exception)
-        self.intqs[exception.prio].put(exception)
-        self.exc_count += 1
-        self.hasInterrupt = True
+        with self.lock:
+            logger.debug('queuing exception: %r', exception)
+            self.pending.append(exception)
+
+            # So sort the list to ensure the higher priorities are at the beginning
+            self.pending.sort(key=operator.attrgetter('prio'))
+
+            # If the first interrupt in the list is one that can be handled at the
+            # current priority level, indicate there is a pending interrupt
+            self.hasInterrupt = self.curlvl > self.pending[0].prio
 
     def checkException(self):
-        if self.hasInterrupt and self.canHandleNextInterrupt:
+        '''
+        Allows a core to check if there are exceptions that need handling.
+        '''
+        if self.hasInterrupt:
             # do most costly Interrupt Handling stuff here
             self.handleException()
 
     def handleException(self):
         '''
         Look for exceptions that should preempt the current state
-        If there are any:
-            Store the state
-            Set the ESR/MSR/context
-            Set the PC to the correct Interrupt Service Routine
-                (two modes, determined by INTC_MCR[HVEN])
         '''
-        # check current exception level
-        # look for higher exception queues to be populated
-        for checklvl in range(4, self.curlvl, -1):
-            curq = self.intqs[checklvl]
-            if not curq.empty():
-                # pull the next exception from the prioritized queue.
-                newexc = curq.get_nowait()
+        # This is only called if the first pending exception has a higher
+        # priority than the current level, so get the first exception and start
+        # processing it.l
 
-                # store the new exception on the stack (pushing the new one in
-                # front of the previous)
-                self.stack.append(newexc)
+        # pull the next exception from the prioritized queue.
+        with self.lock:
+            newexc = self.pending.pop(0)
 
-                # set ESR/MSR??
-                newexc.setupContext(self.emu)
+        # store the new exception on the stack (pushing the new one in front of
+        # the previous)
+        with self.lock:
+            self.stack.append(newexc)
 
-                # set PC from IVOR
-                newpc = self.getHandler(newexc)
+        # set ESR/MSR??
+        newexc.setupContext(self.emu)
 
-                # Check if there are any peripheral-specific callbacks for this
-                # exception type
-                ######################T SHIS IS SOME JACKED UP CRAP....  .source doesn't exist on more exceptions!
-                if newexc.__ivor__ == EXC_EXTERNAL_INPUT:
-                    for callback in self._callbacks_ext.get(newexc.source, []):
-                        callback(newexc)
+        # set PC from IVOR
+        newpc = self.getHandler(newexc)
 
-                else: 
-                    if newexc.__ivor__ in self._callbacks:
-                        for callback in self._callbacks.get(newexc.__ivor__, []):
-                            callback(newexc)
+        # Check if there are any peripheral-specific callbacks for this
+        # exception type
+        for callback in self._callbacks.get(type(newexc), []):
+            callback(newexc)
 
-                logger.debug('PC: 0x%08x (%r)', self.emu.getProgramCounter(), newexc)
-                logger.debug('NEWPC: %r', newpc)
-                self.emu.setProgramCounter(newpc)
+        logger.debug('PC: 0x%08x (%r)  LVL: %d -> %d  NEWPC: 0x%08x',
+                self.emu.getProgramCounter(), newexc, self.curlvl, newexc.prio, newpc)
+        self.emu.setProgramCounter(newpc)
 
-                # change self.curlvl
-                self.curlvl = newexc.prio
+        # change self.curlvl
+        self.curlvl = newexc.prio
 
-                # if exc_count == 0, reset hasException  (in the future, might make this only set when there's an exception of higher priority than current??)
-                self.exc_count -= 1
-                if not self.exc_count:
-                    self.hasInterrupt = False
-
-                break   # only need to do one
+        # Indicate if there are any other pending interrupts that can be
+        # processed at the current level
+        with self.lock:
+            self.hasInterrupt = self.pending and \
+                    self.curlvl > self.pending[0].prio
 
     def addCallback(self, exception, callback):
-        if exception not in self._callbacks_ext:
-            self._callbacks_ext[exception] = [callback]
-        else:
-            self._callbacks_ext[exception].append(callback)
-
-    def addCallbackInt(self, exception, callback):
+        '''
+        Adds an optional callback to be run after a specific exception has
+        completed.
+        '''
         if exception not in self._callbacks:
             self._callbacks[exception] = [callback]
         else:
@@ -213,13 +198,45 @@ class e200INTC:
         correct PC and MSR (stored in their own SRR* registers)
         '''
         # Get rid of the newest exception, it is finished being processed
-        if self.stack:
+        with self.lock:
             oldexc = self.stack.pop()
 
-        # If there are still interrupts on the stack then we are returning
-        # into another interrupt
-        if self.stack:
-            curexc = self.stack[-1]
-            self.curlvl = curexc.prio
-        else:
-            self.curlvl = INTC_STATE_NORMAL
+            # If there are still interrupts on the stack then we are returning 
+            # into another interrupt
+            if self.stack:
+                curexc = self.stack[-1]
+                self.curlvl = curexc.prio
+            else:
+                self.curlvl = INTC_LEVEL_NONE
+
+        # Now execute any exception cleanup functions that may be attached to
+        # this exception
+        oldexc.doCleanup()
+
+        # Check if there are any pending exceptions that can be processed
+        with self.lock:
+            self.hasInterrupt = self.pending and \
+                    self.curlvl > self.pending[0].prio
+
+    def isExceptionActive(self, exctype):
+        '''
+        Returns an indication that a specific exception type is currently being
+        processed or is pending.
+        '''
+        with self.lock:
+            return any(isinstance(e, exctype) for e in self.stack) or \
+                    any(isinstance(e, exctype) for e in self.pending)
+
+    def findPendingException(self, exctype):
+        '''
+        Finds and returns all active and pending exceptions of the specified
+        type
+        '''
+        with self.lock:
+            for exc in self.stack:
+                if isinstance(exc, exctype):
+                    yield exc
+
+            for exc in self.pending:
+                if isinstance(exc, exctype):
+                    yield exc

@@ -2,6 +2,7 @@ import queue
 import logging
 import threading
 
+import envi.bits as e_bits
 from envi.archs.ppc import regs as ppcregs
 
 from ..ppc_vstructs import *
@@ -33,10 +34,6 @@ INTC_SSCIR_SRC = (
     INTC_SRC.INTC_SW_7,
 )
 
-# multiply the interrupt source number by this constant to get the hardware
-# vector offset
-INTC_HWVEC_OFFSET_SIZE  = 0x10
-
 # peripheral register offsets
 INTC_MCR_OFFSET         = 0x0000
 INTC_CPR_OFFSET         = 0x0008
@@ -66,7 +63,7 @@ class INTC_CPR(PeriphRegister):
     def __init__(self):
         super().__init__()
         self._pad0 = v_const(28)
-        self.pri = v_defaultbits(4, 0xF)
+        self.pri = v_bits(4, 0xF)
 
 class INTC_SSCIRn(PeriphRegister):
     def __init__(self):
@@ -76,8 +73,8 @@ class INTC_SSCIRn(PeriphRegister):
         self.clr = v_w1c(1)
 
 class INTC_REGISTERS(PeripheralRegisterSet):
-    def __init__(self, emu=None):
-        super().__init__(emu)
+    def __init__(self):
+        super().__init__()
         self.mcr        = (INTC_MCR_OFFSET, INTC_MCR())
         self.cpr        = (INTC_CPR_OFFSET, INTC_CPR())
 
@@ -125,7 +122,7 @@ class INTC(MMIOPeripheral):
 
         # Install a callback handler for the SSCIR register so when values are
         # written the correct actions can be taken.
-        self.registers.vsAddParseCallback('by_idx_sscir', self.sscirUpdate)
+        self.registers.sscir.vsAddParseCallback('by_idx', self.sscirUpdate)
 
         # A callback for the CPR register, so when the priority changes any
         # delayed interrupts that have been saved will be re-queued.
@@ -191,7 +188,7 @@ class INTC(MMIOPeripheral):
             else:
                 super()._setPeriphReg(offset, bytez)
 
-    def sscirUpdate(self, thing, idx, size):
+    def sscirUpdate(self, thing, idx, size, **kwargs):
         if self.registers.sscir[idx].set:
             # If the SSCIRn[SET] bit is set, queue an exception and clear the
             # SET bit (it should always read 0)
@@ -265,7 +262,7 @@ class INTC(MMIOPeripheral):
 
         # Use the current exception's source to calculate INTVEC
         vtba = (self.vtba << INTC_IACKR_VTBA_SHIFT[vtes]) & INTC_IACKR_VTBA_MASK[vtes]
-        intvec = (intsrc * INTC_HWVEC_OFFSET_SIZE) << INTC_IACKR_INTVEC_SHIFT[vtes]
+        intvec = intsrc << INTC_IACKR_INTVEC_SHIFT[vtes]
         self._iackr = vtba | intvec
 
         if self.registers.mcr.hven:

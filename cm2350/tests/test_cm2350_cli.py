@@ -9,8 +9,9 @@ import hashlib
 import os.path
 import unittest
 
-import envi.archs.ppc.const as eapc
+import vivisect
 import envi.archs.ppc.regs as eapr
+import envi.archs.ppc.const as eapc
 
 from .. import CM2350
 
@@ -156,22 +157,42 @@ DEFAULT_SHADOW_FLASH_A = \
         b'\xFE\xED\xFA\xCE\xCA\xFE\xBE\xEF\x55\xAA\x55\xAA' + \
         b'\xFF' * 0x021C
 
+
+def dict_merge(a, b):
+    result = copy.deepcopy(a)
+
+    for key, value in b.items():
+        if isinstance(value, dict):
+            result[key] = dict_merge(result.get(key, {}), value)
+        else:
+            result[key] = copy.deepcopy(b[key])
+
+    return result
+
+
 # Default project configuration using the DEFAULT_CONFIG path, so it has an
-# empty firmware configuration
-DEFAULT_PROJECT_CONFIG = {
-    'cli': {
-        'verbose': False,
-        'aliases': {
-            '<f1>': 'stepi', '<f2>': 'go -I 1', '<f5>': 'go'
+# empty firmware configuration.
+CM2350_DEFAULT_CONFIG = {
+    'viv': {
+        'parsers': {
+            'blob': {
+                'arch': 'ppc32-embedded',
+                'bigend': True,
+                'baseaddr': 0,
+            },
+            'ihex': {
+                'arch': 'ppc32-embedded',
+                'bigend': True,
+                'offset': 0,
+            },
+            'srec': {
+                'arch': 'ppc32-embedded',
+                'bigend': True,
+                'offset': 0,
+            }
         }
     },
-    'vdb': {
-        'BreakOnEntry': False,
-        'BreakOnMain': False,
-        'SymbolCacheActive': True,
-        'SymbolCachePath': os.path.join(USERDIR, '.envi', 'symcache'),
-        'KillOnQuit': False
-    },
+
     'project': {
         'name': PROJECT_NAME,
         'platform': 'CM2350',
@@ -191,7 +212,7 @@ DEFAULT_PROJECT_CONFIG = {
                 'shadowBOffset': 0,
                 'backup': 'backup.flash'
             },
-            'SRAM': {'addr': 1073741824, 'size': 262144},
+            'SRAM': {'addr': 1073741824, 'size': 262144, 'standby_size': 32768},
             'FlexCAN_A': {'host': None, 'port': None},
             'FlexCAN_B': {'host': None, 'port': None},
             'FlexCAN_C': {'host': None, 'port': None},
@@ -204,21 +225,10 @@ DEFAULT_PROJECT_CONFIG = {
             'eQADC_B': {'host': None, 'port': None},
         }
     },
-    'viv': {
-        'SymbolCacheSave': True,
-        'analysis': {'pointertables': {'table_min_len': 4}},
-        'arch': {'ppc': {'options': 'spe'}},
-        'parsers': {
-            'pe': {'loadresources': False, 'carvepes': True, 'nx': False},
-            'elf': {},
-            'macho': {'baseaddr': 1886388224, 'fatarch': ''},
-            'vbf': {'arch': '', 'bigend': False},
-            'blob': {'arch': 'ppc32-embedded', 'bigend': True, 'baseaddr': 0},
-            'ihex': {'arch': 'ppc32-embedded', 'bigend': True, 'offset': 0},
-            'srec': {'arch': 'ppc32-embedded', 'bigend': True, 'offset': 0},
-        }
-    }
 }
+
+# Merge the CM2350 default config with the vivisect default config
+DEFAULT_PROJECT_CONFIG = dict_merge(vivisect.defconfig, CM2350_DEFAULT_CONFIG)
 
 
 def get_config(config, flash_cfg=None):
@@ -361,7 +371,7 @@ def tearDownModule():
                 logger.debug('removing test directory %s', testdir)
                 shutil.rmtree(testdir)
             else:
-                logger.error('WARNING: test directory %s is not a directory! not removing' % testdir)
+                logger.error('WARNING: test directory %s is not a directory! not removing', testdir)
         else:
             logger.debug('test directory %s not present, skipping', testdir)
 
@@ -524,9 +534,13 @@ class CM2350_CLI(unittest.TestCase):
         #############################
         # Cleanup
 
+        # to gracefully clean up the ECU resources call halt() before deleting
+        # the object
+        ecu.shutdown()
+        del ecu
+
         # Test is completed, remove the configuration directory (unless config
         # == EXISTING_CONFIG)
-        del ecu
         if not exists:
             shutil.rmtree(config)
         elif backup_exists:

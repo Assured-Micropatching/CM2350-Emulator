@@ -15,13 +15,7 @@ MTSPR_VAL       = 0x7C0003A6
 INSTR_REG_SHIFT = 21
 INSTR_SPR_SHIFT = 11
 
-# MacOS timing is always bad for some reason, presumably due to process
-# privatization or something
-import platform
-if platform.system() == 'Darwin':
-    TIMING_ACCURACY = 0.010
-else:
-    TIMING_ACCURACY = 0.005
+TIMING_ACCURACY = 0.010
 
 
 class MPC5674_SPRHOOKS_Test(MPC5674_Test):

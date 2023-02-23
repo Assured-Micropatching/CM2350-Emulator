@@ -298,43 +298,34 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
 '''
 
     def _serverReadMem(self, addr, size):
-        # The particular error msg doesn't matter, but for testing purposes use 
-        # the signal numbers to indicate the type of failure:
-        #   - MMU error         = SIGBUS
-        #   - unable to read    = SIGSEGV
+        """
+        Normally a GDB server should return an error if an invalid memory
+        address is read, but the GDB client when it connects to a remote target
+        has no knowledge of the target endianness and it immediately attempts
+        to read the memory address referenced by the PC and SP registers. But
+        if the gdb client's endianness setting hasn't been set to big endian
+        before connecting, GDB will attempt to read an invalid memory address.
+
+        So this function has to return a fake value for all memory addressing
+        related errors
+        """
         try:
             return vtp_gdb.GdbBaseEmuServer._serverReadMem(self, addr, size)
 
-        except intc_exc.MceDataReadBusError:
-            #return b'E%02d' % signal.SIGSEGV
-
-            # We have to just accept this or GDB gets really weird
-            return b'00000000'
-
-        except intc_exc.DataTlbException:
-            #return b'E%02d' % signal.SIGBUS
-
-            # We have to just accept this or GDB gets really weird
-            return b'00000000'
+        except (intc_exc.MceDataReadBusError, intc_exc.DataTlbException):
+            # Return garbage filler values
+            return b'00' * size
 
     def _serverWriteMem(self, addr, val):
-        # The particular error msg doesn't matter, but for testing purposes use 
-        # the signal numbers to indicate the type of failure:
-        #   - MMU error         = SIGBUS
-        #   - unable to write   = SIGSEGV
-
+        """
+        Support writing to server memory but translate the PPC data access
+        exceptions into standard error types.
+        """
         try:
             return vtp_gdb.GdbBaseEmuServer._serverWriteMem(self, addr, val)
 
-        except intc_exc.MceDataWriteBusError:
-            #return b'E%02d' % signal.SIGSEGV
-
-            # We have to just accept this or GDB gets really weird
-            return b'OK'
+        except intc_exc.MceWriteBusError:
+            return b'E%02d' % signal.SIGSEGV
 
         except intc_exc.DataTlbException:
-            #return b'E%02d' % signal.SIGBUS
-
-            # We have to just accept this or GDB gets really weird
-            return b'OK'
-
+            return b'E%02d' % signal.SIGBUS

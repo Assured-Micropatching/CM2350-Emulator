@@ -1372,13 +1372,18 @@ class FLASH(mmio.MMIO_DEVICE):
         return value
 
     def _flash_write(self, va, offset, bytez):
-        #logger.debug("0x%x:  FLASH write [%x] = %r", self.emu.getProgramCounter(), va, bytez)
-        # The array corresponding to the block being modified must be identified
-        # because the writes are cached by the sub-array until the MCR[EHV] bit
-        # is written which causes the cached data to be written to the flash
-        # bytearray stored in this class.
-        array, block, offset = self._getArrayBlockOffset(va)
-        array.write(block, offset, bytez)
+        # If supervisor mode is enabled, allow directly modifying the bytearray 
+        # representation of flash
+        if self.emu._supervisor:
+            self.writeMemory(offset, bytez)
+        else:
+            #logger.debug("0x%x:  FLASH write [%x] = %s", self.emu.getProgramCounter(), va, bytez.hex())
+            # The array corresponding to the block being modified must be 
+            # identified because the writes are cached by the sub-array until 
+            # the MCR[EHV] bit is written which causes the cached data to be 
+            # written to the flash bytearray stored in this class.
+            array, block, offset = self._getArrayBlockOffset(va)
+            array.write(block, offset, bytez)
 
     def _flash_bytes(self):
         return self.data
@@ -1434,7 +1439,7 @@ class FLASH(mmio.MMIO_DEVICE):
 
     def writeMemory(self, addr, data):
         if addr + len(data) <= len(self.data):
-            self.data[addr:addr+size] = data
+            self.data[addr:addr+len(data)] = data
         else:
             raise envi.SegmentationViolation(addr)
 

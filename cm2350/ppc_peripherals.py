@@ -677,7 +677,7 @@ def _recvData(sock):
     if len(data) < 4:
         # If no data is received, assume this is an error and exit
         logger.debug('Incomplete data received %d bytes: %r', len(data), data)
-        raise OSError()
+        raise OSError(errno.EAGAIN)
     size = struct.unpack('>I', data)[0]
 
     data = b''
@@ -688,7 +688,7 @@ def _recvData(sock):
         if not chunk:
             # If no data is received, assume this is an error and exit
             logger.error('No data received: %r', chunk)
-            raise OSError()
+            raise OSError(errno.EAGAIN)
         data += chunk
 
     return data
@@ -906,13 +906,19 @@ class ExternalIOPeripheral(MMIOPeripheral):
         # but if we did that we couldn't use select() in the IO thread to
         # listen for all incoming messages
         self._io_thread_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._io_thread_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self._io_thread_sock.bind(('', 0))
         self._io_thread_sock.listen(1)
         io_addr = self._io_thread_sock.getsockname()
 
+        # Create the socket to transmit data to the IO thread
         self._io_thread_tx_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._io_thread_tx_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self._io_thread_tx_sock.connect(io_addr)
+
+        # Now get the socket to receive data on the IO thread
         self._io_thread_rx_sock, _ = self._io_thread_sock.accept()
+        self._io_thread_rx_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
         # If analysis-only mode is enabled don't create sockets and attempt to
         # do network things
@@ -922,6 +928,7 @@ class ExternalIOPeripheral(MMIOPeripheral):
             # TODO: support IPv6 (AF_INET6)?
             self._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self._server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self._server.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             self._server.bind(self._server_args)
             self._server.listen(0)
 
@@ -1030,16 +1037,22 @@ class ExternalIOPeripheral(MMIOPeripheral):
                         data = _recvData(self._io_thread_rx_sock)
                         # Send to all available client sockets
                         _sendData(self._clients, data)
-                    except OSError as e:
+                    except OSError as exc:
                         # If an OSError happens while receiving from the
                         # internal main-to-IO thread socket it means this thread
                         # should exit
-                        logger.warning('Lost connection to main thread, exiting', exc_info=1)
+                        if len(exc.args) >= 1 and exc.args[0] == errno.EAGAIN:
+                            # If this indicates a connection lost (EAGAIN), 
+                            # don't print the exception information.
+                            logger.warning('Lost connection to main thread, exiting')
+                        else:
+                            logger.warning('Lost connection to main thread, exiting', exc_info=1)
                         return
 
                 elif sock == self._server:
                     # Currently not using the address returned by accept
                     client_sock, _ = self._server.accept()
+                    client_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                     self._clients.append(client_sock)
                     inputs.append(client_sock)
 
@@ -1048,11 +1061,16 @@ class ExternalIOPeripheral(MMIOPeripheral):
                         # receive data from client and send to the main thread
                         obj = _recvObj(sock)
                         self.receive(obj)
-                    except OSError:
+                    except OSError as exc:
                         # If an OSError occurs while receiving from a client
                         # thread, the client has disconnected, remove the socket
                         # from the list of inputs to receive data from
-                        logger.debug('client sock %r disconnected', sock, exc_info=1)
+                        if len(exc.args) >= 1 and exc.args[0] == errno.EAGAIN:
+                            # If this indicates a connection lost (EAGAIN), 
+                            # don't print the exception information.
+                            logger.debug('client sock %r disconnected', sock)
+                        else:
+                            logger.debug('client sock %r disconnected', sock, exc_info=1)
                         self._clients.remove(sock)
                         inputs.remove(sock)
 
@@ -1167,6 +1185,7 @@ class ExternalIOClient:
         """
         if self._sock is None:
             self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self._sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             self._sock.connect(self._addr)
 
     def close(self):
@@ -1194,5 +1213,5 @@ class ExternalIOClient:
             logger.debug('Received %r from %r', obj, self._addr)
             return obj
         except OSError:
-            logger.debug('Connection closed %r', self._addr)
+            logger.debug('Connection closed %r', self._addr, exc_info=1)
             self.close()

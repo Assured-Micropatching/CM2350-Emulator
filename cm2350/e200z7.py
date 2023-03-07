@@ -19,7 +19,6 @@ import queue
 import threading
 
 import logging
-import threading
 logger = logging.getLogger(__name__)
 
 import envi
@@ -39,6 +38,9 @@ from . import intc_exc, ppc_xbar
 __all__ = [
     'PPC_e200z7',
 ]
+
+
+# TODO: Define PIR, PVR, and SVR register contents
 
 
 class HID0(BitFieldSPR):
@@ -277,13 +279,11 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         self.mcu_intc = e200_intc.e200INTC(emu=self, ivors=True)
 
         # Create GDBSTUB Server
-        #self.gdbstub = e200_gdb.e200GDB(self)
-        self._pause_queue = queue.Queue()
-        self._pausers = queue.Queue()
+        self.gdbstub = e200_gdb.e200GDB(self)
+        self._run = threading.Event()
 
-        # generic Breakpoint data
-        self._bpdata = {}
-        self._bps_in_place = False
+        # By default the debugger _run event flag should be set.
+        self._run.set()
 
         # The same sequence of bytes can decode to different PPC or VLE
         # instructions so the opcache must be split into a full PPC and VLE PPC
@@ -470,16 +470,12 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
 
         # Create the queue that external IO threads can use to queue up message
         # for processing
-        # WHY DOES NOTHING SIMPLE EVER WORK RIGHT IN PYTHON ANYMORE?
         self.external_io = queue.Queue()
 
         # initialize the various modules on this chip.
         for key, module in self.modules.items():
             logger.debug("init_core: Initializing %r...", key)
             module.init(self)
-
-            # Accept possible connections from IO threads
-            #self.processIO()
 
     def reset_core(self):
         '''
@@ -515,14 +511,14 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         * SigSTOP_Exception
         * SigTSTP_Exception
         '''
-        self.queueException(intc_exc.BreakException())
+        self.queueException(intc_exc.DebugException())
 
-    def _do_halt(self, signal):
+    def _do_halt(self):
         '''
         Internal Pause mechanism (to keep the details in-house).
         This should only be called by something *in the execution thread*.
-        Currently, this is only called by BreakException during exception-
-        handling, causing a halt (pause) to emulation, until resumed.
+        Currently, this is only called by DebugException exception during
+        exception- handling, causing a halt (pause) to emulation, until resumed.
 
         We'll simply grab a Queue entry until something is fed to the queue.
         By design, this will halt the processor from executing.  To resume
@@ -532,91 +528,24 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         the remaining cores will continue to execute without some other
         mechanism.
         '''
-        try:
-            # store that we're waiting
-            self._pausers.put(threading.currentThread())
-            # pause the clock
-
-            # this part hangs until something is put in the queue to be received
-            self._pause_queue.get()
-
-        finally:
-            # clear out that we are waiting
-            self._pausers.get_nowait()
-
-            # resume the clock
-            self.resume_time()
+        self.halt_time()
+        self._run.clear()
+        self._run.wait()
+        self.resume_time()
 
     def resume_exec(self):
         '''
         Resume the emulator, which has been "paused"
-        Sends a message to the _pause_queue in order to free the paused thread
         '''
-        if self._pausers.empty():
-            logger.warning("resume while not paused!")
-            raise intc_exc.ResumeException("Resume while not Paused!")   # is this bad?
+        self._run.set()
 
-        self._pause_queue.put("YAY! BE FREE!")
-
-    def addBreakpoint(self, va):
+    def debug_client_detached(self):
         '''
-        Handles the details of breakpoint tracking and modified bytes.
+        Handles the condition when a gdb client detaches. For now we will halt
+        the emulator when this occurs.
         '''
-        # if va is already a breakpoint, don't do it!!
-        if va in self._bpdata:
-            return -1   # raise exception
-
-        brkbytes = self.arch.archGetBreakInstr()
-
-        # check for overlapping breakpoints
-        for tva in range(va, va+len(brkbytes)-1):
-            if tva in self._bpdata:
-                return -2   # raise exception
-
-        for tva in range(va - len(brkbytes)+1, va):
-            if tva in self._bpdata:
-                return -3   # raise exception
-
-        # store existing bytes
-        self._bpdata[va] = self.readMemory(va, len(brkbyes))
-
-    def _putDownBreakpoints(self):
-        '''
-        At each emulator stop, we want to replace the original bytes.  On 
-        resume, we put the Break instruction bytes back in.
-        '''
-        brkbytes = self.arch.archGetBreakInstr()
-
-        for va in self._bpdata:
-            # stamp in a Break instruction
-            self.writeMemory(va, brkbytes)
-
-        self._bps_in_place = True
-
-    def _pullUpBreakpoints(self):
-        '''
-        At each emulator stop, we want to replace the original bytes.  On 
-        resume, we put the Break instruction bytes back in.
-        '''
-        brkbytes = self.arch.archGetBreakInstr()
-
-        for va, origbytes in list(self._bpdata.items()):
-            # restore the original bytes
-            self.writeMemory(va, origbytes)
-        
-        self._bps_in_place = False
-
-    def delBreakpoint(self, va):
-        '''
-        Remove breakpoint.
-        '''
-        if va not in self._bpdata:
-            return -1
-
-        origbytes = self._bpdata.pop(va)
-        if self._bps_in_place:
-            self.writeMemory(va, origbytes)
-
+        self.queueException(intc_exc.GdbClientDetachEvent())
+        self.resume_exec()
 
     ###############################################################################
     # Redirect TLB instruction emulation functions to the MMU peripheral
@@ -645,7 +574,18 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         self.mcu_intc._rfi()
         self.intc._rfi()
 
-    def readMemory(self, va, size):
+    # TODO: properly enable/disable the rfdi instruction
+    #if emu.hid0.dapuen == 0:
+    #    # rfi is an invalid instruction if the Debug APU is not enabled
+    #    envi.InvalidInstruction(mesg='%r is an invalid instruction when the Debug APU is disabled' % op)
+
+    def i_dnh(self, op):
+        raise intc_exc.DebugException()
+
+    def i_dni(self, op):
+        raise intc_exc.DebugException()
+
+    def readMemory(self, va, size, skipcallbacks=False):
         '''
         Data Read
         '''
@@ -659,11 +599,12 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
             raise intc_exc.MceDataReadBusError(pc=self.getProgramCounter(),
                                                data=b'', va=va)
 
-        self._checkReadCallbacks(ppc_xbar.XBAR_MASTER.CORE0, ea, data=data)
+        if not skipcallbacks:
+            self._checkReadCallbacks(ppc_xbar.XBAR_MASTER.CORE0, ea, data=data)
 
         return data
 
-    def writeMemory(self, va, bytez):
+    def writeMemory(self, va, bytez, skipcallbacks=False):
         '''
         Data Write
         '''
@@ -674,23 +615,67 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
             raise intc_exc.MceWriteBusError(pc=self.getProgramCounter(),
                                                data=b'', va=va)
 
-        self._checkWriteCallbacks(ppc_xbar.XBAR_MASTER.CORE0, ea, bytez)
+        if not skipcallbacks:
+            self._checkWriteCallbacks(ppc_xbar.XBAR_MASTER.CORE0, ea, bytez)
 
-        # If the physical address being written to has cached instructions ,
-        # those instructions should be cleared.
-        #
+        # If this is an executable section, we may need to clear any instruction 
+        # cache
+        _, _, perm, _ = mmio.ComplexMemoryMap.getMemoryMap(self, ea)
+        if perm & e_mem.MM_READ_WRITE:
+            self.clearOpcache(ea, len(bytez))
+
+    def updateOpcache(self, ea, vle, op):
+        self.opcache[vle][ea] = op
+
+    def clearOpcache(self, ea, size):
+        """
+        If the physical address being written to has cached instructions,
+        those instructions should be cleared.
+        """
+
         # TODO: Not sure of a more efficient way to handle this.  In theory
         # memory writes should happen less often than executing instructions so
         # it seems to make more sense to handle clearing cached instructions
         # during write rather than checking during execute if they are still
         # valid.
-        ppc_addr_to_clear = [a for a in range(ea, ea + len(bytez), 4) if a in self.opcache[0]]
-        for addr in ppc_addr_to_clear:
-            del self.opcache[0][addr]
 
-        vle_addr_to_clear = [a for a in range(ea, ea + len(bytez), 2) if a in self.opcache[1]]
-        for addr in vle_addr_to_clear:
-            del self.opcache[1][addr]
+        # NOTE: if you have instructions with overlaps like this (numbers 
+        # between |--| indicate execution order):
+        #
+        #   0 1 2 4 5 6 7 8
+        #   |1--------|
+        #       |2--|3---|
+        #
+        # Then instruction 1 will be left in the cache and may cause issues when 
+        # clearing the cache for self modifying or intentionally tricky code 
+        # because this clearOpcache() function won't be called in between 
+        # parsing those instructions.
+        #
+        # To prevent this situation remove the
+        #
+        #   else:
+        #       break
+        #
+        # statement in the first loop below.
+
+        # Go backwards the max expected max instruction size and delete any 
+        # cached instructions if they overlap the modified memory area.
+        for addr in range(ea - 1, ea - 16, -1):
+            #if addr in self.opcache:
+            #    if addr + self.opcache[addr].size > va:
+            #        del self.opcache[addr]
+            #    else:
+            #        break
+            if addr in self.opcache[0] and addr + self.opcache[0][addr].size > ea:
+                del self.opcache[0][addr]
+            if addr in self.opcache[1] and addr + self.opcache[1][addr].size > ea:
+                del self.opcache[1][addr]
+
+        for addr in range(ea - 16, ea + size):
+            if addr in self.opcache[0]:
+                del self.opcache[0][addr]
+            if addr in self.opcache[1]:
+                del self.opcache[1][addr]
 
     def getByteDef(self, va):
         ea = self.mmu.translateDataAddr(va)
@@ -752,6 +737,22 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
             # support here?
             self.executeOpcode(op)
 
+        except intc_exc.DebugException as exc:
+            # TODO: If the op is DNH
+            #       If debug exceptions are enabled and external exception 
+            #       handling is set this either generates a debug exception (if 
+            #       EDBCR0[DNH_EN] is set) or it generates an illegal 
+            #       instruction.
+
+            # TODO: if the op is DNI
+            #       If debug exceptions are enabled and internal exception 
+            #       handling is set this instruction generates a debug 
+            #       exception, otherwise it is a no-op.
+
+            # If the Debug APU is enabled and a debug client is attached and 
+            # this was a DNH instruction, pass control to the GDB stub.
+            self.gdbstub.handleInterrupts(exc)
+
         except (envi.UnsupportedInstruction, envi.InvalidInstruction) as exc:
             logger.exception('Unsupported Instruction 0x%x', pc)
 
@@ -775,33 +776,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         Make sure this stays in sync with stepi()!
         """
         while True:
-            self.processIO()
-
-            try:
-                # See if there are any exceptions that need to start being handled
-                self.mcu_intc.checkException()
-
-                # do normal opcode parsing and execution
-                pc = self.getProgramCounter()
-                op = self.parseOpcode(pc)
-                # TODO: check MSR for FP (MSR_FP_MASK) and SPE (MSR_SPE_MASK)
-                # support here?
-                self.executeOpcode(op)
-
-            except (envi.UnsupportedInstruction, envi.InvalidInstruction) as exc:
-                # Translate standard envi exceptions into the PPC-specific
-                # exceptions
-                tb = sys.exc_info()[2]
-                self.queueException(intc_exc.ProgramException().with_traceback(tb))
-
-            except intc_exc.ResetException:
-                # Special case, don't queue a reset exception, just do a reset
-                self.reset()
-
-            except intc_exc.INTCException as exc:
-                # If any PowerPC-specific exception occurs, queue it to be handled
-                # on the next call
-                self.queueException(exc)
+            self.stepi()
 
     def queueException(self, exception):
         self.mcu_intc.queueException(exception)
@@ -820,32 +795,72 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         devname, channel = request.value
         self.modules[devname].dmaRequest(channel)
 
-    def parseOpcode(self, va, arch=envi.ARCH_PPC_E32, skipcache=False):
+    def getInstrInfo(self, va, arch=envi.ARCH_PPC_E32, skipcache=False):
+        ea, vle = self.mmu.translateInstrAddr(va)
+
+        if skipcache:
+            op = None
+        else:
+            op = self.opcache[vle].get(ea)
+
+        if op is None:
+            off, b = mmio.ComplexMemoryMap.getByteDef(self, ea)
+            if vle:
+                op = self._arch_vle_dis.disasm(b, off, va)
+            else:
+                op = self._arch_dis.disasm(b, off, va)
+
+        instrbytes = b[off:off + op.size]
+
+        return ea, vle, op, instrbytes
+
+    def writeOpcode(self, va, bytez):
+        '''
+        In PowerPC instructions can use different MMU entries than data, which
+        means that using the normal writeMemory() function to install a
+        breakpoint may not work properly. Instead there is a special function to
+        support modifying instructions.
+
+        This function clears the cache of any instructions written.
+        '''
+        ea, vle = self.mmu.translateInstrAddr(va)
+        try:
+            mmio.ComplexMemoryMap.writeMemory(self, ea, bytez)
+        except envi.SegmentationViolation:
+            raise intc_exc.MceWriteBusError(pc=self.getProgramCounter(),
+                                               data=b'', va=va)
+
+        # If this is an executable section, we may need to clear any instruction 
+        # cache
+        _, _, perm, _ = mmio.ComplexMemoryMap.getMemoryMap(self, ea)
+        if perm & e_mem.MM_READ_WRITE:
+            self.clearOpcache(ea, len(bytez))
+
+    def parseOpcode(self, va, arch=envi.ARCH_PPC_E32, skipcache=False, skipcallbacks=False):
         '''
         Combination of the WorkspaceEmulator and the standard envi.memory
         parseOpcode functions that handles translating instruction addresses
         into the correct physical address based on the TLB.
         '''
         ea, vle = self.mmu.translateInstrAddr(va)
+
         if skipcache:
             op = None
         else:
-            # The same sequence of bytes can decode to different PPC or VLE
-            # instructions so a different instruction cache must be used for
-            # each mode
-            op = self.opcache[vle].get(ea, None)
-
-        # Just assume the read was 4 bytes, passing the size means the data will
-        # only be read if there is a callback registered.
-        self._checkReadCallbacks(ppc_xbar.XBAR_MASTER.CORE0, ea, size=4, instr=True)
+            op = self.opcache[vle].get(ea)
 
         if op is None:
             off, b = mmio.ComplexMemoryMap.getByteDef(self, ea)
             if vle:
-                op = self._arch_vle_dis.disasm(b, off, ea)
+                op = self._arch_vle_dis.disasm(b, off, va)
             else:
-                op = self._arch_dis.disasm(b, off, ea)
-            self.opcache[vle][ea] = op
+                op = self._arch_dis.disasm(b, off, va)
+
+            self.updateOpcache(ea, vle, op)
+
+        if not skipcallbacks:
+            self._checkReadCallbacks(ppc_xbar.XBAR_MASTER.CORE0, ea,
+                                     size=op.size, instr=True)
 
         # TODO: Check for the following condition:
         # - SpeEfpuUnavailableException: EFPU/SPE instruction when MSR[SPE] == 0

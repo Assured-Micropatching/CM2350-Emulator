@@ -43,7 +43,7 @@ class ComplexMemoryMap(e_mem.MemoryObject):
                 offset = va - mva
 
                 # Confirm that this segment can be read
-                if not mperms & e_mem.MM_READ:
+                if not (mperms & e_mem.MM_READ or self._supervisor):
                     raise envi.SegmentationViolation(va)
 
                 if mperms & PERM_MMIO:

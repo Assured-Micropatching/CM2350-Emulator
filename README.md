@@ -43,7 +43,7 @@ pip install ipython
 
 3. After the vivisect package and emulator prerequisites have been installed,
    and you have activated the virtual environment you can start the emulator
-   with the `EMU_ecu.py` script:
+   with the `ECU_emu.py` script:
 ```
 . ENV/bin/activate
 emulator/ECU_emu.py
@@ -159,3 +159,26 @@ python3 setup.py develop
 pip install ipython
 ```
 Now the `amp_ta3_emulator` virtualenv will be automatically activated whenever you are in the `path/to` directory or a subdirectory.
+
+# Connecting to the emulator with a GDB client
+
+Instead of using the `ECU_emu.py` script that launches an interactive mode, you
+can just run the emulator and have it wait for a remote GDB client to attach
+similar to starting up `qemu` with the `-g` flag. The `run.py` script launches a
+non-interactive emulator
+```
+$ ./run.py -g
+Waiting for GDB client to connect on port 47001
+```
+
+By default the emulator listens on port 47001 if the `-g` flag is provided,
+optionally a different port can be specified after the -g flag.
+
+After the emulator is started and listening you can connect with
+`gdb-multiarch` or a PowerPC-aware build of `gdb` with the following command:
+```
+$ gdb-multiarch -ex "target remote localhost:47001" -ex "set endian big"
+```
+
+`gdb-multiarch` must be told that the target is in big-endian mode, it is unable
+to detect this automatically.

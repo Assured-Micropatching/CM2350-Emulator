@@ -132,21 +132,54 @@ class e200INTC:
         with self.lock:
             newexc = self.pending.pop(0)
 
+        # If this was a debug exception and the external debugger is connected 
+        # it should have been handled through the external debugger by now, 
+        # don't change the PC
+        if isinstance(newexc, intc_exc.DebugException) and \
+                self.emu.gdbstub.isClientConnected():
+            # Before halting re-evaluate if there are any pending interrupts. If 
+            # a stepi happens it may be done from the GDB server thread in which 
+            # case we don't want this event to appear to be an event that has to 
+            # be handled again.
+            self.hasInterrupt = self.pending and self.curlvl > self.pending[0].prio
+
+            self.emu._do_halt()
+
+            # Double check if there are any pending interrupts or not
+            self.hasInterrupt = self.pending and self.curlvl > self.pending[0].prio
+            if self.hasInterrupt:
+                newexc = self.pending.pop(0)
+            else:
+                # No more exceptions to handle, just return
+                return
+
+        # If the debug client has detached stop the emulator.
+        if isinstance(newexc, intc_exc.GdbClientDetachEvent):
+            raise KeyboardInterrupt('Debug Client Detached')
+
         # store the new exception on the stack (pushing the new one in front of
         # the previous)
         with self.lock:
             self.stack.append(newexc)
 
+        # Before handling the exception update the current exception level 
+        # information
+        self.curlvl = newexc.prio
+
+        # Indicate if there are any other pending interrupts that can be
+        # processed at the current level
+        self.hasInterrupt = self.pending and self.curlvl > self.pending[0].prio
+
         # set ESR/MSR??
         newexc.setupContext(self.emu)
-
-        # set PC from IVOR
-        newpc = self.getHandler(newexc)
 
         # Check if there are any peripheral-specific callbacks for this
         # exception type
         for callback in self._callbacks.get(type(newexc), []):
             callback(newexc)
+
+        # set PC from IVOR
+        newpc = self.getHandler(newexc)
 
         logger.debug('PC: 0x%08x (%r)  LVL: %d -> %d  NEWPC: 0x%08x',
                 self.emu.getProgramCounter(), newexc, self.curlvl, newexc.prio, newpc)

@@ -1,6 +1,6 @@
 from envi.archs.ppc.regs import *
 from envi.archs.ppc.const import *
-from vtrace.platforms import signals
+import vtrace.platforms.gdbstub as vtp_gdb
 
 from .intc_const import *
 from .intc_src import INTC_SRC, INTC_EVENT
@@ -52,6 +52,7 @@ __all__ = [
     'MceInstructionFetchBusError',
     'MceDataReadBusError',
     'MceWriteBusError',
+    'GdbClientDetachEvent',
 ]
 
 
@@ -552,14 +553,33 @@ class DebugException(DebugPrioException):
     __msrmask__ = 0x06046034
 
     def setupContext(self, emu):
-        # TODO: setting CSRR0/DSRR0, CSRR1/DSRR1, and DBSR settings need to be
-        # implemented when debug peripheral is added
-        raise NotImplementedError()
+        # If the Debug APU is not enabled the debug exception uses the CSRR0/1 
+        # registers and the exception handler is returned from with RFI
+
+        # Set CSRR0 (next instruction) and CSRR1 (Current MSR)
+        #emu.setRegister(REG_CSRR0, emu._cur_instr[2])
+        emu.setRegister(REG_CSRR0, emu.getProgramCounter())
+        emu.setRegister(REG_CSRR1, emu.getRegister(REG_MSR))
+
+        # Call the INTCException setupContext() function instead of
+        # StandardPrioException because we have already set the SRR0 and SRR1
+        # values here
+        INTCException.setupContext(self, emu)
+
+        # The __msrmask__ leaves MSR[DE] not cleared, but it should be cleared
+        # if the Debug APU is disabled (HID0[DAPUEN] == 0) or if it is enabled
+        # (HID0[DAPUEN] == 1) and HID0[CICLRDE] == 1
+        if emu.hid0.dapuen == 0 or \
+                (emu.hid0.dapuen == 1 and emu.hid0.ciclerde == 1):
+            msr = emu.getRegister(REG_MSR)
+            msr &= (MSR_DE_MASK ^ 0xffffffff)
+            emu.setRegister(REG_MSR, msr)
 
         super().setupContext(emu)
 
-        # Check the HID0 register to determine if MSR[CE, EE] should be cleared
-        # or not
+        # TODO: Check the HID0 register to determine if MSR[CE, EE] should be 
+        # cleared or not
+
 
 class SpeEfpuUnavailableException(StandardPrioException):
     __priority__ = INTC_LEVEL.FPU_UNAVAILABLE
@@ -699,6 +719,7 @@ class LRATException(StandardPrioException):
     def setupContext(self, emu):
         raise NotImplementedError()
 
+
 ###############################################################################
 # More specific Machine Check Exception types
 ###############################################################################
@@ -723,28 +744,12 @@ class MceWriteBusError(MachineCheckException):
     # Set the MCSR[ST] bit
     __mcsrbits__ = 0x00004000
     __mcsrmask__ = 0x00004000
-    
-class BreakException(DebugException):
-    __SIGNAL__ = None
-
-    def setupContext(self, emu):
-        # For now, we'll skip the standard setupContext and attempt to handle 
-        # "Breaks" out of the standard interrupt handling context.
-
-        # use the emulator's built-in pause/resume functionality (so we're not 
-        # left dealing with the details here)
-        emu._do_halt(self.__SIGNAL__)
-
-class SigTRAP_Exception(BreakException):
-    __SIGNAL__ = signals.SIGTRAP
-
-class SigSTOP_Exception(BreakException):
-    __SIGNAL__ = signals.SIGSTOP
-
-class SigTSTP_Exception(BreakException):
-    __SIGNAL__ = signals.SIGTSTP
 
 
-# normal exceptions:
-class ResumeException(Exception):
+###############################################################################
+# Debug exception used to signal when GDB clients detach
+###############################################################################
+
+class GdbClientDetachEvent(DebugException):
     pass
+

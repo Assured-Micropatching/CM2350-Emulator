@@ -442,7 +442,7 @@ class ScaledEmuTimeCore(EmuTimeCore):
     def systimeReset(self):
         EmuTimeCore.systimeReset(self)
         self._sysoffset = time.time()
-        self._breakstart = _sysoffset
+        self._breakstart = self._sysoffset
         self.timerUpdated()
 
     def getSystemScaling(self):

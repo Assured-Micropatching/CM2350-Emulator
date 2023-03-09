@@ -16,6 +16,8 @@ e200z7 is responsible for defining:
 '''
 import sys
 import queue
+import threading
+
 import logging
 logger = logging.getLogger(__name__)
 
@@ -30,7 +32,8 @@ from envi.archs.ppc.regs import REG_MCSR, REG_MSR, REG_TSR, REG_TCR, REG_DEC, \
 from .ppc_vstructs import BitFieldSPR, v_const, v_w1c, v_bits
 
 # PPC Specific packages
-from . import emutimers, ppc_time, mmio, ppc_mmu, e200_intc, intc_const, e200_gdb
+from . import emutimers, ppc_time, mmio, ppc_mmu, ppc_xbar, e200_intc, \
+        intc_exc, intc_const, e200_gdb
 
 
 __all__ = [
@@ -373,9 +376,6 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
             logger.debug("init_core: Initializing %r...", key)
             module.init(self)
 
-        # Now start the system time
-        self.resume_time()
-
     def reset_core(self):
         '''
         Reset all registered peripherals that have a reset function.
@@ -443,68 +443,6 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         Handles the condition when a gdb client detaches. For now we will halt
         the emulator when this occurs.
         '''
-<<<<<<< HEAD
-        self.queueException(intc_exc.GdbClientDetachEvent())
-        self.resume_exec()
-
-||||||| parent of 14dc520 (saving progress, SWT tests don't all pass yet)
-        # if va is already a breakpoint, don't do it!!
-        if va in self._bpdata:
-            return -1   # raise exception
-
-        brkbytes = self.arch.archGetBreakInstr()
-
-        # check for overlapping breakpoints
-        for tva in range(va, va+len(brkbytes)-1):
-            if tva in self._bpdata:
-                return -2   # raise exception
-
-        for tva in range(va - len(brkbytes)+1, va):
-            if tva in self._bpdata:
-                return -3   # raise exception
-
-        # store existing bytes
-        self._bpdata[va] = self.readMemory(va, len(brkbyes))
-
-    def _putDownBreakpoints(self):
-        '''
-        At each emulator stop, we want to replace the original bytes.  On 
-        resume, we put the Break instruction bytes back in.
-        '''
-        brkbytes = self.arch.archGetBreakInstr()
-
-        for va in self._bpdata:
-            # stamp in a Break instruction
-            self.writeMemory(va, brkbytes)
-
-        self._bps_in_place = True
-
-    def _pullUpBreakpoints(self):
-        '''
-        At each emulator stop, we want to replace the original bytes.  On 
-        resume, we put the Break instruction bytes back in.
-        '''
-        brkbytes = self.arch.archGetBreakInstr()
-
-        for va, origbytes in list(self._bpdata.items()):
-            # restore the original bytes
-            self.writeMemory(va, origbytes)
-        
-        self._bps_in_place = False
-
-    def delBreakpoint(self, va):
-        '''
-        Remove breakpoint.
-        '''
-        if va not in self._bpdata:
-            return -1
-
-        origbytes = self._bpdata.pop(va)
-        if self._bps_in_place:
-            self.writeMemory(va, origbytes)
-
-
-=======
         # if va is already a breakpoint, don't do it!!
         if va in self._bpdata:
             return -1   # raise exception
@@ -560,7 +498,6 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         if self._bps_in_place:
             self.writeMemory(va, origbytes)
 
->>>>>>> 14dc520 (saving progress, SWT tests don't all pass yet)
     ###############################################################################
     # Redirect TLB instruction emulation functions to the MMU peripheral
     ###############################################################################

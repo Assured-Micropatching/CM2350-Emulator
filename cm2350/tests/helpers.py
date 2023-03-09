@@ -88,7 +88,12 @@ class MPC5674_Test(unittest.TestCase):
         pending_excs = self._getPendingExceptions()
         for exc in pending_excs:
             print('Unhanded PPC Exception %s' % exc)
-        self.assertEqual(pending_excs, [])
+
+        # Only assert if the test is current succeeding, we don't want to 
+        # override the error of a failure, the success attribute isn't set yet, 
+        # instead look at the errors attribute.
+        if not self._outcome.errors:
+            self.assertEqual(pending_excs, [])
 
         # Clean up the resources
         self.ECU.shutdown()

@@ -2,6 +2,7 @@ import os
 import copy
 import glob
 import json
+import time
 import random
 import shutil
 import struct
@@ -192,7 +193,11 @@ DEFAULT_PROJECT_CONFIG['project'] = {
             'shadowBOffset': 0,
             'backup': 'backup.flash'
         },
-        'SRAM': {'addr': 1073741824, 'size': 262144},
+        'SRAM': {
+            'addr': 0x40000000,
+            'size': 0x40000,
+            'standby_size': 0x8000,
+        },
         'FlexCAN_A': {'host': None, 'port': None},
         'FlexCAN_B': {'host': None, 'port': None},
         'FlexCAN_C': {'host': None, 'port': None},
@@ -205,9 +210,6 @@ DEFAULT_PROJECT_CONFIG['project'] = {
         'eQADC_B': {'host': None, 'port': None},
     }
 }
-
-# Merge the CM2350 default config with the vivisect default config
-DEFAULT_PROJECT_CONFIG = dict_merge(vivisect.defconfig, CM2350_DEFAULT_CONFIG)
 
 
 def get_config(config, flash_cfg=None):
@@ -462,6 +464,9 @@ class CM2350_CLI(unittest.TestCase):
             backup_file = None
         else:
             backup_file = os.path.join(config, '%s.%s' % (BACKUP_FILENAME, hash_value.hex()))
+
+        # Slight delay
+        time.sleep(0.1)
 
         #############################
         # Start testing now

@@ -1193,8 +1193,11 @@ class ExternalIOClient:
         Closes the client connection
         """
         if self._sock is not None:
-            self._sock.shutdown(socket.SHUT_RDWR)
-            self._sock.close()
+            try:
+                self._sock.shutdown(socket.SHUT_RDWR)
+                self._sock.close()
+            except OSError:
+                pass
             self._sock = None
 
     def send(self, obj):

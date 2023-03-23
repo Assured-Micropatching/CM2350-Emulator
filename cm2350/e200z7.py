@@ -176,7 +176,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         self.mcu_intc = e200_intc.e200INTC(emu=self, ivors=True)
 
         # Create GDBSTUB Server
-        self.gdbstub = e200_gdb.e200GDB(self)
+        #self.gdbstub = e200_gdb.e200GDB(self)
         self._run = threading.Event()
 
         # By default the debugger _run event flag should be set.
@@ -194,7 +194,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         # - PC
         # - "next" PC
         # - if PC is in a VLE context or not
-        self._cur_instr = None
+        self._cur_instr = (None, 0, 0, False)
 
         # Support read and write callbacks
         self._read_callbacks = {}
@@ -265,7 +265,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         wdt_bit = self.tcr.wp << 4 | self.tcr.wpext
 
         # Determine the actual bit number and then the bit mask is the period
-        self.mcu_wdt.start(period=e_bits.b_mask[63 - wdt_bit])
+        self.mcu_wdt.start(ticks=e_bits.b_mask[63 - wdt_bit])
 
     def _startMCUFIT(self):
         # The fixed-interval period is determined by the TCR[WP] and TCR[WPEXT]
@@ -274,7 +274,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         fit_bit = self.tcr.fp << 4 | self.tcr.fpext
 
         # Determine the actual bit number and then the bit mask is the period
-        self.mcu_fit.start(period=e_bits.b_mask[63 - fit_bit])
+        self.mcu_fit.start(ticks=e_bits.b_mask[63 - fit_bit])
 
     def _startMCUDEC(self):
         # If there is a queued or active decrementer exception already, attach a
@@ -289,7 +289,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
             exc.setCleanup(self._startMCUDEC)
         else:
             # There is no active decrementer exception, so start the timer
-            self.mcu_dec.start(period=self.getRegister(REG_DEC))
+            self.mcu_dec.start(ticks=self.getRegister(REG_DEC))
 
     def _tcrWIEUpdate(self, tcr):
         if self.tcr.wie and self.systimeRunning():
@@ -322,7 +322,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
 
         # If the decrementer is enabled, restart it.
         if self.tcr.die:
-            self.mcu_dec.start(period=value)
+            self.mcu_dec.start(ticks=value)
 
         return value
 
@@ -384,6 +384,9 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         '''
         # TODO: move MCU timers into the official PowerPC "timebase" class
         self.disableTimebase()
+
+        # Reset the cached "current instruction" data
+        self._cur_instr = (None, 0, 0, False)
 
         # Clear out all pending extra processing
         with self.extra_processing_lock:

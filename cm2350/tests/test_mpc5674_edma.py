@@ -106,7 +106,7 @@ def get_xfer_vals(emu, saddr=None, ssize=None, daddr=None, dsize=None, nbytes=No
             if mstart + buffer > saddr:
                 start = saddr + buffer
                 stop = mstop
-            elif saddr + buffer > mstop:
+            elif saddr + buffer >= mstop:
                 start = mstart
                 stop = saddr - buffer
             else:

@@ -182,7 +182,7 @@ class e200INTC:
         newpc = self.getHandler(newexc)
 
         logger.debug('PC: 0x%08x (%r)  LVL: %d -> %d  NEWPC: 0x%08x',
-                self.emu.getProgramCounter(), newexc, self.curlvl, newexc.prio, newpc)
+                self.emu._cur_instr[2], newexc, self.curlvl, newexc.prio, newpc)
         self.emu.setProgramCounter(newpc)
 
         # change self.curlvl

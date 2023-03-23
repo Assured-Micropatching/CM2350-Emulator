@@ -183,7 +183,7 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
         resume, we put the Break instruction bytes back in.
         '''
         if not self._bps_in_place:
-            logger.debug('Installing breakpoints: ' + ','.join(hex(a) for a in self._bpdata))
+            logger.debug('Installing breakpoints: %r', self._bpdata)
             for va in self._bpdata:
                 self._installBreakpoint(va)
             self._bps_in_place = True
@@ -194,7 +194,7 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
         resume, we put the Break instruction bytes back in.
         '''
         if self._bps_in_place:
-            logger.debug('Removing breakpoints: ' + ','.join(hex(a) for a in self._bpdata))
+            logger.debug('Removing breakpoints: %r', self._bpdata)
             for va in self._bpdata:
                 self._uninstallBreakpoint(va)
             self._bps_in_place = False
@@ -206,7 +206,7 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
         if addr in self._bpdata:
             raise Exception('Cannot add breakpoint that already exists @ 0x%x' % addr)
 
-        logger.debug('Adding new breakpoint: 0x%x' % addr)
+        logger.debug('Adding new breakpoint: -1x%x', addr)
         origbytes = self._bpdata.get(addr)
         if origbytes:
             # Error, this breakpoint is already set
@@ -254,7 +254,7 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
 
         # Only need to write the original data back to memory if the breakpoint 
         # is currently in memory.
-        logger.debug('Removing breakpoint: 0x%x' % addr)
+        logger.debug('Removing breakpoint: 0x%x', addr)
         if self._bps_in_place:
             self._uninstallBreakpoint(addr)
         del self._bpdata[addr]

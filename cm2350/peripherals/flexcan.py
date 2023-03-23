@@ -941,7 +941,6 @@ class FlexCAN(ExternalIOPeripheral):
             # Set the code to indicate that a message has been received (this
             # isn't done for the RxFIFO received messages)
             msg.into_mb(self.registers.mb.value, offset=idx, code=FLEXCAN_CODE_RX_FULL, timestamp=self._timer.get())
-
             self.event('msg', mb, FLEXCAN_IFLAG2_MASK[mb])
 
     def normalTx(self, mb):

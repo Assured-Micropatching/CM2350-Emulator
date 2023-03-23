@@ -862,7 +862,7 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
 
     def run(self):
         try:
-            logger.info('Starting execution @ 0x%x', self.getProgramCounter())
+            logger.info('Starting execution @ 0x%x', self._cur_instr[2])
 
             # If the --gdb-port flag was provided then we should wait for a GDB 
             # client to connect before continuing
@@ -872,7 +872,7 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
             e200z7.PPC_e200z7.run(self)
         except KeyboardInterrupt:
             print()
-            logger.info('Execution stopped @ 0x%x', self.getProgramCounter())
+            logger.info('Execution stopped @ 0x%x', self._cur_instr[2])
 
 ### special register hardware interfacing
 # hook particular registers such that they don't store data, but rather interface to a virtual device

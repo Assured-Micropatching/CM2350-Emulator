@@ -84,8 +84,8 @@ class MPC5674_FMPLL_Test(MPC5674_Test):
 
     # Add specific EXTAL and PLLCFG startup arguments
     args = MPC5674_Test.args + [
-        '-O', 'project.MPC5674.FMPLL.extal=%d' % self.EXTAL,
-        '-O', 'project.MPC5674.SIU.pllcfg=%d' % self.PLLCFG,
+        '-O', 'project.MPC5674.FMPLL.extal=%d' % EXTAL,
+        '-O', 'project.MPC5674.SIU.pllcfg=%d' % PLLCFG,
     ]
 
     def test_fmpll_synsr_defaults(self):
@@ -397,6 +397,12 @@ class MPC5674_FMPLL_20MHz_Test(MPC5674_FMPLL_Test):
         13333333.33333333,  # ESYNCR2[ERFD] = 5
     ]
 
+    # Add specific EXTAL and PLLCFG startup arguments
+    args = MPC5674_Test.args + [
+        '-O', 'project.MPC5674.FMPLL.extal=%d' % EXTAL,
+        '-O', 'project.MPC5674.SIU.pllcfg=%d' % PLLCFG,
+    ]
+
 
 class MPC5674_FMPLL_10MHz_Test(MPC5674_FMPLL_Test):
     # 10MHz external clock
@@ -441,4 +447,10 @@ class MPC5674_FMPLL_10MHz_Test(MPC5674_FMPLL_Test):
         7500000.0,          # ESYNCR1[EPREDIV] = 7
         5000000.0,          # ESYNCR1[EMFD] = 16
         6666666.66666666,   # ESYNCR2[ERFD] = 5
+    ]
+
+    # Add specific EXTAL and PLLCFG startup arguments
+    args = MPC5674_Test.args + [
+        '-O', 'project.MPC5674.FMPLL.extal=%d' % EXTAL,
+        '-O', 'project.MPC5674.SIU.pllcfg=%d' % PLLCFG,
     ]

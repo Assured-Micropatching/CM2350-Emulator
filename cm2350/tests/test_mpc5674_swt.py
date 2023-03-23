@@ -194,10 +194,6 @@ class MPC5674_WDT_Test(MPC5674_Test):
         self.emu.writeMemValue(SWT_MCR, SWT_MCR_ENABLE_WDOG, 4)
         self.assertEqual(self.emu.swt.watchdog.running(), True)
 
-        # The system time is running when the system initializes, manually reset
-        # it which causes it to pause.
-        self.emu.systimeReset()
-
         # The SWT CO register should reflect the amount of time left before the
         # watchdog timer expires. Because the system starts paused it should
         # have the same value as the TO initialization value
@@ -527,14 +523,15 @@ class MPC5674_WDT_Test(MPC5674_Test):
 
         # The watchdog hasn't run yet so there should be the full period left
         wdt_time = SWT_TO_DEFAULT / self.emu.swt.watchdog.freq
-        self.assertEqual(self.emu.swt.watchdog.time(), wdt_time)
         self.assertEqual(self.emu.swt.watchdog.ticks(), SWT_TO_DEFAULT)
+        self.assertEqual(self.emu.swt.watchdog.time(), wdt_time)
 
-        # Force the system time forward 0.005 emulated seconds (0.005 /
-        # systime_scaling) so we can tell when the watchdog is restarted (do
-        # this by moving starting sysoffset back 0.005 seconds).  Any more than
-        # this and it will cause the watchdog to expire.
-        self.emu._sysoffset -= 0.005 / self.emu._systime_scaling
+        # Force the system time forward 0.005 emulated seconds so we can tell 
+        # when the watchdog is restarted (do this by moving starting sysoffset 
+        # back 0.005 seconds).  Any more than this and it will cause the 
+        # watchdog to expire.
+        updated_systime = self.emu.systime(0.005)
+        self.assertAlmostEqual(updated_systime, 0.005, places=6)
         new_time = wdt_time - 0.005
 
         # Because of the floating point numbers involved with the addition of

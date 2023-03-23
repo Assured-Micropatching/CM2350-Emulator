@@ -10,6 +10,7 @@ import atexit
 import inspect
 
 import envi.bits as e_bits
+from envi.common import EMULOG
 
 from . import mmio
 from .ppc_vstructs import *
@@ -471,7 +472,8 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
 
         try:
             value = self._getPeriphReg(offset, size)
-            #logger.debug("0x%x:  %s: read  [%x:%r] (%r)", self.emu.getProgramCounter(), self.devname, va, size, value)
+            logger.log(EMULOG, "0x%x:  %s: read  [%x:%r] (%r)",
+                       self.emu._cur_instr[2], self.devname, va, size, value)
             return value
 
         except VStructUnimplementedError as exc:
@@ -523,7 +525,8 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
             # TODO: this seems inefficient, but should be good enough for now
             return self._slow_mmio_write(va, offset, data)
 
-        #logger.debug("0x%x:  %s: write [%x] = %r", self.emu.getProgramCounter(), self.devname, va, data)
+        logger.log(EMULOG, "0x%x:  %s: write [%x] = %r",
+                   self.emu._cur_instr[2], self.devname, va, data)
         try:
             self._setPeriphReg(offset, data)
 

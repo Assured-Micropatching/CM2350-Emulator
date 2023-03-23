@@ -295,9 +295,8 @@ class SWT(MMIOPeripheral):
             freq = self.emu.siu.f_periph()
 
         # The SWT duration should be the value of TO (or 0x100 if TO is smaller)
-        period = max(self.registers.to.wto, 0x100)
-
-        self.watchdog.start(freq, period)
+        ticks = max(self.registers.to.wto, 0x100)
+        self.watchdog.start(freq=freq, ticks=ticks)
 
     def stopWatchdog(self):
         self.watchdog.stop()

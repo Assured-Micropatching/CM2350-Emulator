@@ -18,7 +18,19 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     'MPC5674_Test',
+    'initLogging',
 ]
+
+
+def initLogging(logobj):
+    log_lvl = os.environ.get('LOG_LEVEL')
+    if log_lvl:
+        if hasattr(logging, log_lvl):
+            e_common.initLogging(logobj, getattr(logging, log_lvl))
+        elif hasattr(e_common, log_lvl):
+            e_common.initLogging(logobj, getattr(e_common, log_lvl))
+        else:
+            raise Exception('Invalid log level: %s' % log_lvl)
 
 
 class MPC5674_Test(unittest.TestCase):
@@ -42,8 +54,7 @@ class MPC5674_Test(unittest.TestCase):
     _disable_gc = None
 
     def setUp(self):
-        if os.environ.get('LOG_LEVEL', 'INFO') == 'DEBUG':
-            e_common.initLogging(logger, logging.DEBUG)
+        initLogging(logger)
 
         if self._systime_scaling is None:
             self._systime_scaling = 0.1 if self.accurate_timing else 1.0
@@ -92,8 +103,7 @@ class MPC5674_Test(unittest.TestCase):
         # Only assert if the test is current succeeding, we don't want to 
         # override the error of a failure, the success attribute isn't set yet, 
         # instead look at the errors attribute.
-        if not self._outcome.errors:
-            self.assertEqual(pending_excs, [])
+        self.assertEqual(pending_excs, [])
 
         # Clean up the resources
         self.ECU.shutdown()

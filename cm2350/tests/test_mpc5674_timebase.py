@@ -15,7 +15,9 @@ MTSPR_VAL       = 0x7C0003A6
 INSTR_REG_SHIFT = 21
 INSTR_SPR_SHIFT = 11
 
-TIMING_ACCURACY = 0.010
+# Because of how we are measuring elapsed time in the tests this should be 
+# extremely accurate
+TIMING_ACCURACY = 0.0001
 
 
 class MPC5674_SPRHOOKS_Test(MPC5674_Test):
@@ -83,28 +85,34 @@ class MPC5674_SPRHOOKS_Test(MPC5674_Test):
 
         freq = self.emu.getSystemFreq()
 
-        # Sleep for 1 emulated second (1.0 * system scaling) and ensure that
-        # approximately the correct amount of time has elapsed (allowing for the
-        # inaccuracy of python sleep durations)
-        self.emu.resume_time()
+        # Get the start emulated time
+        now = self.emu.systime()
+
+        # Start the PPC core timebase
+        self.emu.enableTimebase()
+
+        # Sleep for 1 second so some time passes in the system
         time.sleep(1.0)
+
+        # Stop all emulator time (also pauses the PPC timebase)
         self.emu.halt_time()
 
         tbl, tbu = self.tb_read()
 
-        # Determine the expected upper range based on sleeping for 1 second and
-        # the current scaling factor.  The expected margin of accuracy is about
-        # 0.005 seconds
-        expected_tbl = int(1.0 * freq * self.emu._systime_scaling)
-        margin = TIMING_ACCURACY * freq * self.emu._systime_scaling
+        # Get the amount of emulated time that has elapsed
+        elapsed = self.emu.systime() - now
 
-        self.assertAlmostEqual(tbl, expected_tbl, delta=margin)
+        # Determine the expected upper range based on the elapsed emulated time.
+        expected_tbl = int(elapsed * freq)
+        margin = TIMING_ACCURACY * expected_tbl
+
+        self.assert_timer_within_range(tbl, expected_tbl, margin)
 
         # Not enough time has passed for TBU to have a non-zero value.
         self.assertEqual(tbu, 0)
 
-        # The systicks function should return the same value
-        self.assertEqual(self.emu.systicks(), (tbu << 32) | tbl)
+        # The getTimebase function should return the same value
+        self.assertEqual(self.emu.getTimebase(), (tbu << 32) | tbl)
 
         # Writing to the TBL/TBU SPRs should have no effect
         # TODO: this may need to produce an error eventually.
@@ -119,28 +127,32 @@ class MPC5674_SPRHOOKS_Test(MPC5674_Test):
 
         freq = self.emu.getSystemFreq()
 
-        # Sleep for 1 second and ensure that approximately the correct amount of
-        # time has elapsed (allowing for the inaccuracy of python sleep
-        # durations)
-        self.emu.resume_time()
+        # Get the start emulated time
+        now = self.emu.systime()
+
+        # Start the PPC core timebase
+        self.emu.enableTimebase()
+
         time.sleep(1.0)
+
+        # Stop all emulator time (also pauses the PPC timebase)
         self.emu.halt_time()
 
         tbl, tbu = self.tb_read()
 
-        # Determine the expected upper range based on sleeping for 1 second and
-        # the current scaling factor.  The expected margin of accuracy is about
-        # 0.005 seconds
-        expected_tbl = int(1.0 * freq * self.emu._systime_scaling)
-        margin = TIMING_ACCURACY * freq * self.emu._systime_scaling
+        # Get the amount of emulated time that has elapsed
+        elapsed = self.emu.systime() - now
 
-        self.assertAlmostEqual(tbl, expected_tbl, delta=margin)
+        # Determine the expected upper range based on the elapsed emulated time.
+        expected_tbl = int(elapsed * freq)
+        margin = TIMING_ACCURACY * expected_tbl
+
+        self.assert_timer_within_range(tbl, expected_tbl, margin)
 
         # Not enough time has passed for TBU to have a non-zero value.
         self.assertEqual(tbu, 0)
 
         # Read from the Write-Only TB SPRs, they should still be 0
-        # TODO: this may need to produce an error eventually.
         self.assertEqual(self.tb_read(tbl=eapr.REG_TBL_WO, tbu=eapr.REG_TBU_WO), (0, 0))
 
         # Change the TB offset
@@ -148,107 +160,113 @@ class MPC5674_SPRHOOKS_Test(MPC5674_Test):
 
         # Ensure that TBL/TBU now return 0
         self.assertEqual(self.tb_read(), (0, 0))
-        self.assertEqual(self.emu.systicks(), 0)
+        self.assertEqual(self.emu.getTimebase(), 0)
 
-        # The tb offset should match the timebase/systicks values we just read
-        self.assertEqual(self.emu._tb_offset, (tbu << 32) | tbl)
+        # Get the start emulated time
+        now = self.emu.systime()
 
-        # Sleep 1 more second
+        # Start the timebase again sleep another second
         self.emu.resume_time()
         time.sleep(1.0)
         self.emu.halt_time()
 
         tbl2, tbu2 = self.tb_read()
 
+        # Get the amount of emulated time that has elapsed
+        elapsed = self.emu.systime() - now
+
         # Accuracy margin should be the same as before
-        expected_tbl = int(1.0 * freq * self.emu._systime_scaling)
-        self.assertAlmostEqual(tbl2, expected_tbl, delta=margin)
+        expected_tbl = int(elapsed * freq)
+        self.assert_timer_within_range(tbl2, expected_tbl, margin)
 
         # Not enough time has passed for TBU to have a non-zero value.
         self.assertEqual(tbu2, 0)
 
         # the systicks() function should return the same value
-        self.assertEqual(self.emu.systicks(), (tbu2 << 32) | tbl2)
-
-        # Call the non-PPC systicks() function, it should return the sum of both
-        # timebase reads
-        expected_ticks = ((tbu + tbu2) << 32) | (tbl + tbl2)
-        self.assertEqual(emutimers.EmulationTime.systicks(self.emu), expected_ticks)
+        self.assertEqual(self.emu.getTimebase(), (tbu2 << 32) | tbl2)
 
     def test_spr_tbl_overflow(self):
         self.assertEqual(self.tb_read(), (0, 0))
-        self.assertEqual(self.emu.systicks(), 0)
 
-        # Change the current TB offset to be < 50 msec worth of ticks from
-        # 0xFFFFFFFF, sleep 0.1 second and confirm that TBU has a value of 1 and
-        # the TBL has a value of approximately 50 msec ticks.
-        freq = self.emu.getSystemFreq()
-        tb_offset = 0xFFFF_FFFF - int(0.05 * freq * self.emu._systime_scaling)
+        # Stop all emulator time (also pauses the PPC timebase), but also start 
+        # the PPC timebase
+        self.emu.halt_time()
+        self.emu.enableTimebase()
+
+        # Set the time base lower value so it'll overflow
+        tb_offset = 0xFFFFF000
         self.tb_write(tb_offset)
 
         # The TBL/TBU values should match the offset just written
         self.assertEqual(self.tb_read(), (tb_offset, 0))
-        self.assertEqual(self.emu.systicks(), tb_offset)
+        self.assertEqual(self.emu.getTimebase(), tb_offset)
 
-        # Sleep 0.1 second
+        # Get the start emulated time
+        now = self.emu.systime()
+
+        # Resume and run for about 0.1 seconds
         self.emu.resume_time()
         time.sleep(0.1)
         self.emu.halt_time()
 
         tbl, tbu = self.tb_read()
 
-        # Determine the expected upper range based on sleeping for 1 second and
-        # the current scaling factor.  The expected margin of accuracy is about
-        # 0.005 seconds
-        expected_tbl = int(0.05 * freq * self.emu._systime_scaling)
-        margin = TIMING_ACCURACY * freq * self.emu._systime_scaling
+        # Get the amount of emulated time that has elapsed
+        elapsed = self.emu.systime() - now
+        expected_tb = int(elapsed * self.emu.getSystemFreq()) + tb_offset
+        tb = (tbu << 32) | tbl
 
-        self.assertAlmostEqual(tbl, expected_tbl, delta=margin)
-
-        # TBU should finally be 1
+        # TBU should now be 1
         self.assertEqual(tbu, 1)
+        self.assertEqual(tb, 0x100000000 + tbl)
 
-        self.assertEqual(self.emu.systicks(), 0x100000000 + tbl)
-        self.assertEqual(self.emu.systicks(), (tbu << 32) | tbl)
+        margin = TIMING_ACCURACY * expected_tb
+        expected_tbl = expected_tb & 0xFFFFFFFF
+        self.assert_timer_within_range(tbl, expected_tbl, margin)
+
+        self.assertEqual(self.emu.getTimebase(), 0x100000000 + tbl)
+        self.assertEqual(self.emu.getTimebase(), tb)
+        self.assert_timer_within_range(self.emu.getTimebase(), expected_tb, margin)
 
     def test_spr_tbu_overflow(self):
         self.assertEqual(self.tb_read(), (0, 0))
-        self.assertEqual(self.emu.systicks(), 0)
 
-        # Change the current TB offset to be < 50 msec worth of ticks from
-        # 0xFFFFFFFFFFFFFFFF, sleep 0.1 second and confirm that TBU has reset
-        # back to a value of 1 and the TBL has a value of approximately 50 msec ticks.
-        freq = self.emu.getSystemFreq()
-        tb_offset = 0xFFFF_FFFF_FFFF_FFFF - int(0.05 * freq * self.emu._systime_scaling)
+        # Stop all emulator time (also pauses the PPC timebase), but also start 
+        # the PPC timebase
+        self.emu.halt_time()
+        self.emu.enableTimebase()
+
+        # Set the time base upper and lower values so TBL will overflow
+        tb_offset = 0xFFFFFFFFFFFFF000
         self.tb_write(tb_offset)
 
-        # Because the system time is still at 0 when we wrote a new offset, the
-        # current emu._tb_offset should be -tb_offset
-        self.assertEqual(self.emu._tb_offset, - tb_offset)
-
         # The TBL/TBU values should match the offset just written
-        self.assertEqual(self.tb_read(), ((tb_offset & 0xFFFF_FFFF), 0xFFFF_FFFF))
-        self.assertEqual(self.emu.systicks(), tb_offset)
+        self.assertEqual(self.tb_read(), (tb_offset & 0xFFFFFFFF, (tb_offset >> 32) & 0xFFFFFFFF))
+        self.assertEqual(self.emu.getTimebase(), tb_offset)
 
-        # Sleep 0.1 second (scaled based on the systime scaling)
+        # Get the start emulated time
+        now = self.emu.systime()
+
+        # Resume and run for about 0.1 seconds
         self.emu.resume_time()
         time.sleep(0.1)
         self.emu.halt_time()
 
         tbl, tbu = self.tb_read()
 
-        # Determine the expected upper range based on sleeping for 1 second and
-        # the current scaling factor.  The expected margin of accuracy is about
-        # 0.005 seconds
-        expected_tbl = int(0.05 * freq * self.emu._systime_scaling)
-        margin = TIMING_ACCURACY * freq * self.emu._systime_scaling
-
-        self.assertAlmostEqual(tbl, expected_tbl, delta=margin)
+        # Get the amount of emulated time that has elapsed
+        elapsed = self.emu.systime() - now
+        expected_tb = int(elapsed * self.emu.getSystemFreq()) + tb_offset
+        tb = (tbu << 32) | tbl
 
         # TBU should have overflowed back to 0
         self.assertEqual(tbu, 0)
-
-        tb = (tbu << 32) | tbl
         self.assertEqual(tb, tbl)
-        self.assertEqual(self.emu.systicks(), 0x10000000000000000 + tbl)
-        self.assertEqual(self.emu.systicks(), 0x10000000000000000 + tb)
+
+        margin = TIMING_ACCURACY * expected_tb
+        expected_tbl = expected_tb & 0xFFFFFFFF
+        self.assert_timer_within_range(tbl, expected_tbl, margin)
+
+        self.assertEqual(self.emu.getTimebase(), 0x10000000000000000 + tbl)
+        self.assertEqual(self.emu.getTimebase(), 0x10000000000000000 + tb)
+        self.assert_timer_within_range(self.emu.getTimebase(), expected_tb, margin)

@@ -4,7 +4,8 @@ import envi.bits as e_bits
 
 from ..ppc_vstructs import *
 from ..ppc_peripherals import *
-from ..intc_exc import MceDataReadBusError, MceWriteBusError, ResetException, INTC_EVENT
+from ..intc_exc import MceDataReadBusError, MceWriteBusError, ResetException, \
+        ResetSource, INTC_EVENT
 
 import logging
 logger = logging.getLogger(__name__)
@@ -177,7 +178,7 @@ class SWT(MMIOPeripheral):
                     # if a BUS ERROR happens and MCR[RIA] is set it should generate
                     # a reset if the watchdog is enabled
                     if self.registers.mcr.ria and self.registers.mcr.wen:
-                        raise ResetException()
+                        raise ResetException(ResetSource.WATCHDOG)
                     else:
                         raise exc
 
@@ -193,7 +194,7 @@ class SWT(MMIOPeripheral):
             # ppc_vstructs.ReadOnlyRegister()
             if offset in SWT_LOCKABLE_OFFSETS:
                 if self.registers.mcr.ria and self.registers.mcr.wen:
-                    raise ResetException()
+                    raise ResetException(ResetSource.WATCHDOG)
                 else:
                     raise MceWriteBusError()
 
@@ -215,7 +216,7 @@ class SWT(MMIOPeripheral):
                 # if a BUS ERROR happens and MCR[RIA] is set it should generate
                 # a reset if the watchdog is enabled
                 if self.registers.mcr.ria and self.registers.mcr.wen:
-                    raise ResetException()
+                    raise ResetException(ResetSource.WATCHDOG)
                 else:
                     raise exc
 
@@ -274,10 +275,7 @@ class SWT(MMIOPeripheral):
                 # Indicate a SWT interrupt is requested
                 self.event('tif', 1)
             else:
-                self.emu.queueException(ResetException())
-
-                # Update the ECSM event reason
-                self.emu.ecsm.swtReset()
+                self.emu.queueException(ResetException(ResetSource.WATCHDOG))
 
     def restartWatchdog(self):
         # Reset the watchdog service key sequence back to the beginning
@@ -376,7 +374,7 @@ class SWT(MMIOPeripheral):
                 # If the MCR[RIA] bit is set invalid memory accesses to the SWT
                 # peripheral should generate a system reset
                 if self.registers.mcr.ria:
-                    raise ResetException()
+                    raise ResetException(ResetSource.WATCHDOG)
                 else:
                     raise MceWriteBusError()
 

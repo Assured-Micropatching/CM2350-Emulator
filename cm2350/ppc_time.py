@@ -1,5 +1,9 @@
 from . import emutimers
-from envi.archs.ppc.regs import REG_TBU, REG_TB, REG_TBU_WO, REG_TBL_WO
+import envi.bits as e_bits
+from envi.archs.ppc.regs import REG_TBU, REG_TB, REG_TBU_WO, REG_TBL_WO, REG_R3
+
+import logging
+logger = logging.getLogger(__name__)
 
 
 __all__ = [
@@ -10,6 +14,9 @@ __all__ = [
 class PpcEmuTime:
     '''
     PowerPC specific emulator time and timer handling mixin
+
+    TODO: lots of docs here about how this is separate from the core emulator
+    time class
     '''
     def __init__(self):
         # The time base can be written to which is supposed to reset the point
@@ -22,7 +29,7 @@ class PpcEmuTime:
 
         # Register the TBU/TBL callbacks, these are read-only so no write
         # callback is attached.
-        self.addSprReadHandler(REG_TB, self.tblRead)
+        self.addSprReadHandler(REG_TB, self.tbRead)
         self.addSprReadHandler(REG_TBU, self.tbuRead)
         self.addSprWriteHandler(REG_TB, self._invalid_tb_write)
         self.addSprWriteHandler(REG_TBU, self._invalid_tb_write)
@@ -35,7 +42,7 @@ class PpcEmuTime:
         # the reads are correctly emulated.
         self.addSprReadHandler(REG_TBL_WO, self._invalid_tb_read)
         self.addSprReadHandler(REG_TBU_WO, self._invalid_tb_read)
-        self.addSprWriteHandler(REG_TBL_WO, self.tblWrite)
+        self.addSprWriteHandler(REG_TBL_WO, self.tbWrite)
         self.addSprWriteHandler(REG_TBU_WO, self.tbuWrite)
 
     def _invalid_tb_write(self, emu, op):
@@ -52,6 +59,20 @@ class PpcEmuTime:
         '''
         if self._tb_offset is None:
             self._tb_offset = self.systicks()
+        else:
+            logger.warning('PPC timebase enabled when already enabled!', exc_info=1)
+
+        # When the timebase is enabled also check if the WDT, FIT or DEC
+        # timers should be started
+        #
+        # TODO: Fix how timers are started, they should be started always when 
+        # the timebase is running.
+        if self.tcr.wie:
+            self._startMCUWDT()
+        if self.tcr.fie:
+            self._startMCUFIT()
+        if self.tcr.die:
+            self._startMCUWDT()
 
     def disableTimebase(self):
         '''
@@ -61,8 +82,21 @@ class PpcEmuTime:
         '''
         if self._tb_offset is not None:
             self._tb_offset = None
+        else:
+            logger.warning('PPC timebase disabled when already disabled!', exc_info=1)
 
-    def tblRead(self, emu, op):
+        # Stop all MCU timers
+        self.mcu_wdt.stop()
+        self.mcu_fit.stop()
+        self.mcu_dec.stop()
+
+    def timebaseRunning(self):
+        '''
+        Useful for testing to indicate check the timebase is running or not
+        '''
+        return self._tb_offset is not None
+
+    def tbRead(self, emu, op):
         '''
         Read callback handler to associate the value of the TBL SPR with the
         EmulationTime.
@@ -82,24 +116,27 @@ class PpcEmuTime:
         # wide regardless of if this is a 64-bit or 32-bit machine.
         return (self.getTimebase() >> 32) & 0xFFFFFFFF
 
-    def tblWrite(self, emu, op):
+    def tbWrite(self, emu, op):
         '''
         Update the tb_offset so TBL values returned from this point on
         reflect the new offset.
         '''
-        # Ensure that the offset value is only 32-bits wide regardless of the
-        # platform size.
-        tbl_offset = self.getOperValue(op, 1) & 0xFFFFFFFF
+        # On 64 bit platforms this will be the full timebase, on 32 bit 
+        # platforms this needs to be combined with the current TBU value to get 
+        # the full timebase
+        tb = self.getOperValue(op, 1)
 
-        # Based on the new TBL offset and the current value of TBU_WO, calculate
-        # the new desired timebase offset
-        tbu_offset = emu.getRegister(REG_TBU_WO)
-        offset = (tbu_offset << 32) | tbl_offset
-        self._tb_offset = self.getTimebase() - offset
+        if self.psize == 4:
+            # Based on the new TB offset and the current value of TBU, calculate
+            # the new desired timebase offset
+            tbu = (self.getTimebase() >> 32) & 0xFFFFFFFF
+            tb |= (tbu << 32)
 
-        # Return the offset so that TBL_WO has the correct offset to use to
+        self._tb_offset = self.systicks() - tb
+
+        # Return the offset so that TBL has the correct offset to use to
         # calculate the desired timebase offset.
-        return tbl_offset
+        return tb & e_bits.b_masks[self.psize]
 
     def tbuWrite(self, emu, op):
         '''
@@ -108,17 +145,18 @@ class PpcEmuTime:
         '''
         # Ensure that the offset value is only 32-bits wide regardless of the
         # platform size.
-        tbu_offset = self.getOperValue(op, 1) & 0xFFFFFFFF
+        tbu = self.getOperValue(op, 1) & 0xFFFFFFFF
 
-        # Based on the new TBU offset and the current value of TBL_WO, calculate
-        # the new desired timebase offset
-        tbl_offset = emu.getRegister(REG_TBL_WO)
-        offset = (tbu_offset << 32) | tbl_offset
-        self._tb_offset = self.getTimebase() - offset
+        # Based on the new TBU offset and the current value of TBL (the lower 32 
+        # bits of the current offset), calculate the new desired timebase offset
+        tbl = self.getTimebase() & 0xFFFFFFFF
+        tb = (tbu << 32) | tbl
 
-        # Return the offset so that TBU_WO has the correct offset to use to
+        self._tb_offset = self.systicks() - tb
+
+        # Return the offset so that TBU has the correct offset to use to
         # calculate the desired timebase offset.
-        return tbu_offset
+        return (tb >> 32) & 0xFFFFFFFF
 
     def getTimebase(self):
         '''

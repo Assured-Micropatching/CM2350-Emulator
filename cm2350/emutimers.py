@@ -271,12 +271,15 @@ class EmuTimeCore:
 
     def systimeReset(self):
         '''
-        Reset the timebase back to 0 and clear the system frequency.
-        Also stop all timers (but don't delete them, there's no need to force
-        modules to re-create their timers).
+        Clear the system ticks and stop all the timers.
         '''
         self._ticks = 0
         self._systemFreq = None
+
+        # Stop all registered timers
+        for timer in self._timers:
+            timer.stop()
+
         self.timerUpdated()
 
     def setSystemFreq(self, freq):
@@ -332,9 +335,13 @@ class EmuTimeCore:
         testing).
         '''
         if offset:
-            self._ticks += self-offset * self.getSystemFreq()
+            self._ticks += offset * self.getSystemFreq()
 
         return self._ticks
+
+    def sleep(self, delay):
+        # Move time forward the specified number of seconds
+        self._ticks += delay * self.getSystemFreq()
 
     def resume_time(self):
         self._running = True
@@ -437,10 +444,13 @@ class ScaledEmuTimeCore(EmuTimeCore):
         Resume tracking the amount of time passing for the emulator, but only
         if system time has already been started.
         '''
-        halted_time = time.time() - self._breakstart
-        self._sysoffset += halted_time
-        self._breakstart = None
-        self.timerUpdated()
+        if self._breakstart is not None:
+            halted_time = time.time() - self._breakstart
+            self._sysoffset += halted_time
+            self._breakstart = None
+            self.timerUpdated()
+        else:
+            logger.warning('resume_time called when time is already running!', exc_info=1)
 
     def halt_time(self):
         '''
@@ -448,8 +458,11 @@ class ScaledEmuTimeCore(EmuTimeCore):
 
         This also stops timers from expiring.
         '''
-        self._breakstart = time.time()
-        self.timerUpdated()
+        if self._breakstart is None:
+            self._breakstart = time.time()
+            self.timerUpdated()
+        else:
+            logger.warning('halt_time called when time is already paused!', exc_info=1)
 
     def systimeRunning(self):
         '''
@@ -458,8 +471,10 @@ class ScaledEmuTimeCore(EmuTimeCore):
         '''
         return self._sysoffset and not self._breakstart
 
-
     def systimeReset(self):
+        '''
+        Reset the system time and set breakstart to indicate the system is paused.
+        '''
         self._sysoffset = time.time()
         self._breakstart = self._sysoffset
         EmuTimeCore.systimeReset(self)
@@ -489,10 +504,9 @@ class ScaledEmuTimeCore(EmuTimeCore):
             #
             # So we invert the offset here. Also multiply the offset by the 
             # desired system time scaling factor.
-            self._sysoffset += -(offset * self._systime_scaling)
+            self._sysoffset -= offset / self._systime_scaling
 
         now = time.time()
-
 
         # Make sure to take into account the breakstart offset if the system
         # is halted
@@ -516,6 +530,11 @@ class ScaledEmuTimeCore(EmuTimeCore):
             return int(systime * sysfreq)
         else:
             return 0
+
+    def sleep(self, delay):
+        # Move time forward/wait the specified number of seconds
+        #self._sysoffset -= delay / self._systime_scaling
+        time.sleep(delay / self._systime_scaling)
 
     def timerUpdated(self):
         '''

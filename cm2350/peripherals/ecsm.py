@@ -6,7 +6,7 @@ import envi.archs.ppc.regs as eapr
 
 from ..ppc_vstructs import *
 from ..ppc_peripherals import *
-from ..intc_exc import INTC_EVENT
+from ..intc_exc import INTC_EVENT, ResetSource
 from ..ppc_mmu import PpcTlbFlags
 
 import logging
@@ -341,8 +341,6 @@ class ECSM(MMIOPeripheral):
         # Callback for the EEGR register that can force RAM ECC write errors
         self.registers.vsAddParseCallback('eegr', self.eegrUpdate)
 
-        self._swt_reset = False
-
         # Flags to keep track of what types of read/write errors have been
         # enabled.  These are named after the corresponding flags in the EEGR
         # register.  None indicates the bit in EEGR is not set, 1 indicates it
@@ -363,17 +361,20 @@ class ECSM(MMIOPeripheral):
     def reset(self, emu):
         super().reset(emu)
 
-        # If the SWT reset flag is set, set MRSR[SWTR], otherwise set MRSR[DIR]
-        if self._swt_reset:
-            # Clear the flag for next reset
-            self._swt_reset = False
+        # Default the reset reason to power on reset
+        self.registers.mrsr.vsOverrideValue('por', 1)
+
+    def setResetSource(self, source):
+        # First clear out any currently set reset sources
+        self.registers.mrsr.reset(self.emu)
+
+        if source == ResetSource.POWER_ON:
+            self.registers.mrsr.vsOverrideValue('por', 1)
+        elif source == ResetSource.WATCHDOG:
             self.registers.mrsr.vsOverrideValue('swtr', 1)
         else:
+            # All other reset is considered to be a device-input reset
             self.registers.mrsr.vsOverrideValue('dir', 1)
-
-    def swtReset(self):
-        # Indicates that a reset is because of a software watchdog timeout
-        self._swt_reset = True
 
     def _getAddrAttrs(self, addr, instr):
         flags = 0

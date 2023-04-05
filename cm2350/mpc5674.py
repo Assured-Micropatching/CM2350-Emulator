@@ -607,7 +607,7 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         self.loadInitialFirmware()
 
         # Complete initialization of the e200z7 core
-        self.init_core()
+        self.init()
 
         # If the --gdb-port flag is provided 
 
@@ -789,8 +789,8 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
                 addr + standby_size, addr + size)
         self.writeMemory(start, b'\x00' * (end - start))
 
-        # Reset the e200z7 core
-        self.reset_core()
+        # Reset the core
+        super().reset()
 
     def loadInitialFirmware(self):
         '''
@@ -846,7 +846,7 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         else:
             self.flash.load_complete()
 
-    def init_core(self):
+    def init(self):
         logger.info('INIT')
 
         # Create the initial RAM data (it isn't all cleared out during reset)
@@ -858,7 +858,8 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
                 addr, addr + size)
         self.addMemoryMap(addr, e_mem.MM_RWX, 'SRAM', b'\x00' * size)
 
-        e200z7.PPC_e200z7.init_core(self)
+        # Init the core
+        super().init()
 
     def run(self):
         try:

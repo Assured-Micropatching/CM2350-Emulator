@@ -81,9 +81,9 @@ class Peripheral:
     def init(self, emu):
         """
         Standard "module" peripheral init function. This is called only once
-        during emulator initialization when the emulator's init_core() function
-        is called. Any emulator-dependant initialization should be done in this
-        function and not in the constructor.
+        during emulator initialization when the emulator processor core's
+        init() function is called. Any emulator-dependant initialization should
+        be done in this function and not in the constructor.
 
         By default this function calls it's own reset() function at the end of
         this init() function. This should make it easy for a peripheral to
@@ -101,10 +101,10 @@ class Peripheral:
     def reset(self, emu):
         """
         Standard "module" peripheral reset function. This is called every time
-        the emulator's reset_core() function is called, and also by default by
-        this class's own init() function. This means that each peripheral only
-        needs to implement one function to initialize all values to the correct
-        default state.
+        the emulator processor core's reset() function is called, and also by
+        default by this class's own init() function. This means that each
+        peripheral only needs to implement one function to initialize all
+        values to the correct default state.
 
         This function is required to be implemented by all peripherals.
         """

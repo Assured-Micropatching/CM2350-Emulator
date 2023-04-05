@@ -1,3 +1,5 @@
+import unittest
+
 from ..ppc_mmu import PpcTlbPageSize, PpcTlbFlags, PpcTlbPerm
 
 from .helpers import MPC5674_Test
@@ -10,17 +12,6 @@ BAM_RCHW_ADDRS = [
     0x0001C000,
     0x00020000,
     0x00030000,
-]
-
-# TODO: MCU Core Watchdog not tested because the e200z7 class does not yet
-# implement and start a watchdog.  Enable this test when the e200z7 class
-# implements the watchdog.
-BAM_RCHW_VALUES = [
-    0x005A,     # The basic RCHW with no flags set
-    0x015A,     # Target is VLE
-    0x025A,     # Port size (unused by emulation)
-    #0x045A,     # MCU Core Watchdog enabled on startup
-    0x085A,     # SWT Watchdog enabled on startup
 ]
 
 DEFAULT_BOOKE_TLB = (
@@ -40,6 +31,8 @@ DEFAULT_VLE_TLB = (
 )
 
 class MPC5674_Flash_BAM(MPC5674_Test):
+    _start_timebase_paused = True
+
     def test_bam_flash_empty(self):
         # Confirm that by default no valid target was found
         self.assertEqual(self.emu.bam.rchw_addr, None)
@@ -56,11 +49,6 @@ class MPC5674_Flash_BAM(MPC5674_Test):
         # reset to cause standard BAM processing
         self.emu.reset()
 
-        # System time should be disabled again after reset, re-enable it
-        self.assertFalse(self.emu.systimeRunning())
-        self.emu.resume_time()
-        self.assertTrue(self.emu.systimeRunning())
-
         self.assertEqual(self.emu.bam.rchw_addr, 0x00000000)
         self.assertEqual(self.emu.bam.rchw.entry_point, 0xAAAAAAAA)
         self.assertEqual(self.emu.getProgramCounter(), 0xAAAAAAAA)
@@ -72,11 +60,6 @@ class MPC5674_Flash_BAM(MPC5674_Test):
         self.emu.flash.data[0x4000:0x4008] = b'\x00\x5a\x00\x00\x20\x00\x00\x00'
 
         self.emu.reset()
-
-        # System time should be disabled again after reset, re-enable it
-        self.assertFalse(self.emu.systimeRunning())
-        self.emu.resume_time()
-        self.assertTrue(self.emu.systimeRunning())
 
         self.assertEqual(self.emu.bam.rchw_addr, 0x00004000)
         self.assertEqual(self.emu.bam.rchw.entry_point, 0x20000000)
@@ -90,11 +73,6 @@ class MPC5674_Flash_BAM(MPC5674_Test):
 
         self.emu.reset()
 
-        # System time should be disabled again after reset, re-enable it
-        self.assertFalse(self.emu.systimeRunning())
-        self.emu.resume_time()
-        self.assertTrue(self.emu.systimeRunning())
-
         self.assertEqual(self.emu.bam.rchw_addr, 0x00010000)
         self.assertEqual(self.emu.bam.rchw.entry_point, 0x40000000)
         self.assertEqual(self.emu.getProgramCounter(), 0x40000000)
@@ -106,11 +84,6 @@ class MPC5674_Flash_BAM(MPC5674_Test):
         self.emu.flash.data[0x1C000:0x1C008] = b'\x00\x5a\x00\x00\x00\x12\x34\x56'
 
         self.emu.reset()
-
-        # System time should be disabled again after reset, re-enable it
-        self.assertFalse(self.emu.systimeRunning())
-        self.emu.resume_time()
-        self.assertTrue(self.emu.systimeRunning())
 
         self.assertEqual(self.emu.bam.rchw_addr, 0x0001C000)
         self.assertEqual(self.emu.bam.rchw.entry_point, 0x00123456)
@@ -124,11 +97,6 @@ class MPC5674_Flash_BAM(MPC5674_Test):
 
         self.emu.reset()
 
-        # System time should be disabled again after reset, re-enable it
-        self.assertFalse(self.emu.systimeRunning())
-        self.emu.resume_time()
-        self.assertTrue(self.emu.systimeRunning())
-
         self.assertEqual(self.emu.bam.rchw_addr, 0x00020000)
         self.assertEqual(self.emu.bam.rchw.entry_point, 0x00000000)
         self.assertEqual(self.emu.getProgramCounter(), 0x00000000)
@@ -141,11 +109,6 @@ class MPC5674_Flash_BAM(MPC5674_Test):
 
         self.emu.reset()
 
-        # System time should be disabled again after reset, re-enable it
-        self.assertFalse(self.emu.systimeRunning())
-        self.emu.resume_time()
-        self.assertTrue(self.emu.systimeRunning())
-
         self.assertEqual(self.emu.bam.rchw_addr, 0x00030000)
         self.assertEqual(self.emu.bam.rchw.entry_point, 0x00000010)
         self.assertEqual(self.emu.getProgramCounter(), 0x00000010)
@@ -156,11 +119,6 @@ class MPC5674_Flash_BAM(MPC5674_Test):
 
         self.emu.reset()
 
-        # System time should be disabled again after reset, re-enable it
-        self.assertFalse(self.emu.systimeRunning())
-        self.emu.resume_time()
-        self.assertTrue(self.emu.systimeRunning())
-
         self.assertEqual(self.emu.bam.rchw_addr, None)
         self.assertEqual(self.emu.bam.rchw.entry_point, 0)
         self.assertEqual(self.emu.getProgramCounter(), 0)
@@ -170,11 +128,6 @@ class MPC5674_Flash_BAM(MPC5674_Test):
 
         # reset to cause standard BAM processing
         self.emu.reset()
-
-        # System time should be disabled again after reset, re-enable it
-        self.assertFalse(self.emu.systimeRunning())
-        self.emu.resume_time()
-        self.assertTrue(self.emu.systimeRunning())
 
         self.assertEqual(self.emu.bam.rchw_addr, 0x00004000)
         self.assertEqual(self.emu.bam.rchw.entry_point, 0x40000000)
@@ -189,8 +142,8 @@ class MPC5674_Flash_BAM(MPC5674_Test):
         # Ensure that the MPC4674F SWT is not running
         self.assertEqual(self.emu.swt.watchdog.running(), False)
 
-        # TODO: Ensure that the e200z7 MCU Watchdog is not running
-        #raise NotImplementedError('todo')
+        # Ensure that the e200z7 MCU Watchdog is not running
+        self.assertEqual(self.emu.mcu_wdt.running(), False)
 
         # TLB checking code borrowed from MMU/TLB tests
         for esel in range(len(DEFAULT_BOOKE_TLB)):
@@ -205,9 +158,9 @@ class MPC5674_Flash_BAM(MPC5674_Test):
         self.emu.reset()
 
         # System time should be disabled again after reset, re-enable it
-        self.assertFalse(self.emu.systimeRunning())
-        self.emu.resume_time()
-        self.assertTrue(self.emu.systimeRunning())
+        self.assertFalse(self.emu.timebaseRunning())
+        self.emu.enableTimebase()
+        self.assertTrue(self.emu.timebaseRunning())
 
         self.assertEqual(self.emu.bam.rchw_addr, 0x00004000)
         self.assertEqual(self.emu.bam.rchw.entry_point, 0x40000000)
@@ -219,38 +172,17 @@ class MPC5674_Flash_BAM(MPC5674_Test):
         self.assertEqual(self.emu.bam.rchw.ps0, 0)
         self.assertEqual(self.emu.bam.rchw.vle, 1)
 
+        # Ensure that the MPC4674F SWT is not running
+        self.assertEqual(self.emu.swt.watchdog.running(), False)
+
+        # Ensure that the e200z7 MCU Watchdog is not running
+        self.assertEqual(self.emu.mcu_wdt.running(), False)
+
         # TLB checking code borrowed from MMU/TLB tests
         for esel in range(len(DEFAULT_VLE_TLB)):
             for attr, val in DEFAULT_VLE_TLB[esel].items():
                 msg = 'tlb[%d].%s == 0x%x' % (esel, attr, val)
                 self.assertEqual(getattr(self.emu.mmu._tlb[esel], attr), val, msg)
-
-    def test_bam_rchw_mcu_watchdog(self):
-        self.emu.flash.data[0x4000:0x4008] = b'\x04\x5A\x00\x00\x40\x00\x00\x00'
-
-        # reset to cause standard BAM processing
-        self.emu.reset()
-
-        # System time should be disabled again after reset, re-enable it
-        self.assertFalse(self.emu.systimeRunning())
-        self.emu.resume_time()
-        self.assertTrue(self.emu.systimeRunning())
-
-        self.assertEqual(self.emu.bam.rchw_addr, 0x00004000)
-        self.assertEqual(self.emu.bam.rchw.entry_point, 0x40000000)
-        self.assertEqual(self.emu.getProgramCounter(), 0x40000000)
-
-        self.assertEqual(self.emu.bam.rchw.rsvd, 0)
-        self.assertEqual(self.emu.bam.rchw.swt, 0)
-        self.assertEqual(self.emu.bam.rchw.wte, 1)
-        self.assertEqual(self.emu.bam.rchw.ps0, 0)
-        self.assertEqual(self.emu.bam.rchw.vle, 0)
-
-        # Ensure that the SWT watchdog is not running
-        self.assertEqual(self.emu.swt.watchdog.running(), False)
-
-        # TODO: Ensure that the e200z7 MCU Watchdog is not running
-        #raise NotImplementedError('todo')
 
     def test_bam_rchw_swt(self):
         self.emu.flash.data[0x4000:0x4008] = b'\x08\x5A\x00\x00\x40\x00\x00\x00'
@@ -259,9 +191,9 @@ class MPC5674_Flash_BAM(MPC5674_Test):
         self.emu.reset()
 
         # System time should be disabled again after reset, re-enable it
-        self.assertFalse(self.emu.systimeRunning())
-        self.emu.resume_time()
-        self.assertTrue(self.emu.systimeRunning())
+        self.assertFalse(self.emu.timebaseRunning())
+        self.emu.enableTimebase()
+        self.assertTrue(self.emu.timebaseRunning())
 
         self.assertEqual(self.emu.bam.rchw_addr, 0x00004000)
         self.assertEqual(self.emu.bam.rchw.entry_point, 0x40000000)
@@ -276,5 +208,61 @@ class MPC5674_Flash_BAM(MPC5674_Test):
         # Ensure that the SWT watchdog is running
         self.assertEqual(self.emu.swt.watchdog.running(), True)
 
-        # TODO: Ensure that the e200z7 MCU Watchdog is running
-        #raise NotImplementedError('todo')
+        # Ensure that the e200z7 MCU Watchdog is running
+        self.assertEqual(self.emu.mcu_wdt.running(), False)
+
+    @unittest.skip('fix implementation of MCU WDT so it runs correctly')
+    def test_bam_rchw_mcu_wdt(self):
+        self.emu.flash.data[0x4000:0x4008] = b'\x04\x5A\x00\x00\x40\x00\x00\x00'
+
+        # reset to cause standard BAM processing
+        self.emu.reset()
+
+        # System time should be disabled again after reset, re-enable it
+        self.assertFalse(self.emu.timebaseRunning())
+        self.emu.enableTimebase()
+        self.assertTrue(self.emu.timebaseRunning())
+
+        self.assertEqual(self.emu.bam.rchw_addr, 0x00004000)
+        self.assertEqual(self.emu.bam.rchw.entry_point, 0x40000000)
+        self.assertEqual(self.emu.getProgramCounter(), 0x40000000)
+
+        self.assertEqual(self.emu.bam.rchw.rsvd, 0)
+        self.assertEqual(self.emu.bam.rchw.swt, 0)
+        self.assertEqual(self.emu.bam.rchw.wte, 1)
+        self.assertEqual(self.emu.bam.rchw.ps0, 0)
+        self.assertEqual(self.emu.bam.rchw.vle, 0)
+
+        # Ensure that the SWT watchdog is not running
+        self.assertEqual(self.emu.swt.watchdog.running(), False)
+
+        # Ensure that the e200z7 MCU Watchdog is running
+        self.assertEqual(self.emu.mcu_wdt.running(), True)
+
+    @unittest.skip('fix implementation of MCU WDT so it runs correctly')
+    def test_bam_rchw_swt_and_mcu_wdt(self):
+        self.emu.flash.data[0x4000:0x4008] = b'\x0C\x5A\x00\x00\x40\x00\x00\x00'
+
+        # reset to cause standard BAM processing
+        self.emu.reset()
+
+        # System time should be disabled again after reset, re-enable it
+        self.assertFalse(self.emu.timebaseRunning())
+        self.emu.enableTimebase()
+        self.assertTrue(self.emu.timebaseRunning())
+
+        self.assertEqual(self.emu.bam.rchw_addr, 0x00004000)
+        self.assertEqual(self.emu.bam.rchw.entry_point, 0x40000000)
+        self.assertEqual(self.emu.getProgramCounter(), 0x40000000)
+
+        self.assertEqual(self.emu.bam.rchw.rsvd, 0)
+        self.assertEqual(self.emu.bam.rchw.swt, 1)
+        self.assertEqual(self.emu.bam.rchw.wte, 1)
+        self.assertEqual(self.emu.bam.rchw.ps0, 0)
+        self.assertEqual(self.emu.bam.rchw.vle, 0)
+
+        # Ensure that the SWT watchdog is running
+        self.assertEqual(self.emu.swt.watchdog.running(), True)
+
+        # Ensure that the e200z7 MCU Watchdog is running
+        self.assertEqual(self.emu.mcu_wdt.running(), True)

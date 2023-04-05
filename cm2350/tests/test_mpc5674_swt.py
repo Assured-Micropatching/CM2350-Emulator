@@ -1,4 +1,3 @@
-import time
 import random
 
 import envi.bits as e_bits
@@ -33,6 +32,15 @@ SWT_MCR_ENABLE_WDOG   = 0xff00010b
 SWT_TO_DEFAULT        = 0x0005fcd0
 SWT_MCR_DEFAULT_BYTES = b'\xff\x00\x01\x0a'
 SWT_TO_DEFAULT_BYTES  = b'\x00\x05\xfc\xd0'
+
+# SIU and ECSM constants for checking reset sources
+SIU_RSR         = (0xC3F9000C, 4)
+SIU_RSR_PORS    = 0x80008000
+SIU_RSR_SWTRS   = 0x02008000
+
+ECSM_MRSR       = (0xFFF4000F, 1)
+ECSM_MRSR_POR   = 0x80
+ECSM_MRSR_SWTR  = 0x20
 
 
 class MPC5674_WDT_Test(MPC5674_Test):
@@ -159,7 +167,7 @@ class MPC5674_WDT_Test(MPC5674_Test):
 
         # The SWT is enabled and running by default, ensure that the timeout
         # period matches the default TO value
-        self.assertEqual(self.emu.swt.watchdog.period, SWT_TO_DEFAULT)
+        self.assertEqual(self.emu.swt.watchdog._ticks, SWT_TO_DEFAULT)
 
     def test_swt_wn_defaults(self):
         self.assertEqual(self.emu.readMemory(SWT_WN, 4), b'\x00\x00\x00\x00')
@@ -190,6 +198,13 @@ class MPC5674_WDT_Test(MPC5674_Test):
         self.assertEqual(self.emu.swt._sk_idx, 0)
 
     def test_swt_co_defaults(self):
+        # Watchdog should be disabled by default because the SWT flag in the BAM 
+        # RCHW entry isn't set.
+        self.assertEqual(self.emu.swt.watchdog.running(), False)
+
+        # Pause the emulator system time so no emulated time elapses
+        self.emu.halt_time()
+
         # Enable the watchdog
         self.emu.writeMemValue(SWT_MCR, SWT_MCR_ENABLE_WDOG, 4)
         self.assertEqual(self.emu.swt.watchdog.running(), True)
@@ -199,9 +214,6 @@ class MPC5674_WDT_Test(MPC5674_Test):
         # have the same value as the TO initialization value
         self.assertEqual(self.emu.readMemory(SWT_CO, 4), SWT_TO_DEFAULT_BYTES)
         self.assertEqual(self.emu.readMemValue(SWT_CO, 4), SWT_TO_DEFAULT)
-
-        # There is no "co" attribute in the SWT class so it can't be
-        # read directly.
 
         # Stop the watchdog timer
         clear_wen_val = SWT_MCR_ENABLE_WDOG & 0xFFFFFFFE
@@ -250,12 +262,14 @@ class MPC5674_WDT_Test(MPC5674_Test):
             msg = 'invalid read from 0x%x' % test_addr
             with self.assertRaises(intc_exc.ResetException, msg=msg) as cm:
                 self.emu.readMemory(test_addr, 4)
+            self.assertEqual(cm.exception.source, intc_exc.ResetSource.WATCHDOG)
             self.assertEqual(cm.exception.kwargs, {}, msg=msg)
 
             # Write the test value to the test address
             msg = 'invalid write of 0x%x to 0x%x' % (test_val, test_addr)
             with self.assertRaises(intc_exc.ResetException, msg=msg) as cm:
                 self.emu.writeMemValue(test_addr, test_val, 4)
+            self.assertEqual(cm.exception.source, intc_exc.ResetSource.WATCHDOG)
             self.assertEqual(cm.exception.kwargs, {}, msg=msg)
 
     def test_swt_invalid_access_error_ria_clear_wen_set(self):
@@ -288,6 +302,10 @@ class MPC5674_WDT_Test(MPC5674_Test):
             self.validate_invalid_addr(test_addr, 4)
 
     def test_swt_ro_reg_writes_sysreset(self):
+
+        mrsr_addr, mrsr_size = ECSM_MRSR
+        rsr_addr, rsr_size = SIU_RSR
+
         # Writes to read-only registers should generate Bus Errors or resets
         # depending on RIA
         unlocked_ro_regs = [SWT_CO]
@@ -321,12 +339,22 @@ class MPC5674_WDT_Test(MPC5674_Test):
             self.emu.setProgramCounter(test_pc)
 
             # Should be no pending exceptions by default
-            self.assertEqual(self._getPendingExceptions(), [])
+            self.assertEqual(self.checkPendingExceptions(), [])
 
             msg = 'invalid write of 0x%x to 0x%x' % (test_val, test_addr)
             with self.assertRaises(intc_exc.ResetException, msg=msg) as cm:
                 self.emu.writeMemValue(test_addr, test_val, 4)
+            self.assertEqual(cm.exception.source, intc_exc.ResetSource.WATCHDOG)
             self.assertEqual(cm.exception.kwargs, {}, msg=msg)
+
+            self.emu.queueException(cm.exception)
+            self.emu.stepi()
+
+            # queue the exception as it would be if this had happened while 
+            # processing an instruction, step and then check that the watchdog 
+            # is marked as the source of the reset
+            self.assertEqual(self.emu.readMemValue(*SIU_RSR), SIU_RSR_SWTRS)
+            self.assertEqual(self.emu.readMemValue(*ECSM_MRSR), ECSM_MRSR_SWTR)
 
         # Lock the SWT and try again
         lock_swt_val = SWT_MCR_ENABLE_WDOG | 0x00000010
@@ -345,12 +373,22 @@ class MPC5674_WDT_Test(MPC5674_Test):
             self.emu.setProgramCounter(test_pc)
 
             # Should be no pending exceptions by default
-            self.assertEqual(self._getPendingExceptions(), [])
+            self.assertEqual(self.checkPendingExceptions(), [])
 
             msg = 'invalid write of 0x%x to 0x%x' % (test_val, test_addr)
             with self.assertRaises(intc_exc.ResetException, msg=msg) as cm:
                 self.emu.writeMemValue(test_addr, test_val, 4)
+            self.assertEqual(cm.exception.source, intc_exc.ResetSource.WATCHDOG)
             self.assertEqual(cm.exception.kwargs, {}, msg=msg)
+
+            self.emu.queueException(cm.exception)
+            self.emu.stepi()
+
+            # queue the exception as it would be if this had happened while 
+            # processing an instruction, step and then check that the watchdog 
+            # is marked as the source of the reset
+            self.assertEqual(self.emu.readMemValue(*SIU_RSR), SIU_RSR_SWTRS)
+            self.assertEqual(self.emu.readMemValue(*ECSM_MRSR), ECSM_MRSR_SWTR)
 
     def test_swt_ro_reg_writes_buserror(self):
         # Writes to read-only registers should generate Bus Errors or resets
@@ -405,13 +443,13 @@ class MPC5674_WDT_Test(MPC5674_Test):
 
         # Before a reset the ECSM MRSR[SWTR] should be 0 and MRSR[POR] should be
         # set since this was the first boot.
-        self.assertEqual(self.emu.ecsm.registers.mrsr.por, 1)
-        self.assertEqual(self.emu.ecsm.registers.mrsr.dir, 0)
-        self.assertEqual(self.emu.ecsm.registers.mrsr.swtr, 0)
+        self.assertEqual(self.emu.readMemValue(*SIU_RSR), SIU_RSR_PORS)
+        self.assertEqual(self.emu.readMemValue(*ECSM_MRSR), ECSM_MRSR_POR)
 
         # Attempt to unlock by writing to MCR and ensure this fails
         with self.assertRaises(intc_exc.ResetException) as cm:
             self.emu.writeMemValue(SWT_MCR, SWT_MCR_ENABLE_WDOG, 4)
+        self.assertEqual(cm.exception.source, intc_exc.ResetSource.WATCHDOG)
         self.assertEqual(cm.exception.kwargs, {})
 
         # MCR values should be unchanged
@@ -420,12 +458,15 @@ class MPC5674_WDT_Test(MPC5674_Test):
         self.assertEqual(self.emu.swt.registers.mcr.slk, 1)
         self.assertEqual(self.emu.swt.locked(), True)
 
-        # After a non-watchdog reset the ECSM MRSR[SWTR] and MRSR[POR] should be
-        # 0 and MRSR[DIR] should be 1
-        self.emu.reset()
-        self.assertEqual(self.emu.ecsm.registers.mrsr.por, 0)
-        self.assertEqual(self.emu.ecsm.registers.mrsr.dir, 1)
-        self.assertEqual(self.emu.ecsm.registers.mrsr.swtr, 0)
+        # Cause a reset with the captured exception
+        self.emu.queueException(cm.exception)
+        self.emu.stepi()
+
+        # queue the exception as it would be if this had happened while 
+        # processing an instruction, step and then check that the watchdog is 
+        # marked as the source of the reset
+        self.assertEqual(self.emu.readMemValue(*SIU_RSR), SIU_RSR_SWTRS)
+        self.assertEqual(self.emu.readMemValue(*ECSM_MRSR), ECSM_MRSR_SWTR)
 
         # Since we reset, set the SLK flag again
         lock_swt_val = SWT_MCR_ENABLE_WDOG | 0x00000010
@@ -475,6 +516,7 @@ class MPC5674_WDT_Test(MPC5674_Test):
         # Attempt to unlock by writing to MCR and ensure this fails
         with self.assertRaises(intc_exc.ResetException) as cm:
             self.emu.writeMemValue(SWT_MCR, SWT_MCR_ENABLE_WDOG, 4)
+        self.assertEqual(cm.exception.source, intc_exc.ResetSource.WATCHDOG)
         self.assertEqual(cm.exception.kwargs, {})
 
         # MCR values should be unchanged
@@ -483,12 +525,17 @@ class MPC5674_WDT_Test(MPC5674_Test):
         self.assertEqual(self.emu.swt.registers.mcr.slk, 1)
         self.assertEqual(self.emu.swt.locked(), True)
 
-        # After a non-watchdog reset the ECSM MRSR[SWTR] and MRSR[POR] should be
-        # 0 and MRSR[DIR] should be 1
-        self.emu.reset()
-        self.assertEqual(self.emu.ecsm.registers.mrsr.por, 0)
-        self.assertEqual(self.emu.ecsm.registers.mrsr.dir, 1)
-        self.assertEqual(self.emu.ecsm.registers.mrsr.swtr, 0)
+        # Cause a reset with the captured exception
+        self.emu.queueException(cm.exception)
+        self.emu.stepi()
+
+        # Pause the emulated system time and reset it back to 0
+        self.emu.halt_time()
+        self.emu.systime(-self.emu.systime())
+
+        # check that the watchdog is marked as the source of the reset
+        self.assertEqual(self.emu.readMemValue(*SIU_RSR), SIU_RSR_SWTRS)
+        self.assertEqual(self.emu.readMemValue(*ECSM_MRSR), ECSM_MRSR_SWTR)
 
         # Since we reset, set the SLK flag again
         lock_swt_val = SWT_MCR_ENABLE_WDOG | 0x00000010
@@ -523,8 +570,8 @@ class MPC5674_WDT_Test(MPC5674_Test):
 
         # The watchdog hasn't run yet so there should be the full period left
         wdt_time = SWT_TO_DEFAULT / self.emu.swt.watchdog.freq
-        self.assertEqual(self.emu.swt.watchdog.ticks(), SWT_TO_DEFAULT)
         self.assertEqual(self.emu.swt.watchdog.time(), wdt_time)
+        self.assertEqual(self.emu.swt.watchdog.ticks(), SWT_TO_DEFAULT)
 
         # Force the system time forward 0.005 emulated seconds so we can tell 
         # when the watchdog is restarted (do this by moving starting sysoffset 
@@ -603,14 +650,14 @@ class MPC5674_WDT_Test(MPC5674_Test):
 
         # Before a reset the ECSM MRSR[SWTR] should be 0 and MRSR[POR] should be
         # set since this was the first boot.
-        self.assertEqual(self.emu.ecsm.registers.mrsr.por, 1)
-        self.assertEqual(self.emu.ecsm.registers.mrsr.dir, 0)
-        self.assertEqual(self.emu.ecsm.registers.mrsr.swtr, 0)
+        self.assertEqual(self.emu.readMemValue(*SIU_RSR), SIU_RSR_PORS)
+        self.assertEqual(self.emu.readMemValue(*ECSM_MRSR), ECSM_MRSR_POR)
 
         # Attempt to unlock by writing to MCR and ensure this fails
         # This should generate a ResetException
         with self.assertRaises(intc_exc.ResetException) as cm:
             self.emu.writeMemValue(SWT_MCR, SWT_MCR_ENABLE_WDOG, 4)
+        self.assertEqual(cm.exception.source, intc_exc.ResetSource.WATCHDOG)
         self.assertEqual(cm.exception.kwargs, {})
 
         # Write the soft unlock sequence and ensure that the HLK flag is
@@ -623,7 +670,8 @@ class MPC5674_WDT_Test(MPC5674_Test):
         self.assertEqual(self.emu.swt.registers.mcr.slk, 0)
         self.assertEqual(self.emu.swt.locked(), True)
 
-        # Watchdog should still be running
+        # We haven't processed the reset exception yet so the watchdog should 
+        # still be running
         self.assertEqual(self.emu.swt.registers.mcr.wen, 1)
         self.assertEqual(self.emu.swt.watchdog.running(), True)
 
@@ -631,16 +679,24 @@ class MPC5674_WDT_Test(MPC5674_Test):
         # This should generate a ResetException
         with self.assertRaises(intc_exc.ResetException) as cm:
             self.emu.writeMemValue(SWT_MCR, SWT_MCR_ENABLE_WDOG, 4)
+        self.assertEqual(cm.exception.source, intc_exc.ResetSource.WATCHDOG)
         self.assertEqual(cm.exception.kwargs, {})
 
-        # The reset reason was not a SWT reset so the ECSM MRSR[SWTR] should be
-        # 0, MRSR[POR] is 0, and the MRSR[DIR] is 1
-        self.emu.reset()
-        self.assertEqual(self.emu.ecsm.registers.mrsr.por, 0)
-        self.assertEqual(self.emu.ecsm.registers.mrsr.dir, 1)
-        self.assertEqual(self.emu.ecsm.registers.mrsr.swtr, 0)
+        # Cause a reset with the captured exception
+        self.emu.queueException(cm.exception)
+        self.emu.stepi()
+
+        # queue the exception as it would be if this had happened while 
+        # processing an instruction, step and then check that the watchdog is 
+        # marked as the source of the reset
+        self.assertEqual(self.emu.readMemValue(*SIU_RSR), SIU_RSR_SWTRS)
+        self.assertEqual(self.emu.readMemValue(*ECSM_MRSR), ECSM_MRSR_SWTR)
 
     def test_swt_xtal_freq(self):
+        # Pause the emulated system time and reset it back to 0
+        self.emu.halt_time()
+        self.emu.systime(-self.emu.systime())
+
         default_extal = self.emu.vw.config.project.MPC5674.FMPLL.extal
 
         # Enable the watchdog
@@ -683,11 +739,6 @@ class MPC5674_WDT_Test(MPC5674_Test):
         # Enable the watchdog
         self.emu.writeMemValue(SWT_MCR, SWT_MCR_ENABLE_WDOG, 4)
 
-        # Because this test attempts to test the accuracy of emulated timeouts
-        # force the system time scaling factor to be 0.01 (100 real milliseconds
-        # to 1 emulated millisecond).
-        self.emu._systime_scaling = 0.01
-
         # Default value of MCR[ITR] (TIF) is 0 so the first watchdog expiration
         # will
         # generate a ResetException
@@ -698,26 +749,29 @@ class MPC5674_WDT_Test(MPC5674_Test):
         default_extal = self.emu.vw.config.project.MPC5674.FMPLL.extal
         wdt_time = SWT_TO_DEFAULT / default_extal
 
-        self.assertEqual(self.emu.systime(), 0.0)
+        start = self.emu.systime()
 
         # The default timeout time is 0.00981 seconds, divide the timeout time
         # by 0.01 to get the real amount of time to sleep for half of the
         # watchdog time to elapse for the emulator.
-        sleep_time = (wdt_time * 0.5) / self.emu._systime_scaling
+        sleep_time = wdt_time * 0.5
         self.emu.resume_time()
-        time.sleep(sleep_time)
+        self.emu.sleep(sleep_time)
         self.emu.halt_time()
+
+        # Get current system time
+        now = self.emu.systime()
 
         # It's unlikely the python timing will be accurate enough so that the
         # system time is now the sleep_time. but it should be less than the
         # watchdog time
-        self.assertGreater(self.emu.systime(), wdt_time * 0.5)
-        self.assertLess(self.emu.systime(), wdt_time)
+        self.assertGreater(now - start, wdt_time * 0.5)
+        self.assertLess(now - start, wdt_time)
 
         # The watchdog should not have expired yet
         self.assertEqual(self.emu.swt.watchdog.running(), True)
 
-        self.assertEqual(self._getPendingExceptions(), [])
+        self.assertEqual(self.checkPendingExceptions(), [])
 
         # Before the SWT watchdog generates a reset the ECSM MRSR[SWTR] should
         # be 0 and MRSR[POR] should be set since this was the first boot.
@@ -726,32 +780,33 @@ class MPC5674_WDT_Test(MPC5674_Test):
         self.assertEqual(self.emu.ecsm.registers.mrsr.swtr, 0)
 
         # Run for a full WDT time
-        sleep_time = wdt_time / self.emu._systime_scaling
+        sleep_time = wdt_time
         self.emu.resume_time()
-        time.sleep(sleep_time)
+        self.emu.sleep(sleep_time)
         self.emu.halt_time()
 
+        # Get current system time
+        now = self.emu.systime()
+
         # The watchdog timer should have expired by now
-        self.assertGreater(self.emu.systime(), wdt_time)
+        self.assertGreater(now - start, wdt_time)
 
         self.assertEqual(self.emu.swt.watchdog.running(), False)
-        reset_exc = intc_exc.ResetException()
-        self.assertEqual(self._getPendingExceptions(), [reset_exc])
+        reset_exc = intc_exc.ResetException(intc_exc.ResetSource.WATCHDOG)
+        self.assertEqual(self.checkPendingExceptions(), [reset_exc])
 
-        # Ensure that the ECSM MRSR[SWTR] flag is set and MRSR[POR] is 0
-        self.emu.reset()
-        self.assertEqual(self.emu.ecsm.registers.mrsr.por, 0)
-        self.assertEqual(self.emu.ecsm.registers.mrsr.dir, 0)
-        self.assertEqual(self.emu.ecsm.registers.mrsr.swtr, 1)
+        # Process the reset exception
+        self.emu.stepi()
+
+        # queue the exception as it would be if this had happened while 
+        # processing an instruction, step and then check that the watchdog is 
+        # marked as the source of the reset
+        self.assertEqual(self.emu.readMemValue(*SIU_RSR), SIU_RSR_SWTRS)
+        self.assertEqual(self.emu.readMemValue(*ECSM_MRSR), ECSM_MRSR_SWTR)
 
     def test_swt_expire_interrupt(self):
         # Enable the watchdog
         self.emu.writeMemValue(SWT_MCR, SWT_MCR_ENABLE_WDOG, 4)
-
-        # Because this test attempts to test the accuracy of emulated timeouts
-        # force the system time scaling factor to be 0.01 (100 real milliseconds
-        # to 1 emulated millisecond).
-        self.emu._systime_scaling = 0.01
 
         # Change MCR[ITR] so that the first watchdog expiration generates an
         # interrupt, and the second one generates a reset
@@ -766,20 +821,16 @@ class MPC5674_WDT_Test(MPC5674_Test):
         default_extal = self.emu.vw.config.project.MPC5674.FMPLL.extal
         wdt_time = SWT_TO_DEFAULT / default_extal
 
-        now = self.emu.systime()
-        logger.debug('0. [%f] (WDT timeout = %f)', now, wdt_time)
+        # Get the start emulated time
+        start = self.emu.systime()
 
-        self.assertEqual(self.emu.systime(), 0.0)
+        logger.debug('0. [%f] (WDT timeout = %f)', start, wdt_time)
 
         # resume the system time, wait half of the WDT time and then halt the
         # system again to stop time from counting
-
-        # The default timeout time is 0.00981 seconds, divide the timeout time
-        # by 0.01 to get the real amount of time to sleep for half of the
-        # watchdog time to elapse for the emulator.
-        sleep_time = (wdt_time * 0.5) / self.emu._systime_scaling
+        sleep_time = wdt_time * 0.5
         self.emu.resume_time()
-        time.sleep(sleep_time)
+        self.emu.sleep(sleep_time)
         self.emu.halt_time()
 
         # It's unlikely the python timing will be accurate enough so that the
@@ -787,53 +838,57 @@ class MPC5674_WDT_Test(MPC5674_Test):
         # watchdog time
         now = self.emu.systime()
         logger.debug('1. [%f] WDT time remaining = %f', now, self.emu.swt.watchdog.time())
-        self.assertGreater(now, wdt_time * 0.5)
-        self.assertLess(now, wdt_time)
+        self.assertGreater(now - start, wdt_time * 0.5)
+        self.assertLess(now - start, wdt_time)
 
         # The watchdog should not have expired yet
         self.assertEqual(self.emu.swt.watchdog.running(), True)
-        self.assertEqual(self._getPendingExceptions(), [])
+        self.assertEqual(self.checkPendingExceptions(), [])
 
         # Run for a full WDT time
-        sleep_time = wdt_time / self.emu._systime_scaling
+        sleep_time = wdt_time
         self.emu.resume_time()
-        time.sleep(sleep_time)
+        self.emu.sleep(sleep_time)
         self.emu.halt_time()
 
         # The watchdog timer should have expired by now, but only once
         now = self.emu.systime()
         logger.debug('2. [%f] WDT time remaining = %f', now, self.emu.swt.watchdog.time())
-        self.assertGreater(now, wdt_time * 1.5)
-        self.assertLess(now, wdt_time * 2)
+        self.assertGreater(now - start, wdt_time * 1.5)
+        self.assertLess(now - start, wdt_time * 2)
 
         self.assertEqual(self.emu.swt.watchdog.running(), True)
         self.assertEqual(self._getPendingExceptions(),
                 [intc_exc.ExternalException(intc_exc.INTC_SRC.SWT)])
 
-        # Before the SWT watchdog generates a reset the ECSM MRSR[SWTR] should
-        # be 0 and MRSR[POR] should be set since this was the first boot.
-        self.assertEqual(self.emu.ecsm.registers.mrsr.por, 1)
-        self.assertEqual(self.emu.ecsm.registers.mrsr.dir, 0)
-        self.assertEqual(self.emu.ecsm.registers.mrsr.swtr, 0)
+        # Before a reset the ECSM MRSR[SWTR] should be 0 and MRSR[POR] should be
+        # set since this was the first boot.
+        self.assertEqual(self.emu.readMemValue(*SIU_RSR), SIU_RSR_PORS)
+        self.assertEqual(self.emu.readMemValue(*ECSM_MRSR), ECSM_MRSR_POR)
 
         # Wait for another half WDT time for the watchdog to expire again.  The
         # second expiration should generate a ResetException
-        sleep_time = (wdt_time * 0.5) / self.emu._systime_scaling
+        sleep_time = wdt_time * 0.5
         self.emu.resume_time()
-        time.sleep(sleep_time)
+        self.emu.sleep(sleep_time)
         self.emu.halt_time()
 
         # Watchdog should have expired twice now
         now = self.emu.systime()
         logger.debug('3. [%f] WDT time remaining = %f', now, self.emu.swt.watchdog.time())
-        self.assertGreater(now, wdt_time * 2.0)
-        self.assertLess(now, wdt_time * 2.5)
+        self.assertGreater(now - start, wdt_time * 2.0)
+        self.assertLess(now - start, wdt_time * 2.5)
         self.assertEqual(self.emu.swt.watchdog.running(), False)
-        reset_exc = intc_exc.ResetException()
-        self.assertEqual(self._getPendingExceptions(), [reset_exc])
 
-        # Ensure that the ECSM MRSR[SWTR] flag is set and MRSR[POR] is 0
-        self.emu.reset()
-        self.assertEqual(self.emu.ecsm.registers.mrsr.por, 0)
-        self.assertEqual(self.emu.ecsm.registers.mrsr.dir, 0)
-        self.assertEqual(self.emu.ecsm.registers.mrsr.swtr, 1)
+        # a reset exception should be queued
+        reset_exc = intc_exc.ResetException(intc_exc.ResetSource.WATCHDOG)
+        self.assertEqual(self.checkPendingExceptions(), [reset_exc])
+
+        # Process the reset exception
+        self.emu.stepi()
+
+        # queue the exception as it would be if this had happened while 
+        # processing an instruction, step and then check that the watchdog is 
+        # marked as the source of the reset
+        self.assertEqual(self.emu.readMemValue(*SIU_RSR), SIU_RSR_SWTRS)
+        self.assertEqual(self.emu.readMemValue(*ECSM_MRSR), ECSM_MRSR_SWTR)

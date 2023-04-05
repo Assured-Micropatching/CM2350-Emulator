@@ -290,27 +290,6 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
         self.emu.writeMemValue(ctrl_addrs[3], val, 4)
         self.assertEqual(self.emu.can[3].speed, 125000)
 
-    def assert_timer_within_range(self, value, expected, margin, msg=None):
-        if msg is None:
-            msg = '%d ~= %d +/- %d' % (value, expected, margin)
-        else:
-            msg = '%d ~= %d +/- %d (%s)' % (value, expected, margin, msg)
-
-        # Timers wrap at 0xFFFF
-        logger.debug(msg)
-        if value < expected:
-            # See if perhaps the value just wrapped around, otherwise do the 
-            # normal margin check
-            if 0xFFFF + value < expected + margin:
-                # No need to check because we've just manually confirmed that 
-                # the value is within range.
-                pass
-            else:
-                self.assertGreaterEqual(value, expected - margin, msg=msg)
-        else:
-            # It should be less than expected plus the margin
-            self.assertLessEqual(value, expected + margin, msg=msg)
-
     def test_flexcan_mcr_defaults(self):
         for idx in range(4):
             devname, baseaddr = FLEXCAN_DEVICES[idx]
@@ -844,7 +823,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             time.sleep(0.5)
             val = self.emu.readMemValue(timer_addr, 4)
 
-            self.assert_timer_within_range(val, expected_val, margin, msg=devname)
+            self.assert_timer_within_range(val, expected_val, margin, maxval=0xFFFF, msg=devname)
 
             self.assertEqual(self.emu.can[idx].mode, flexcan.FLEXCAN_MODE.NORMAL, devname)
             self.emu.writeMemValue(mcr_addr, FLEXCAN_MCR_MDIS_MASK, 4)
@@ -997,7 +976,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
                 ts_offset = (mb * FLEXCAN_MBx_SIZE) + 2
                 timestamp = struct.unpack_from('>H', self.emu.can[dev].registers.mb.value, ts_offset)[0]
 
-                self.assert_timer_within_range(timestamp, expected_ticks, margin, msg=testmsg)
+                self.assert_timer_within_range(timestamp, expected_ticks, margin, maxval=0xFFFF, msg=testmsg)
 
                 # Lastly, a mailbox should only have a corresponding interrupt
                 # if the interrupt mask is set
@@ -1131,7 +1110,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
                 ts_offset = (mb * FLEXCAN_MBx_SIZE) + 2
                 timestamp = struct.unpack_from('>H', self.emu.can[dev].registers.mb.value, ts_offset)[0]
                 logger.info('msg %d: timestamp = 0x%04x, expected = 0x%04x', i, timestamp, expected_ticks)
-                self.assert_timer_within_range(timestamp, expected_ticks, margin, msg=testmsg)
+                self.assert_timer_within_range(timestamp, expected_ticks, margin, maxval=0xFFFF, msg=testmsg)
 
                 last_mb = mb
                 last_timestamp = timestamp
@@ -1350,7 +1329,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
                 expected_ticks = int(self.emu.can[dev].speed * rx_delay * self.emu._systime_scaling) & 0xFFFF
 
                 timestamp = struct.unpack_from('>H', rx_msgs[i], 2)[0]
-                self.assert_timer_within_range(timestamp, expected_ticks, margin, msg=testmsg)
+                self.assert_timer_within_range(timestamp, expected_ticks, margin, maxval=0xFFFF, msg=testmsg)
 
                 # Now that the timestamp has been confirmed to be within the
                 # expected range, ensure that the received message in the

@@ -33,7 +33,7 @@ from .ppc_vstructs import BitFieldSPR, v_const, v_w1c, v_bits
 
 # PPC Specific packages
 from . import emutimers, ppc_time, mmio, ppc_mmu, ppc_xbar, e200_intc, \
-        intc_exc, intc_const, e200_gdb
+        intc_exc, e200_gdb
 
 
 __all__ = [
@@ -149,6 +149,9 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
 
         # The TCR register controls the MCU watchdog, Decrementer and
         # Fixed-Interval Timers.
+        # TODO: These timers should be running when the timebase is enabled 
+        # regardless of the resulting interrrupt on/off action that is 
+        # configured.
         self.tcr = TCR(self)
         self.tcr.vsAddParseCallback('wie', self._tcrWIEUpdate)
         self.tcr.vsAddParseCallback('fie', self._tcrFIEUpdate)
@@ -221,13 +224,13 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
             # If TSR[ENW] and TSR[WIS] are both cleared, set TSR[ENW] and start
             # the watchdog timer again
             self.tsr.vsOverrideValue('enw', 1)
-            self.watchdog.start()
+            self.mcu_wdt.start()
 
         elif not self.tsr.wis:
             # If TSR[ENW] is set but not TSR[WIS], set WIS and start the
             # watchdog timer again
             self.tsr.vsOverrideValue('wis', 1)
-            self.watchdog.start()
+            self.mcu_wdt.start()
 
             # Trigger the watchdog exception
             self.queueException(intc_exc.WatchdogTimerException())
@@ -235,7 +238,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         elif self.tcr.wrc:
             # Any value in TCR[WRC] when TSR[ENW] and TSR[WIS] are set causes a
             # reset to happen
-            self.queueException(intc_exc.ResetException())
+            self.queueException(intc_exc.ResetException(intc_exc.ResetSource.CORE_WATCHDOG))
 
     def _mcuFITHandler(self):
         # Indicate that a fixed-interval timer event has occured
@@ -328,31 +331,15 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
 
     def _hid0TBUpdate(self, hid0):
         if self.hid0.tben:
-            self.resume_time()
-
-            # When the timebase is enabled also check if the WDT, FIT or DEC
-            # timers should be started
-            if self.tcr.wie:
-                self._startMCUWDT()
-            if self.tcr.fie:
-                self._startMCUFIT()
-            if self.tcr.die:
-                self._startMCUWDT()
+            self.enableTimebase()
         else:
-            self.halt_time()
+            self.disableTimebase()
 
-            # If any of the timebase-run MCU timers are running, stop them now
-            if self.tcr.wie:
-                self.mcu_wdt.stop()
-            if self.tcr.fie:
-                self.mcu_fit.stop()
-            if self.tcr.die:
-                self.mcu_dec.stop()
-
-    def init_core(self):
+    def init(self):
         '''
         Setup the Peripherals supported on this chip
         '''
+        # TODO: move MCU timers into the official PowerPC "timebase" class
         # Create the MCU timers
         self.mcu_wdt = self.registerTimer('MCU_WDT', self._mcuWDTHandler)
         self.mcu_fit = self.registerTimer('MCU_FIT', self._mcuFITHandler)
@@ -373,16 +360,18 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
 
         # initialize the various modules on this chip.
         for key, module in self.modules.items():
-            logger.debug("init_core: Initializing %r...", key)
+            logger.debug("init: Initializing %r...", key)
             module.init(self)
 
-    def reset_core(self):
+        # Start the core emulator time now
+        self.resume_time()
+
+    def reset(self):
         '''
         Reset all registered peripherals that have a reset function.
         Peripherals that should be returned to some pre-determined state when
         the processor resets should implement this function.
         '''
-        # TODO: move MCU timers into the official PowerPC "timebase" class
         self.disableTimebase()
 
         # Reset the cached "current instruction" data
@@ -392,17 +381,15 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         with self.extra_processing_lock:
             self.extra_processing = []
 
-        # Stop all MCU timers
-        self.mcu_wdt.stop()
-        self.mcu_fit.stop()
-        self.mcu_dec.stop()
-
         # First reset the system emulation time, then reset all modules
         self.systimeReset()
         for key, module in self.modules.items():
             if hasattr(module, 'reset'):
-                logger.debug("reset_core: Resetting %r...", key)
+                logger.debug("reset: Resetting %r...", key)
                 module.reset(self)
+
+        # Start the core emulator time now
+        self.resume_time()
 
     def halt_exec(self):
         '''
@@ -692,6 +679,20 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
             # support here?
             self.executeOpcode(op)
 
+            # Increment the tick counter
+            self.tick()
+
+        except intc_exc.ResetException as exc:
+            # Reset the entire CPU
+            self.reset()
+
+            # If any peripherals have registered a "setResetSource" function 
+            # call it now.
+            for key, module in self.modules.items():
+                if hasattr(module, 'setResetSource'):
+                    logger.debug("system reset: setting reset source %s in %s", exc.source, key)
+                    module.setResetSource(exc.source)
+
         except intc_exc.DebugException as exc:
             # TODO: If the op is DNH
             #       If debug exceptions are enabled and external exception 
@@ -708,9 +709,6 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
             # this was a DNH instruction, pass control to the GDB stub.
             self.gdbstub.handleInterrupts(exc)
 
-            # Increment the tick counter
-            self.tick()
-
         except (envi.UnsupportedInstruction, envi.InvalidInstruction) as exc:
             logger.exception('Unsupported Instruction 0x%x', pc)
 
@@ -718,10 +716,6 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
             # exception
             tb = sys.exc_info()[2]
             self.queueException(intc_exc.ProgramException().with_traceback(tb))
-
-        except intc_exc.ResetException:
-            # Special case, don't queue a reset exception, just do a reset
-            self.reset()
 
         except intc_exc.INTCException as exc:
             # If any PowerPC-specific exception occurs, queue it to be handled
@@ -735,6 +729,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
             self.stepi()
 
     def queueException(self, exception):
+        logger.debug('queuing expcetion %s', exception)
         self.mcu_intc.queueException(exception)
 
     def isExceptionActive(self, exctype):

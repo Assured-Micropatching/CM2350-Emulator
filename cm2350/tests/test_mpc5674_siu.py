@@ -560,28 +560,17 @@ class MPC5674_SIU_Test(MPC5674_Test):
         self.validate_invalid_write(addr, size)
 
     def test_siu_rsr(self):
-        # Verify that the RSR[SERF] flag is 0 by default, and then after an
-        # external software triggered reset (SRCR[SER] = 1) it is set to 1.
-
-        # Writing a 1 to SRCR[SER] causes a RESET exception
-        self.emu.writeMemValue(addr, 0x40000000, size)
-
-        reset_exc = intc_exc.ResetException()
-        self.assertEqual(self._getPendingExceptions(), [reset_exc])
-
-    def test_siu_rsr(self):
         # Verify RSR[SERF] default. The RSR register has WKPCFG and BOOTCFG
         # read-only values
         # For this configuration WKPCFG is 1 and BOOTCFG is 0 so the default RSR
         # value is:
         #   0xx00008000
         addr, size = SIU_RSR
-        default_val = 0x00008000
+        default_val = 0x80008000
 
-        # TODO: some of these fields indicate reset reasons, they will likely
-        # need to be implemented and tests created for them at some point.
+        # By default the PORS flag should be set
         self.assertEqual(self.emu.readMemValue(addr, size), default_val)
-        self.assertEqual(self.emu.siu.registers.rsr.pors, 0)
+        self.assertEqual(self.emu.siu.registers.rsr.pors, 1)
         self.assertEqual(self.emu.siu.registers.rsr.ers, 0)
         self.assertEqual(self.emu.siu.registers.rsr.llrs, 0)
         self.assertEqual(self.emu.siu.registers.rsr.lcrs, 0)
@@ -599,84 +588,70 @@ class MPC5674_SIU_Test(MPC5674_Test):
         self.emu.writeMemValue(addr, ~default_val, size)
         self.assertEqual(self.emu.readMemValue(addr, size), default_val)
 
-        # Override the values of the SERF and RGF bits
-        self.emu.siu.registers.rsr.vsOverrideValue('serf', 1)
-        self.emu.siu.registers.rsr.vsOverrideValue('rgf', 1)
-        serf_val = 0x00010000
-        rgf_val = 0x00000001
-        test_val = default_val | serf_val | rgf_val
-        self.assertEqual(self.emu.readMemValue(addr, size), test_val)
+        # Trigger some resets and ensure the correct reset source is set (also 
+        # the weak pullup flag is set)
+        source_tests = [
+            (intc_exc.ResetSource.POWER_ON,          'pors',  0x80008000),
+            (intc_exc.ResetSource.EXTERNAL,          'ers',   0x40008000),
+            (intc_exc.ResetSource.LOSS_OF_LOCK,      'llrs',  0x20008000),
+            (intc_exc.ResetSource.LOSS_OF_CLOCK,     'lcrs',  0x10008000),
+            (intc_exc.ResetSource.CORE_WATCHDOG,     'wdrs',  0x08008000),
+            (intc_exc.ResetSource.DEBUG,             'wdrs',  0x08008000),
+            (intc_exc.ResetSource.WATCHDOG,          'swtrs', 0x02008000),
+            (intc_exc.ResetSource.SOFTWARE_SYSTEM,   'ssrs',  0x00028000),
+            (intc_exc.ResetSource.SOFTWARE_EXTERNAL, 'serf',  0x00018000),
+        ]
 
-        self.assertEqual(self.emu.siu.registers.rsr.pors, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.ers, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.llrs, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.lcrs, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.wdrs, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.swtrs, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.ssrs, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.serf, 1)
-        self.assertEqual(self.emu.siu.registers.rsr.wkpcfg, 1)
-        self.assertEqual(self.emu.siu.registers.rsr.abr, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.bootcfg, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.rgf, 1)
+        for source, test_field, test_value in source_tests:
+            # Queue a reset exception with the desired reset reason and step to 
+            # reset the emulator
+            self.emu.queueException(intc_exc.ResetException(source))
+            self.emu.stepi()
 
-        # Writing 0 to all fields should not change anything
-        self.emu.writeMemValue(addr, 0, size)
+            # Verify that the reset reason is now set correctly
+            self.assertEqual(self.emu.readMemValue(addr, size), test_value, msg=test_field)
 
-        self.assertEqual(self.emu.readMemValue(addr, size), test_val)
-        self.assertEqual(self.emu.siu.registers.rsr.pors, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.ers, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.llrs, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.lcrs, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.wdrs, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.swtrs, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.ssrs, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.serf, 1)
-        self.assertEqual(self.emu.siu.registers.rsr.wkpcfg, 1)
-        self.assertEqual(self.emu.siu.registers.rsr.abr, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.bootcfg, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.rgf, 1)
+            for field, value in self.emu.siu.registers.rsr.vsGetFields():
+                msg = '%s (%s)' % (field, test_field)
+                if field in (test_field, 'wkpcfg'):
+                    self.assertEqual(value, 1, msg=msg)
+                else:
+                    self.assertEqual(value, 0, msg=msg)
 
-        # Writing 1 to the SERF field clears it
-        self.emu.writeMemValue(addr, serf_val, size)
-        test_val = default_val | rgf_val
+            # Writing 0 to all fields should not change anything
+            self.emu.writeMemValue(addr, 0, size)
 
-        self.assertEqual(self.emu.readMemValue(addr, size), test_val)
-        self.assertEqual(self.emu.siu.registers.rsr.pors, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.ers, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.llrs, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.lcrs, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.wdrs, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.swtrs, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.ssrs, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.serf, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.wkpcfg, 1)
-        self.assertEqual(self.emu.siu.registers.rsr.abr, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.bootcfg, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.rgf, 1)
+            for field, value in self.emu.siu.registers.rsr.vsGetFields():
+                msg = '%s (%s)' % (field, test_field)
+                if field in (test_field, 'wkpcfg'):
+                    self.assertEqual(value, 1, msg=msg)
+                else:
+                    self.assertEqual(value, 0, msg=msg)
 
-        # Writing 1 to the RGF field clears it
-        self.emu.writeMemValue(addr, rgf_val, size)
+            # Writing the value read should not change anything unless the bit 
+            # being changed is SERF
+            self.emu.writeMemValue(addr, test_value, size)
 
-        self.assertEqual(self.emu.readMemValue(addr, size), default_val)
-        self.assertEqual(self.emu.siu.registers.rsr.pors, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.ers, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.llrs, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.lcrs, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.wdrs, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.swtrs, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.ssrs, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.serf, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.wkpcfg, 1)
-        self.assertEqual(self.emu.siu.registers.rsr.abr, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.bootcfg, 0)
-        self.assertEqual(self.emu.siu.registers.rsr.rgf, 0)
+            for field, value in self.emu.siu.registers.rsr.vsGetFields():
+                msg = '%s (%s)' % (field, test_field)
+                if field in (test_field, 'wkpcfg') and field != 'serf':
+                    self.assertEqual(value, 1, msg=msg)
+                else:
+                    self.assertEqual(value, 0, msg=msg)
 
     def test_siu_srcr(self):
-        # Verify RSR[SERF] is 0
+        # Fill in a bunch of NOPs (0x60000000: ori r0,r0,0) starting at the
+        # current PC (0x00000000)
+        pc = self.emu.getProgramCounter()
+        self.assertEqual(pc, 0)
+        instrs = b'\x60\x00\x00\x00' * 0x100
+        self.emu.flash.data[pc:pc+len(instrs)] = instrs
+
         rsr_addr, size = SIU_RSR
-        # WKPCFG = 1, BOOTCFG = 0
-        rsr_val = 0x00008000
+
+        # Verify RSR[SERF] is 0 WKPCFG = 1, BOOTCFG = 0, and PORS is 1 (because 
+        # this is the initial power on)
+        rsr_val = 0x80008000
         self.assertEqual(self.emu.readMemValue(rsr_addr, size), rsr_val)
         self.assertEqual(self.emu.siu.registers.rsr.serf, 0)
 
@@ -686,63 +661,100 @@ class MPC5674_SIU_Test(MPC5674_Test):
         self.assertEqual(self.emu.siu.registers.srcr.ser, 0)
         self.assertEqual(self.emu.siu.registers.srcr.ssr, 0)
 
-        # Writing a 1 to SRCR[SSR] causes a RESET exception
-        with self.assertRaises(intc_exc.ResetException) as cm:
-            self.emu.writeMemValue(srcr_addr, 0x80000000, size)
-        self.assertEqual(cm.exception.kwargs, {})
+        # Writing a 1 to SRCR[SSR] causes a software system reset and sets the 
+        # RSR[SSRS] flag.
+        self.emu.writeMemValue(srcr_addr, 0x80000000, size)
+
+        # Ensure that the exception has been queued
+        self.assertEqual(self.checkPendingExceptions(), \
+                [intc_exc.ResetException(intc_exc.ResetSource.SOFTWARE_SYSTEM)])
 
         # Before the reset:
+        #   RSR[SSRS] is 0
         #   RSR[SERF] is 0
-        #   SRCR[SER] is 0
-        #   SRCR[SSR] is 1
         self.assertEqual(self.emu.readMemValue(rsr_addr, size), rsr_val)
         self.assertEqual(self.emu.siu.registers.rsr.serf, 0)
+        self.assertEqual(self.emu.siu.registers.rsr.ssrs, 0)
+
+        #   SRCR[SER] is 0
+        #   SRCR[SSR] is 1
         self.assertEqual(self.emu.readMemValue(srcr_addr, size), 0x80000000)
         self.assertEqual(self.emu.siu.registers.srcr.ser, 0)
         self.assertEqual(self.emu.siu.registers.srcr.ssr, 1)
 
-        self.emu.reset()
+        # Step to trigger the reset
+        self.emu.stepi()
+
+        # PC should be back at 0
+        self.assertEqual(self.emu.getProgramCounter(), 0)
 
         # After the reset:
+        #   RSR[SSRS] is 1
         #   RSR[SERF] is 0
-        #   SRCR[SER] is 0
-        #   SRCR[SSR] is 0
+        rsr_val = 0x00028000
         self.assertEqual(self.emu.readMemValue(rsr_addr, size), rsr_val)
         self.assertEqual(self.emu.siu.registers.rsr.serf, 0)
+        self.assertEqual(self.emu.siu.registers.rsr.ssrs, 1)
+
+        #   SRCR[SER] is 0
+        #   SRCR[SSR] is 0
         self.assertEqual(self.emu.readMemValue(srcr_addr, size), 0)
         self.assertEqual(self.emu.siu.registers.srcr.ser, 0)
         self.assertEqual(self.emu.siu.registers.srcr.ssr, 0)
 
-        # Writing a 1 to SRCR[SER] causes a RESET exception
-        with self.assertRaises(intc_exc.ResetException) as cm:
-            self.emu.writeMemValue(srcr_addr, 0x40000000, size)
-        self.assertEqual(cm.exception.kwargs, {})
+        # Writing a 1 to SRCR[SSR] causes a software external reset and sets the 
+        # RSR[SERF] flag.
+        self.emu.writeMemValue(srcr_addr, 0x40000000, size)
+
+        # Ensure that the exception has been queued
+        self.assertEqual(self.checkPendingExceptions(), \
+                [intc_exc.ResetException(intc_exc.ResetSource.SOFTWARE_EXTERNAL)])
 
         # Before the reset:
+        #   RSR[SSRS] is still 1
         #   RSR[SERF] is 0
+        self.assertEqual(self.emu.readMemValue(rsr_addr, size), rsr_val)
+        self.assertEqual(self.emu.siu.registers.rsr.ssrs, 1)
+        self.assertEqual(self.emu.siu.registers.rsr.serf, 0)
+
         #   SRCR[SER] is 1
         #   SRCR[SSR] is 0
-        self.assertEqual(self.emu.readMemValue(rsr_addr, size), rsr_val)
-        self.assertEqual(self.emu.siu.registers.rsr.serf, 0)
         self.assertEqual(self.emu.readMemValue(srcr_addr, size), 0x40000000)
         self.assertEqual(self.emu.siu.registers.srcr.ser, 1)
         self.assertEqual(self.emu.siu.registers.srcr.ssr, 0)
 
-        self.emu.reset()
+        # Step to trigger the reset
+        self.emu.stepi()
+
+        # PC should be back at 0
+        self.assertEqual(self.emu.getProgramCounter(), 0)
 
         # After the reset:
+        #   RSR[SSRS] is 0
         #   RSR[SERF] is 1
+        rsr_val = 0x00018000
+        self.assertEqual(self.emu.readMemValue(rsr_addr, size), rsr_val)
+        self.assertEqual(self.emu.siu.registers.rsr.ssrs, 0)
+        self.assertEqual(self.emu.siu.registers.rsr.serf, 1)
+
         #   SRCR[SER] is 0
         #   SRCR[SSR] is 0
-        rsr_val |= 0x00010000
-        self.assertEqual(self.emu.readMemValue(rsr_addr, size), rsr_val)
-        self.assertEqual(self.emu.siu.registers.rsr.serf, 1)
         self.assertEqual(self.emu.readMemValue(srcr_addr, size), 0)
         self.assertEqual(self.emu.siu.registers.srcr.ser, 0)
         self.assertEqual(self.emu.siu.registers.srcr.ssr, 0)
 
         # All other values should have no affect
         self.emu.writeMemValue(srcr_addr, 0x3FFFFFFF, size)
+        self.assertEqual(self.emu.readMemValue(srcr_addr, size), 0)
+
+        # Step and verify no reset occured
+        self.emu.stepi()
+
+        # PC should have moved to 4
+        self.assertEqual(self.emu.getProgramCounter(), 4)
+
+        # Verify RSR and SCRC haven't changed
+        self.assertEqual(self.emu.readMemValue(rsr_addr, size), rsr_val)
         self.assertEqual(self.emu.readMemValue(srcr_addr, size), 0)
 
     def test_siu_ccr(self):

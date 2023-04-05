@@ -96,3 +96,15 @@ MCR_VTES_MASK   = 1 << MCR_VTES
 MMD_MCR = 0
 MMD_CPR = 2
 MMD_IACKR = 4
+
+
+class ResetSource(enum.Enum):
+    POWER_ON            = enum.auto()
+    EXTERNAL            = enum.auto()
+    SOFTWARE_SYSTEM     = enum.auto()
+    LOSS_OF_CLOCK       = enum.auto()
+    LOSS_OF_LOCK        = enum.auto()
+    CORE_WATCHDOG       = enum.auto()  # MCU watchdog
+    DEBUG               = enum.auto()
+    WATCHDOG            = enum.auto()  # SWT peripheral
+    SOFTWARE_EXTERNAL   = enum.auto()

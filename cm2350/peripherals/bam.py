@@ -147,6 +147,8 @@ class BAM(MMIOPeripheral):
         if self.analyze():
             logger.info("booting from first discovered boot entry: baseaddr: 0x%x  codeva: 0x%x", self.rchw_addr, self.rchw.entry_point)
             logger.debug(self.rchw.tree())
+        else:
+            logger.info("Using default boot entry of 0x%x", self.rchw.entry_point)
 
         # The default entry point if no BAM entry is found ix 0x00000000, which
         # is what the "invalid" RHCW will now indicate.

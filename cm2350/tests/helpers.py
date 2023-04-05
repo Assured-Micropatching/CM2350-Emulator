@@ -86,13 +86,17 @@ class MPC5674_Test(unittest.TestCase):
 
         # Enable the timebase (normally done by writing a value to HID0)
         if not self._start_timebase_paused:
-            self.emu.resume_time()
+            self.emu.enableTimebase()
 
     def _getPendingExceptions(self):
         # Remove all the exceptions in the pending list
         pending = self.emu.mcu_intc.pending
         self.emu.mcu_intc.pending = []
         return pending
+
+    def checkPendingExceptions(self):
+        # Just return the list of pending exceptions but leave them queued
+        return self.emu.mcu_intc.pending
 
     def tearDown(self):
         # Ensure that there are no unprocessed exceptions
@@ -103,7 +107,20 @@ class MPC5674_Test(unittest.TestCase):
         # Only assert if the test is current succeeding, we don't want to 
         # override the error of a failure, the success attribute isn't set yet, 
         # instead look at the errors attribute.
-        self.assertEqual(pending_excs, [])
+        #
+        # Unfortunately python3.11 changed how to check this so we have to check 
+        # for the existence of the 'errors' attribute on the TestCase.outcome 
+        # object, and if that attribute doesn't exist get the errors list from 
+        # the result object.
+
+        # How the Python 3.4 - 3.10 unittest module tracks failures
+        if hasattr(self._outcome, 'errors'):
+            if not self._outcome.errors:
+                self.assertEqual(pending_excs, [])
+
+        # How the Python 3.11+ unittest module tracks failures
+        elif not self._outcome.result.errors:
+            self.assertEqual(pending_excs, [])
 
         # Clean up the resources
         self.ECU.shutdown()
@@ -277,3 +294,41 @@ class MPC5674_Test(unittest.TestCase):
     def get_spr_num(self, reg):
         regname = self.emu.getRegisterName(reg)
         return next(num for num, (name, _, _) in eaps.sprs.items() if name == regname)
+
+    def assert_timer_within_range(self, value, expected, margin, maxval=0xFFFFFFFF, msg=None):
+        compare_msg = '%d =? %d +/- %d' % (value, expected, margin)
+        if msg is None:
+            msg = ''
+        else:
+            msg = ' (' + msg + ')'
+
+        logger.debug(msg)
+        if value < expected:
+            # See if perhaps the value just wrapped around, otherwise do the 
+            # normal margin check
+            if (maxval + value <= expected + margin) or value >= expected - margin:
+                result = True
+                extra = ' (max: %d)' % maxval
+            else:
+                result = False
+                toobig_diff = (maxval + value) - (expected + margin)
+                toosmall_diff = (expected - margin) - value
+                if toosmall_diff < toobig_diff:
+                    extra = ' (max: %d, diff:%d)' % (maxval, -toosmall_diff)
+                else:
+                    extra = ' (max: %d, diff:%d)' % (maxval, toobig_diff)
+
+        else:
+            # It should be less than expected plus the margin
+            if value <= expected + margin:
+                result = True
+                extra = ' (max: %#x)' % maxval
+            else:
+                result = False
+                diff = value - (expected + margin)
+                extra = ' (max: %d, diff:%d)' % (maxval, diff)
+
+        if result:
+            self.assertTrue(result, msg=compare_msg+extra+msg)
+        else:
+            self.fail(msg=compare_msg+extra+msg)

@@ -198,6 +198,12 @@ class ResetException(INTCException):
     __ivor__ = EXC_RESET
     __maskable__ = False
 
+    def __init__(self, source, *args, **kwargs):
+        # Reset exceptions must have a reset reason
+        self.source = source
+        super().__init__(*args, **kwargs)
+
+
 ### Base Exceptions (related to IVORs)
 class CriticalInputException(CriticalPrioException):
     __priority__ = INTC_LEVEL.CRITICAL_INPUT

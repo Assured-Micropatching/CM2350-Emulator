@@ -700,6 +700,9 @@ class SIU(MMIOPeripheral):
         # clock divider changes the main system time frequency is updated
         self.registers.vsAddParseCallback('sysdiv', self.updateSystemFreq)
 
+        # TODO: callbacks for each register that impacts the system clocks and 
+        # updates the each in turn.
+
         # Attach the callback functions to handle writes that need to cause GPIO
         # value updates
         self.registers.pcr.vsAddParseCallback('by_idx', self.pcrUpdate)
@@ -709,6 +712,14 @@ class SIU(MMIOPeripheral):
 
     def init(self, emu):
         super().init(emu)
+
+        # Register the system clocks
+        emu.registerClock('sys',    self.f_sys)
+        emu.registerClock('periph', self.f_periph)
+        emu.registerClock('cpu',    self.f_cpu)
+        emu.registerClock('etpu',   self.f_etpu)
+        emu.registerClock('engclk', self.f_engclk)
+        emu.registerClock('clkout', self.f_clkout)
 
     def reset(self, emu):
         """
@@ -787,7 +798,7 @@ class SIU(MMIOPeripheral):
             divider = 1
         else:
             divider = (2, 4, 8, 16)[self.registers.sysdiv.sysclkdiv]
-        return self.emu.fmpll.f_pll() // divider
+        return self.emu.getClock('pll') // divider
 
     def updateMasksFromPCR(self, pin):
         """
@@ -963,7 +974,7 @@ class SIU(MMIOPeripheral):
         # 1 The external clock (the EXTAL frequency of the oscillator) is the
         # source of the ENGCLK
         if self.registers.eccr.ecss:
-            freq = self.emu.fmpll.f_extal()
+            freq = self.emu.getClock('extal')
         elif self.registers.eccr.engdiv != 0:
             freq = self.f_periph() / (self.registers.eccr.engdiv * 2)
         else:

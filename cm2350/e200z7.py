@@ -32,7 +32,7 @@ from envi.archs.ppc.regs import REG_MCSR, REG_MSR, REG_TSR, REG_TCR, REG_DEC, \
 from .ppc_vstructs import BitFieldSPR, v_const, v_w1c, v_bits
 
 # PPC Specific packages
-from . import emutimers, ppc_time, mmio, ppc_mmu, ppc_xbar, e200_intc, \
+from . import emutimers, clocks, ppc_time, mmio, ppc_mmu, ppc_xbar, e200_intc, \
         intc_exc, e200_gdb
 
 
@@ -115,7 +115,7 @@ import vivisect.impemu.emulator as vimp_emu
 
 class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
                  eape.Ppc32EmbeddedEmulator, ppc_time.PpcEmuTime,
-                 emutimers.ScaledEmuTimeCore):
+                 emutimers.ScaledEmuTimeCore, clocks.EmuClocks):
     def __init__(self, vw):
         # module registry
         self.modules = {}
@@ -141,6 +141,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
 
         ppc_time.PpcEmuTime.__init__(self)
         emutimers.ScaledEmuTimeCore.__init__(self, 0.1)
+        clocks.EmuClocks.__init__(self)
 
         # MCU timers
         self.mcu_wdt = None

@@ -730,8 +730,8 @@ class MPC5674_WDT_Test(MPC5674_Test):
         self.assertEqual(self.emu.swt.watchdog.running(), True)
 
         # The watchdog clock should now be using the platform/peripheral clock
-        self.assertEqual(self.emu.swt.watchdog.freq, self.emu.siu.f_periph())
-        wdt_time = SWT_TO_DEFAULT / self.emu.siu.f_periph()
+        self.assertEqual(self.emu.swt.watchdog.freq, self.emu.getClock('periph'))
+        wdt_time = SWT_TO_DEFAULT / self.emu.getClock('periph')
         self.assertEqual(self.emu.swt.watchdog.time(), wdt_time)
         self.assertEqual(self.emu.swt.watchdog.ticks(), SWT_TO_DEFAULT)
 

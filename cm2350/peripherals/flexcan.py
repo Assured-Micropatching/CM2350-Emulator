@@ -1358,9 +1358,9 @@ class FlexCAN(ExternalIOPeripheral):
 
         # source clock = CPI source clock / (PRESDIV + 1)
         if ctrl.clk_src:
-            sclk = self.emu.siu.f_periph() / (ctrl.presdiv + 1)
+            sclk = self.emu.getClock('periph') / (ctrl.presdiv + 1)
         else:
-            sclk = self.emu.fmpll.f_extal() / (ctrl.presdiv + 1)
+            sclk = self.emu.getClock('extal') / (ctrl.presdiv + 1)
 
         # SYNC (1) + PROPSEG (0-7 + 1) + SEG1 (0-7 + 1) + SEG2 (0-7 + 1)
         tq_per_bit = ctrl.propseg + ctrl.pseg1 + ctrl.pseg2 + 4

@@ -285,12 +285,10 @@ class SWT(MMIOPeripheral):
         self.updateServiceKeys()
 
         with self._wdogHandlerLock:
-            csl = self.registers.mcr.csl
-
-        if csl:
-            freq = self.emu.fmpll.extal
-        else:
-            freq = self.emu.siu.f_periph()
+            if self.registers.mcr.csl:
+                freq = self.emu.getClock('extal')
+            else:
+                freq = self.emu.getClock('periph')
 
         # The SWT duration should be the value of TO (or 0x100 if TO is smaller)
         ticks = max(self.registers.to.wto, 0x100)

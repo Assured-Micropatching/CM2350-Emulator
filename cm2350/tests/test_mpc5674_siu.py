@@ -504,7 +504,7 @@ class MPC5674_SIU_Test(MPC5674_Test):
         # Default PLL clock based on the PCB params selected for these tests is
         # 60 MHz
         self.assertEqual(self.emu.vw.config.project.MPC5674.FMPLL.extal, 40000000)
-        self.assertEqual(self.emu.fmpll.f_pll(), 60000000.0)
+        self.assertEqual(self.emu.getClock('pll'), 60000000.0)
 
         # The max clock for the real hardware is 264 MHz:
         #  (40 MHz * (50+16)) / ((4+1) * (1+1))
@@ -514,7 +514,7 @@ class MPC5674_SIU_Test(MPC5674_Test):
         self.emu.writeMemValue(0xC3F80008, 0xF0040032, 4)
         # ESYNCR2[ERFD] = 1
         self.emu.writeMemValue(0xC3F8000C, 0x00000001, 4)
-        self.assertEqual(self.emu.fmpll.f_pll(), 264000000.0)
+        self.assertEqual(self.emu.getClock('pll'), 264000000.0)
 
     def change_pgpdo_state(self, state):
         """
@@ -1406,6 +1406,7 @@ class MPC5674_SIU_Test(MPC5674_Test):
 
         # Default system clock is 60 MHz
         self.assertEqual(self.emu.siu.f_sys(), 60000000.0)
+        self.assertEqual(self.emu.getClock('sys'), 60000000.0)
 
         # The CPU, Peripheral, and eTPU clocks are derived from the system clock
         # and divided based on the value of SYSDIV[IPCLKDIV]:
@@ -1426,10 +1427,16 @@ class MPC5674_SIU_Test(MPC5674_Test):
             self.assertEqual(self.emu.siu.registers.sysdiv.ipclkdiv, ipclkdiv_val, msg=hex(sysdiv_val))
             self.assertEqual(self.emu.siu.registers.sysdiv.bypass, 1, msg=hex(sysdiv_val))
             self.assertEqual(self.emu.siu.registers.sysdiv.sysclkdiv, sysckldiv_val, msg=hex(sysdiv_val))
+
             self.assertEqual(self.emu.siu.f_sys(), sys_freq, msg=hex(sysdiv_val))
             self.assertEqual(self.emu.siu.f_cpu(), cpu_freq, msg=hex(sysdiv_val))
             self.assertEqual(self.emu.siu.f_periph(), periph_freq, msg=hex(sysdiv_val))
             self.assertEqual(self.emu.siu.f_etpu(), etpu_freq, msg=hex(sysdiv_val))
+
+            self.assertEqual(self.emu.getClock('sys'), sys_freq, msg=hex(sysdiv_val))
+            self.assertEqual(self.emu.getClock('cpu'), cpu_freq, msg=hex(sysdiv_val))
+            self.assertEqual(self.emu.getClock('periph'), periph_freq, msg=hex(sysdiv_val))
+            self.assertEqual(self.emu.getClock('etpu'), etpu_freq, msg=hex(sysdiv_val))
 
         # When bypass is disabled the system clock is the FMPLL clock divided
         # down based on SYSDIV[SYSCLKDIV]:
@@ -1463,10 +1470,16 @@ class MPC5674_SIU_Test(MPC5674_Test):
             self.assertEqual(self.emu.siu.registers.sysdiv.ipclkdiv, ipclkdiv_val)
             self.assertEqual(self.emu.siu.registers.sysdiv.bypass, 0)
             self.assertEqual(self.emu.siu.registers.sysdiv.sysclkdiv, sysckldiv_val)
+
             self.assertEqual(self.emu.siu.f_sys(), sys_freq)
             self.assertEqual(self.emu.siu.f_cpu(), cpu_freq)
             self.assertEqual(self.emu.siu.f_periph(), periph_freq)
             self.assertEqual(self.emu.siu.f_etpu(), etpu_freq)
+
+            self.assertEqual(self.emu.getClock('sys'), sys_freq)
+            self.assertEqual(self.emu.getClock('cpu'), cpu_freq)
+            self.assertEqual(self.emu.getClock('periph'), periph_freq)
+            self.assertEqual(self.emu.getClock('etpu'), etpu_freq)
 
         self.set_sysclk_264mhz()
 
@@ -1484,10 +1497,16 @@ class MPC5674_SIU_Test(MPC5674_Test):
             self.assertEqual(self.emu.siu.registers.sysdiv.ipclkdiv, ipclkdiv_val)
             self.assertEqual(self.emu.siu.registers.sysdiv.bypass, 1)
             self.assertEqual(self.emu.siu.registers.sysdiv.sysclkdiv, sysckldiv_val)
+
             self.assertEqual(self.emu.siu.f_sys(), sys_freq)
             self.assertEqual(self.emu.siu.f_cpu(), cpu_freq)
             self.assertEqual(self.emu.siu.f_periph(), periph_freq)
             self.assertEqual(self.emu.siu.f_etpu(), etpu_freq)
+
+            self.assertEqual(self.emu.getClock('sys'), sys_freq)
+            self.assertEqual(self.emu.getClock('cpu'), cpu_freq)
+            self.assertEqual(self.emu.getClock('periph'), periph_freq)
+            self.assertEqual(self.emu.getClock('etpu'), etpu_freq)
 
         # 264 MHz system clock with bypass disabled
         tests = (
@@ -1516,10 +1535,16 @@ class MPC5674_SIU_Test(MPC5674_Test):
             self.assertEqual(self.emu.siu.registers.sysdiv.ipclkdiv, ipclkdiv_val)
             self.assertEqual(self.emu.siu.registers.sysdiv.bypass, 0)
             self.assertEqual(self.emu.siu.registers.sysdiv.sysclkdiv, sysckldiv_val)
+
             self.assertEqual(self.emu.siu.f_sys(), sys_freq)
             self.assertEqual(self.emu.siu.f_cpu(), cpu_freq)
             self.assertEqual(self.emu.siu.f_periph(), periph_freq)
             self.assertEqual(self.emu.siu.f_etpu(), etpu_freq)
+
+            self.assertEqual(self.emu.getClock('sys'), sys_freq)
+            self.assertEqual(self.emu.getClock('cpu'), cpu_freq)
+            self.assertEqual(self.emu.getClock('periph'), periph_freq)
+            self.assertEqual(self.emu.getClock('etpu'), etpu_freq)
 
     def test_siu_output_clk(self):
         # The ENGCLK can be driven from the external clock/crystal or from the
@@ -1539,11 +1564,15 @@ class MPC5674_SIU_Test(MPC5674_Test):
         # The default system clock is 60 MHz, and the peripheral clock is 30 MHz
         self.assertEqual(self.emu.siu.f_sys(), 60000000.0)
         self.assertEqual(self.emu.siu.f_periph(), 30000000.0)
+        self.assertEqual(self.emu.getClock('sys'), 60000000.0)
+        self.assertEqual(self.emu.getClock('periph'), 30000000.0)
 
         # Based on the default ECCS values ENGCLK will be 937.5 kHz and CLKOUT
         # will be 15 MHz
         self.assertEqual(self.emu.siu.f_engclk(), 937500.0)
         self.assertEqual(self.emu.siu.f_clkout(), 15000000.0)
+        self.assertEqual(self.emu.getClock('engclk'), 937500.0)
+        self.assertEqual(self.emu.getClock('clkout'), 15000000.0)
 
         # Set ECCR[ECSS] and confirm that the ENGCLK is the same as the external
         # clock (40 MHz)
@@ -1553,6 +1582,7 @@ class MPC5674_SIU_Test(MPC5674_Test):
         self.assertEqual(self.emu.siu.registers.eccr.ebts, 0)
         self.assertEqual(self.emu.siu.registers.eccr.ebdf, 1)
         self.assertEqual(self.emu.siu.f_engclk(), 40000000.0)
+        self.assertEqual(self.emu.getClock('engclk'), 40000000.0)
 
         # Test a few ECCR[ENGDIV] values
         tests = (
@@ -1566,8 +1596,12 @@ class MPC5674_SIU_Test(MPC5674_Test):
             self.assertEqual(self.emu.siu.registers.eccr.engdiv, engdiv_val)
             self.assertEqual(self.emu.siu.registers.eccr.ecss, 0)
             self.assertEqual(self.emu.siu.registers.eccr.ebdf, 1)
+
             self.assertEqual(self.emu.siu.f_engclk(), engclk_freq)
             self.assertEqual(self.emu.siu.f_clkout(), 15000000.0)
+
+            self.assertEqual(self.emu.getClock('engclk'), engclk_freq)
+            self.assertEqual(self.emu.getClock('clkout'), 15000000.0)
 
         # Test the possible ECCR[EBDF] values
         tests = (
@@ -1581,9 +1615,12 @@ class MPC5674_SIU_Test(MPC5674_Test):
             self.assertEqual(self.emu.siu.registers.eccr.engdiv, 0x10)
             self.assertEqual(self.emu.siu.registers.eccr.ecss, 0)
             self.assertEqual(self.emu.siu.registers.eccr.ebdf, ebdf_val)
+
             self.assertEqual(self.emu.siu.f_engclk(), 937500.0)
             self.assertEqual(self.emu.siu.f_clkout(), clkout_freq)
 
+            self.assertEqual(self.emu.getClock('engclk'), 937500.0)
+            self.assertEqual(self.emu.getClock('clkout'), clkout_freq)
 
     # Tests for SIU addresses with no emulated functionality
 

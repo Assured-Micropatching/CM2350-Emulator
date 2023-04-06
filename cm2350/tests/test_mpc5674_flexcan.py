@@ -1,4 +1,5 @@
 import os
+import time
 import random
 import struct
 import unittest
@@ -212,7 +213,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
         # Default PLL clock based on the PCB params selected for these tests is
         # 60 MHz
         self.assertEqual(self.emu.vw.config.project.MPC5674.FMPLL.extal, 40000000)
-        self.assertEqual(self.emu.fmpll.f_pll(), 60000000.0)
+        self.assertEqual(self.emu.getClock('pll'), 60000000.0)
 
         # The max clock for the real hardware is 764 MHz:
         #  (40 MHz * (50+16)) / ((4+1) * (1+1))
@@ -226,7 +227,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
         self.emu.writeMemValue(0xC3F80008, 0xF0070050, 4)
         # ESYNCR2[ERFD] = 1
         self.emu.writeMemValue(0xC3F8000C, 0x00000001, 4)
-        self.assertEqual(self.emu.fmpll.f_pll(), 240000000.0)
+        self.assertEqual(self.emu.getClock('pll'), 240000000.0)
 
         # Now set the SIU peripheral configuration to allow the CPU frequency to
         # be double the peripheral speed (otherwise the maximum bus/peripheral
@@ -235,7 +236,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
         # SYSDIV[IPCLKDIV] = 0
         # SYSDIV[BYPASS] = 1
         self.emu.writeMemValue(0xC3F909A0, 0x00000010, 4)
-        self.assertEqual(self.emu.siu.f_periph(), 120000000.0)
+        self.assertEqual(self.emu.getClock('periph'), 120000000.0)
 
     def set_baudrates(self):
         # Configure FMPLL to an appropriately reasonable example valid baud rate
@@ -1369,7 +1370,7 @@ class MPC5674_FlexCAN_RealIO(MPC5674_Test):
         # Default PLL clock based on the PCB params selected for these tests is
         # 60 MHz
         self.assertEqual(self.emu.vw.config.project.MPC5674.FMPLL.extal, 40000000)
-        self.assertEqual(self.emu.fmpll.f_pll(), 60000000.0)
+        self.assertEqual(self.emu.getClock('pll'), 60000000.0)
 
         # The max clock for the real hardware is 764 MHz:
         #  (40 MHz * (50+16)) / ((4+1) * (1+1))
@@ -1383,7 +1384,7 @@ class MPC5674_FlexCAN_RealIO(MPC5674_Test):
         self.emu.writeMemValue(0xC3F80008, 0xF0070050, 4)
         # ESYNCR2[ERFD] = 1
         self.emu.writeMemValue(0xC3F8000C, 0x00000001, 4)
-        self.assertEqual(self.emu.fmpll.f_pll(), 240000000.0)
+        self.assertEqual(self.emu.getClock('pll'), 240000000.0)
 
         # Now set the SIU peripheral configuration to allow the CPU frequency to
         # be double the peripheral speed (otherwise the maximum bus/peripheral
@@ -1392,7 +1393,7 @@ class MPC5674_FlexCAN_RealIO(MPC5674_Test):
         # SYSDIV[IPCLKDIV] = 0
         # SYSDIV[BYPASS] = 1
         self.emu.writeMemValue(0xC3F909A0, 0x00000010, 4)
-        self.assertEqual(self.emu.siu.f_periph(), 120000000.0)
+        self.assertEqual(self.emu.getClock('periph'), 120000000.0)
 
     def set_baudrates(self):
         # Configure FMPLL to an appropriately reasonable example valid baud rate
@@ -1647,6 +1648,10 @@ class MPC5674_FlexCAN_RealIO(MPC5674_Test):
             pc = self.emu.getProgramCounter()
             while pc != mb1_handler_addr:
                 cur_pc = pc
+
+                # NOP processing is too fast so force a small delay here to let
+                # network happen
+                time.sleep(0.001)
 
                 # The message has not yet been processed by the CAN peripheral
                 # which means that the exception count is still 0

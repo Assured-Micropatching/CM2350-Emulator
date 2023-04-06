@@ -1,7 +1,4 @@
 # the core of the CM2350 simulator
-import os
-import sys
-import time
 
 import vivisect.cli as v_cli
 import envi.archs.ppc.emu as eape

@@ -2,7 +2,6 @@ import os
 import copy
 import glob
 import json
-import time
 import random
 import shutil
 import struct

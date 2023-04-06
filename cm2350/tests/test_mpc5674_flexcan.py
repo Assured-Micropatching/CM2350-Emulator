@@ -1,5 +1,4 @@
 import os
-import time
 import random
 import struct
 import unittest
@@ -352,7 +351,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
 
         # CAN A
         self.emu.can[0]._timer.start()
-        time.sleep(0.1)
+        self.emu.sleep(0.1)
         self.assertNotEqual(self.emu.readMemory(test_addrs[0], 4), b'\x00\x00\x00\x00')
         self.assertNotEqual(self.emu.readMemValue(test_addrs[0], 4), 0x00000000)
 
@@ -369,7 +368,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
 
         # CAN B
         self.emu.can[1]._timer.start()
-        time.sleep(0.1)
+        self.emu.sleep(0.1)
         self.assertNotEqual(self.emu.readMemory(test_addrs[1], 4), b'\x00\x00\x00\x00')
         self.assertNotEqual(self.emu.readMemValue(test_addrs[1], 4), 0x00000000)
 
@@ -386,7 +385,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
 
         # CAN C
         self.emu.can[2]._timer.start()
-        time.sleep(0.1)
+        self.emu.sleep(0.1)
         self.assertNotEqual(self.emu.readMemory(test_addrs[2], 4), b'\x00\x00\x00\x00')
         self.assertNotEqual(self.emu.readMemValue(test_addrs[2], 4), 0x00000000)
 
@@ -403,7 +402,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
 
         # CAN D
         self.emu.can[3]._timer.start()
-        time.sleep(0.1)
+        self.emu.sleep(0.1)
         self.assertNotEqual(self.emu.readMemory(test_addrs[3], 4), b'\x00\x00\x00\x00')
         self.assertNotEqual(self.emu.readMemValue(test_addrs[3], 4), 0x00000000)
 
@@ -820,7 +819,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
 
             self.emu.writeMemValue(mcr_addr, 0, 4)
 
-            time.sleep(0.5)
+            self.emu.sleep(0.5)
             val = self.emu.readMemValue(timer_addr, 4)
 
             self.assert_timer_within_range(val, expected_val, margin, maxval=0xFFFF, msg=devname)
@@ -857,7 +856,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             # Change mode to NORMAL, the timer now starts moving, but disable
             # self-reception of messages to make this test simpler
             self.emu.writeMemValue(mcr_addr, FLEXCAN_MCR_SRX_DIS_MASK, 4)
-            start_time = time.time()
+            start_time = self.emu.systime()
 
             # Place messages into each mailbox and mark the mailbox as inactive
             for mb in range(FLEXCAN_NUM_MBs):
@@ -879,7 +878,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             self.assertEqual(self._getPendingExceptions(), [], msg=devname)
 
             # Wait some short time to let the timer run for a bit
-            time.sleep(0.5)
+            self.emu.sleep(0.5)
 
             # For each CAN device only transmit from some of them:
             #   CAN A: tx in all mailboxes
@@ -899,7 +898,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
                 # Save the timestamp that the message was sent
                 addr = baseaddr + FLEXCAN_MB_OFFSET + (mb * FLEXCAN_MBx_SIZE)
                 self.emu.writeMemValue(addr, flexcan.FLEXCAN_CODE_TX_ACTIVE, 1)
-                tx_times[mb] = time.time()
+                tx_times[mb] = self.emu.systime()
 
             # Now read all queued transmit messages
             txd_msgs = self.emu.can[dev].getTransmittedObjs()
@@ -1079,7 +1078,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
 
             # Now move back to normal mode
             self.emu.writeMemValue(mcr_addr, 0, 4)
-            start_time = time.time()
+            start_time = self.emu.systime()
 
             last_mb = None
             last_timestamp = None
@@ -1104,7 +1103,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
 
                 # Confirm that the timestamp is accurate. The timer has probably
                 # wrapped by now so ensure it is limited to 16 bits
-                rx_delay = time.time() - start_time
+                rx_delay = self.emu.systime() - start_time
                 expected_ticks = int(self.emu.can[dev].speed * rx_delay * self.emu._systime_scaling) & 0xFFFF
 
                 ts_offset = (mb * FLEXCAN_MBx_SIZE) + 2
@@ -1180,7 +1179,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             # And ensure that there are no new interrupts
             self.assertEqual(self._getPendingExceptions(), [], msg=testmsg)
 
-        time.sleep(2)
+        self.emu.sleep(2)
 
         # Quick sanity check see that all exceptions have been properly handled
         self.assertEqual(self._getPendingExceptions(), [], msg=testmsg)
@@ -1215,7 +1214,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             self.emu.writeMemValue(mcr_addr, FLEXCAN_MCR_FEN_MASK, 4)
             self.assertEqual(self.emu.can[dev].mode, flexcan.FLEXCAN_MODE.NORMAL, devname)
             self.assertEqual(self.emu.can[dev].registers.mcr.fen, 1, devname)
-            start_time = time.time()
+            start_time = self.emu.systime()
 
             # Generate 6 messages to send
             msgs = [generate_msg() for i in range(6)]
@@ -1233,8 +1232,8 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             for i in range(len(msgs)):
                 testmsg = '%s RxFIFO[%d]' % (devname, i)
                 self.emu.can[dev].processReceivedData(msgs[i])
-                rx_times.append(time.time())
-                time.sleep(0.1)
+                rx_times.append(self.emu.systime())
+                self.emu.sleep(0.1)
 
                 # There should be one RxFIFO Msg Available interrupt (MB5) when
                 # the first message is sent, then an RxFIFO Warning interrupt
@@ -1293,7 +1292,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             # Send another message and ensure the RxFIFO Warning is set again
             msgs.append(generate_msg())
             self.emu.can[dev].processReceivedData(msgs[-1])
-            rx_times.append(time.time())
+            rx_times.append(self.emu.systime())
 
             self.assertEqual(self._getPendingExceptions(), [get_int(dev, 6)], msg=testmsg)
             iflag1_val = self.emu.readMemValue(baseaddr + FLEXCAN_IFLAG1_OFFSET, 4)
@@ -1648,10 +1647,6 @@ class MPC5674_FlexCAN_RealIO(MPC5674_Test):
             pc = self.emu.getProgramCounter()
             while pc != mb1_handler_addr:
                 cur_pc = pc
-
-                # NOP processing is too fast so force a small delay here to let
-                # network happen
-                time.sleep(0.001)
 
                 # The message has not yet been processed by the CAN peripheral
                 # which means that the exception count is still 0

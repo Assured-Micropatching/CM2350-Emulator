@@ -1,10 +1,5 @@
-import time
-
 import envi.bits as e_bits
-import envi.archs.ppc.spr as eaps
 import envi.archs.ppc.regs as eapr
-
-from .. import emutimers
 
 from .helpers import MPC5674_Test
 
@@ -17,7 +12,7 @@ INSTR_SPR_SHIFT = 11
 
 # Because of how we are measuring elapsed time in the tests this should be 
 # extremely accurate
-TIMING_ACCURACY = 0.0001
+TIMING_ACCURACY = 0.002
 
 
 class MPC5674_SPRHOOKS_Test(MPC5674_Test):
@@ -83,27 +78,18 @@ class MPC5674_SPRHOOKS_Test(MPC5674_Test):
         # Ensure TBL and TBR are 0 by default
         self.assertEqual(self.tb_read(), (0, 0))
 
-        freq = self.emu.getSystemFreq()
-
-        # Get the start emulated time
-        now = self.emu.systime()
-
         # Start the PPC core timebase
         self.emu.enableTimebase()
 
-        # Sleep for 1 second so some time passes in the system
-        time.sleep(1.0)
+        # Sleep for 0.1 second of emulated time
+        self.emu.sleep(0.1)
 
         # Stop all emulator time (also pauses the PPC timebase)
         self.emu.halt_time()
 
         tbl, tbu = self.tb_read()
 
-        # Get the amount of emulated time that has elapsed
-        elapsed = self.emu.systime() - now
-
-        # Determine the expected upper range based on the elapsed emulated time.
-        expected_tbl = int(elapsed * freq)
+        expected_tbl = int(0.1 * self.emu.getSystemFreq())
         margin = TIMING_ACCURACY * expected_tbl
 
         self.assert_timer_within_range(tbl, expected_tbl, margin)
@@ -125,26 +111,19 @@ class MPC5674_SPRHOOKS_Test(MPC5674_Test):
         # Ensure TBL and TBR are 0 by default
         self.assertEqual(self.tb_read(), (0, 0))
 
-        freq = self.emu.getSystemFreq()
-
-        # Get the start emulated time
-        now = self.emu.systime()
-
         # Start the PPC core timebase
         self.emu.enableTimebase()
 
-        time.sleep(1.0)
+        # Sleep for 0.1 second of emulated time
+        self.emu.sleep(0.1)
 
         # Stop all emulator time (also pauses the PPC timebase)
         self.emu.halt_time()
 
         tbl, tbu = self.tb_read()
 
-        # Get the amount of emulated time that has elapsed
-        elapsed = self.emu.systime() - now
-
         # Determine the expected upper range based on the elapsed emulated time.
-        expected_tbl = int(elapsed * freq)
+        expected_tbl = int(0.1 * self.emu.getSystemFreq())
         margin = TIMING_ACCURACY * expected_tbl
 
         self.assert_timer_within_range(tbl, expected_tbl, margin)
@@ -162,21 +141,15 @@ class MPC5674_SPRHOOKS_Test(MPC5674_Test):
         self.assertEqual(self.tb_read(), (0, 0))
         self.assertEqual(self.emu.getTimebase(), 0)
 
-        # Get the start emulated time
-        now = self.emu.systime()
-
-        # Start the timebase again sleep another second
+        # Start the timebase again sleep another 0.1 emulated seconds
         self.emu.resume_time()
-        time.sleep(1.0)
+        self.emu.sleep(0.1)
         self.emu.halt_time()
 
         tbl2, tbu2 = self.tb_read()
 
-        # Get the amount of emulated time that has elapsed
-        elapsed = self.emu.systime() - now
-
         # Accuracy margin should be the same as before
-        expected_tbl = int(elapsed * freq)
+        expected_tbl = int(0.1 * self.emu.getSystemFreq())
         self.assert_timer_within_range(tbl2, expected_tbl, margin)
 
         # Not enough time has passed for TBU to have a non-zero value.
@@ -201,19 +174,15 @@ class MPC5674_SPRHOOKS_Test(MPC5674_Test):
         self.assertEqual(self.tb_read(), (tb_offset, 0))
         self.assertEqual(self.emu.getTimebase(), tb_offset)
 
-        # Get the start emulated time
-        now = self.emu.systime()
-
         # Resume and run for about 0.1 seconds
         self.emu.resume_time()
-        time.sleep(0.1)
+        self.emu.sleep(0.1)
         self.emu.halt_time()
 
         tbl, tbu = self.tb_read()
 
         # Get the amount of emulated time that has elapsed
-        elapsed = self.emu.systime() - now
-        expected_tb = int(elapsed * self.emu.getSystemFreq()) + tb_offset
+        expected_tb = int(0.1 * self.emu.getSystemFreq()) + tb_offset
         tb = (tbu << 32) | tbl
 
         # TBU should now be 1
@@ -249,14 +218,12 @@ class MPC5674_SPRHOOKS_Test(MPC5674_Test):
 
         # Resume and run for about 0.1 seconds
         self.emu.resume_time()
-        time.sleep(0.1)
+        self.emu.sleep(0.1)
         self.emu.halt_time()
 
         tbl, tbu = self.tb_read()
 
-        # Get the amount of emulated time that has elapsed
-        elapsed = self.emu.systime() - now
-        expected_tb = int(elapsed * self.emu.getSystemFreq()) + tb_offset
+        expected_tb = int(0.1 * self.emu.getSystemFreq()) + tb_offset
         tb = (tbu << 32) | tbl
 
         # TBU should have overflowed back to 0

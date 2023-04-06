@@ -812,11 +812,10 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             timer_addr = baseaddr + FLEXCAN_TIMER_OFFSET
 
             # Expected ticks (limit to 16 bits):
-            expected_val = int(self.emu.can[idx].speed * 0.5 * self.emu._systime_scaling) & 0xFFFF
+            expected_val = int(self.emu.can[idx].speed * 0.5) & 0xFFFF
 
-            # Margin of error is approximately 0.005 (so speed * 0.005 * system 
-            # scaling)
-            margin = self.emu.can[idx].speed * 0.005 * self.emu._systime_scaling
+            # Margin of error is approximately 0.005 (so speed * 0.005)
+            margin = self.emu.can[idx].speed * 0.005
 
             self.emu.writeMemValue(mcr_addr, 0, 4)
 
@@ -950,7 +949,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             # It is expected that the calculated timestamp will be slightly
             # larger than the actual timestamp because it is saved right
             # after the memory write occurs that causes the transmit
-            margin = self.emu.can[dev].speed * 0.0200 * self.emu._systime_scaling
+            margin = self.emu.can[dev].speed * 0.0200
 
             # Confirm that the order of the generated interrupts matches both
             # the order of the transmitted messages and the interrupt source for
@@ -971,7 +970,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
 
                 # Confirm that the timestamp is accurate
                 tx_delay = tx_times[mb] - start_time
-                expected_ticks = int(self.emu.can[dev].speed * tx_delay * self.emu._systime_scaling) & 0xFFFF
+                expected_ticks = int(self.emu.can[dev].speed * tx_delay) & 0xFFFF
 
                 ts_offset = (mb * FLEXCAN_MBx_SIZE) + 2
                 timestamp = struct.unpack_from('>H', self.emu.can[dev].registers.mb.value, ts_offset)[0]
@@ -1087,7 +1086,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             # It is expected that the calculated timestamp will be slightly
             # larger than the actual timestamp because it is saved right
             # after the memory write occurs that causes the transmit
-            margin = self.emu.can[dev].speed * 0.0050 * self.emu._systime_scaling
+            margin = self.emu.can[dev].speed * 0.0050
 
             # Zero out the timer register.
             self.emu.writeMemValue(timer_addr, 0, 4)
@@ -1105,7 +1104,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
                 # Confirm that the timestamp is accurate. The timer has probably
                 # wrapped by now so ensure it is limited to 16 bits
                 rx_delay = self.emu.systime() - start_time
-                expected_ticks = int(self.emu.can[dev].speed * rx_delay * self.emu._systime_scaling) & 0xFFFF
+                expected_ticks = int(self.emu.can[dev].speed * rx_delay) & 0xFFFF
 
                 ts_offset = (mb * FLEXCAN_MBx_SIZE) + 2
                 timestamp = struct.unpack_from('>H', self.emu.can[dev].registers.mb.value, ts_offset)[0]
@@ -1223,7 +1222,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             # It is expected that the calculated timestamp will be slightly
             # larger than the actual timestamp because it is saved right
             # after the memory write occurs that causes the transmit
-            margin = self.emu.can[dev].speed * 0.0050 * self.emu._systime_scaling
+            margin = self.emu.can[dev].speed * 0.0050
 
             # The RxFIFO can hold 6 messages, each received message should
             # generate a RxFIFO Msg Available interrupt (MB5), when the last
@@ -1326,7 +1325,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             for i in range(len(msgs)):
                 testmsg = '%s RxFIFO[%d]' % (devname, i)
                 rx_delay = rx_times[i] - start_time
-                expected_ticks = int(self.emu.can[dev].speed * rx_delay * self.emu._systime_scaling) & 0xFFFF
+                expected_ticks = int(self.emu.can[dev].speed * rx_delay) & 0xFFFF
 
                 timestamp = struct.unpack_from('>H', rx_msgs[i], 2)[0]
                 self.assert_timer_within_range(timestamp, expected_ticks, margin, maxval=0xFFFF, msg=testmsg)
@@ -1355,9 +1354,6 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
 
 
 class MPC5674_FlexCAN_RealIO(MPC5674_Test):
-    #accurate_timing = True
-    #_systime_scaling = 0.01
-
     args = [
         '-c',
         '-O', 'project.MPC5674.FlexCAN_A.port=10001',

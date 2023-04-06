@@ -573,7 +573,7 @@ class FlexCAN(ExternalIOPeripheral):
                 isrflags=FLEXCAN_INT_FLAG_REGS,
                 isrevents=FLEXCAN_INT_EVENTS)
         # timer register
-        self._timer = TimerRegister(16)
+        self._timer = TimerRegister(emu=emu, bits=16)
 
         self.mode = None
         self.speed = None
@@ -1368,4 +1368,4 @@ class FlexCAN(ExternalIOPeripheral):
         self.speed = sclk / tq_per_bit
 
         # Set the timer register to run at the bus bit clock
-        self._timer.setFreq(self.emu, self.speed)
+        self._timer.setFreq(self.speed)

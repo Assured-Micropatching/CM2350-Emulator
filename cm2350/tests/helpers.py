@@ -38,26 +38,21 @@ class MPC5674_Test(unittest.TestCase):
 
     # When set to False automatically sets the following options:
     #   - _start_timebase_paused = False
-    #   - _systime_scaling = 1
     #   - _disable_gc = False
     #
     # When set to True automatically sets the following options:
     #   - _start_timebase_paused = True
-    #   - _systime_scaling = 0.1
     #   - _disable_gc = True
     #
     # If any of the specific performance settings are not None, the specific
     # performance setting will be used instead of the default.
     accurate_timing = False
-    _systime_scaling = None
     _start_timebase_paused = None
     _disable_gc = None
 
     def setUp(self):
         initLogging(logger)
 
-        if self._systime_scaling is None:
-            self._systime_scaling = 0.1 if self.accurate_timing else 1.0
         if self._start_timebase_paused is None:
             self._start_timebase_paused = True if self.accurate_timing else False
         if self._disable_gc is None:
@@ -66,9 +61,6 @@ class MPC5674_Test(unittest.TestCase):
         logger.debug('Creating CM2350 with args: %r', self.args)
         self.ECU = CM2350(self.args)
         self.emu = self.ECU.emu
-
-        # Set the emulator systime scaling
-        self.emu._systime_scaling = self._systime_scaling
 
         # Check if the garbage collector should be disabled for these tests
         if self._disable_gc:

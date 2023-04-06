@@ -1,4 +1,3 @@
-import time
 import weakref
 import threading
 import socket
@@ -1087,13 +1086,13 @@ class TimerRegister:
     thread to track individual timers. This uses the primary emulator systime
     scaling factor.
     """
-    def __init__(self, bits=None):
+    def __init__(self, emu, bits=None):
         """
         Constructor for the TimerRegister class. If the bits parameter is
         specified then all timer values will be masked to ensure they are
         always within the allowed bit size.
         """
-        self._systime_scaling = None
+        self.emu = emu
         self.freq = 0
 
         if bits is not None:
@@ -1106,36 +1105,33 @@ class TimerRegister:
         self._timer_offset = None
         self._running = False
 
-    def setFreq(self, emu, freq):
+    def setFreq(self, freq):
         """
         Set the frequency of this timer. Uses the emulator's systime_scaling
         value to ensure that all timers are running with the same relative
         speed.
         """
-        self._systime_scaling = emu._systime_scaling
         self.freq = freq
 
     def stop(self):
         """
         Stops this timer from running.
         """
-        self._running = False
         self._timer_offset = None
 
     def start(self):
         """
         Starts this timer running (if it is not already running)
         """
-        if not self._running:
-            self._running = True
-            self._timer_offset = time.time()
+        if self._timer_offset is None:
+            self._timer_offset = self.emu.systime()
 
     def _time(self):
         """
         Internal function to return the scaled amount of time since the timer
         started counting scaled according to the emulator system scaling factor.
         """
-        return (time.time() - self._timer_offset) * self._systime_scaling
+        return self.emu.systime() - self._timer_offset
 
     def _ticks(self):
         """
@@ -1149,7 +1145,7 @@ class TimerRegister:
         Return the number of ticks since the timer started counting wrapped to
         the specified bit width (if a bit width is configured)
         """
-        if not self._running:
+        if self._timer_offset is None:
             return 0
         elif self._bitmask is not None:
             return self._ticks() & self._bitmask
@@ -1160,7 +1156,10 @@ class TimerRegister:
         """
         Set a custom timer offset
         """
-        self._timer_offset = time.time() - value
+
+        # Convert ticks to time
+        offset = value / self.freq
+        self._timer_offset = self.emu.systime() - offset
 
 
 class ExternalIOClient:

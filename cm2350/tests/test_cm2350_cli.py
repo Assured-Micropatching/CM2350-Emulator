@@ -465,9 +465,6 @@ class CM2350_CLI(unittest.TestCase):
         else:
             backup_file = os.path.join(config, '%s.%s' % (BACKUP_FILENAME, hash_value.hex()))
 
-        # Slight delay
-        time.sleep(0.1)
-
         #############################
         # Start testing now
 

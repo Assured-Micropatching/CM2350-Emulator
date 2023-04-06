@@ -207,7 +207,7 @@ def read_mb_data(emu, dev, mb):
 
 
 class MPC5674_FlexCAN_Test(MPC5674_Test):
-    _disable_gc = True
+    accurate_timing = True
 
     def set_sysclk_240mhz(self):
         # Default PLL clock based on the PCB params selected for these tests is
@@ -946,10 +946,10 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
                 else:
                     self.assertNotIn(mb, tx_mbs, msg=testmsg)
 
-            # It is expected that the calculated timestamp will be slightly
-            # larger than the actual timestamp because it is saved right
-            # after the memory write occurs that causes the transmit
-            margin = self.emu.can[dev].speed * 0.0200
+            # Unfortunately the IO thread has a pretty wide variation on when 
+            # things are received and processed so the margin has to be larger 
+            # for this test.
+            margin = self.emu.can[dev].speed * 0.0300
 
             # Confirm that the order of the generated interrupts matches both
             # the order of the transmitted messages and the interrupt source for
@@ -1354,6 +1354,8 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
 
 
 class MPC5674_FlexCAN_RealIO(MPC5674_Test):
+    accurate_timing = True
+
     args = [
         '-c',
         '-O', 'project.MPC5674.FlexCAN_A.port=10001',

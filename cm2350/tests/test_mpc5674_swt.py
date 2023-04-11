@@ -588,9 +588,6 @@ class MPC5674_WDT_Test(MPC5674_Test):
 
         new_ticks = int(new_time * self.emu.swt.watchdog.freq)
 
-        # Because the new times are intentionally calculated differently than
-        # how the watchdog timeouts are calculated the new tick value may be off
-        # by as much as (0.000001 * frequency)
         tick_delta = 0.000001 * self.emu.swt.watchdog.freq
         self.assertAlmostEqual(self.emu.swt.watchdog.ticks(), new_ticks, delta=tick_delta)
 
@@ -604,8 +601,8 @@ class MPC5674_WDT_Test(MPC5674_Test):
         # The watchdog should still be running but the duration should be back
         # to the full period
         self.assertEqual(self.emu.swt.watchdog.running(), True)
-        self.assertAlmostEqual(self.emu.swt.watchdog.time(), wdt_time)
         self.assertEqual(self.emu.swt.watchdog.ticks(), SWT_TO_DEFAULT)
+        self.assertAlmostEqual(self.emu.swt.watchdog.time(), wdt_time)
 
         # SWT is still locked
         self.assertEqual(self.emu.swt.registers.mcr.hlk, 0)
@@ -765,8 +762,8 @@ class MPC5674_WDT_Test(MPC5674_Test):
         # It's unlikely the python timing will be accurate enough so that the
         # system time is now the sleep_time. but it should be less than the
         # watchdog time
-        self.assertGreater(now - start, wdt_time * 0.5)
-        self.assertLess(now - start, wdt_time)
+        self.assertGreaterEqual(now - start, wdt_time * 0.5)
+        self.assertLessEqual(now - start, wdt_time)
 
         # The watchdog should not have expired yet
         self.assertEqual(self.emu.swt.watchdog.running(), True)
@@ -838,7 +835,7 @@ class MPC5674_WDT_Test(MPC5674_Test):
         # watchdog time
         now = self.emu.systime()
         logger.debug('1. [%f] WDT time remaining = %f', now, self.emu.swt.watchdog.time())
-        self.assertGreater(now - start, wdt_time * 0.5)
+        self.assertGreaterEqual(now - start, wdt_time * 0.5)
         self.assertLess(now - start, wdt_time)
 
         # The watchdog should not have expired yet

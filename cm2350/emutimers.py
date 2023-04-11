@@ -136,35 +136,38 @@ class EmuTimer:
         self.target = None
         if self._callback:
             self._callback()
+        self._emutime.timerUpdated()
 
     def stop(self):
         '''
         Stop a timer.
         '''
-        now = self._emutime.systicks()
-        logger.debug('[%d] %s timer stopped', now, self.name)
+        if self.target is not None:
+            now = self._emutime.systicks()
+            logger.debug('[%d] %s timer stopped', now, self.name)
 
-        self.target = None
-        self._remaining = None
+            self.target = None
+            self._remaining = None
 
-        # Because this is the function intended to be used outside of the
-        # EmulationTime object, notify the emutime obj that a timer has been
-        # updated
-        self._emutime.timerUpdated()
+            # Because this is the function intended to be used outside of the
+            # EmulationTime object, notify the emutime obj that a timer has been
+            # updated
+            self._emutime.timerUpdated()
 
     def pause(self):
         '''
         Temporarily pause a timer.
         '''
-        now = self._emutime.systicks()
-        self._remaining = self.target - now
-        logger.debug('[%d] %s timer paused (%d remaining)', now, self.name, self._remaining)
-        self.target = None
+        if self.target is not None:
+            now = self._emutime.systicks()
+            self._remaining = self.target - now
+            logger.debug('[%d] %s timer paused (%d remaining)', now, self.name, self._remaining)
+            self.target = None
 
-        # Because this is the function intended to be used outside of the
-        # EmulationTime object, notify the emutime obj that a timer has been
-        # updated
-        self._emutime.timerUpdated()
+            # Because this is the function intended to be used outside of the
+            # EmulationTime object, notify the emutime obj that a timer has been
+            # updated
+            self._emutime.timerUpdated()
 
     def resume(self):
         '''
@@ -256,18 +259,10 @@ class EmuTimeCore:
 
         self._running = False
 
-    def __del__(self):
+    def shutdown(self):
         # Stop all the timers, probably not necessary
         for t in self._timers:
             t.stop()
-
-    def tick(self):
-        self._ticks += 1
-
-        # Determine if any timers should expire
-        #expired_timer = self.getExpiredTimer()
-        #if expired_timer is not None:
-        #    self._handle_expired(expired_timer)
 
     def systimeReset(self):
         '''
@@ -313,7 +308,7 @@ class EmuTimeCore:
         '''
         Call the timer's callback handler
         '''
-        logger.debug('[%d] %s expired', self.systicks(), expired_timer.name)
+        logger.debug('%s expired', expired_timer.name)
         expired_timer.callback()
 
         # After the timer callback has been run, this timer should be placed at
@@ -326,7 +321,7 @@ class EmuTimeCore:
         Optionally adjust the system time by the specified offset (useful for
         testing).
         '''
-        return self.systicks(offset) * self.getSystemFreq()
+        return self.systicks(offset) / self.getSystemFreq()
 
     def systicks(self, offset=None):
         '''
@@ -340,8 +335,20 @@ class EmuTimeCore:
         return self._ticks
 
     def sleep(self, delay):
-        # Move time forward the specified number of seconds
-        self._ticks += delay * self.getSystemFreq()
+        # Calculate how much many ticks the system should move forward
+        offset = int(delay * self.getSystemFreq())
+        sleep_ticks = self._ticks + offset
+
+        while self._ticks < sleep_ticks:
+            # Determine what the next system tick count is that a timer would 
+            # expire
+            next_event = self.getNextEvent()
+            if next_event is not None and next_event < offset:
+                self._ticks += next_event
+                offset -= next_event
+                self.tick()
+            else:
+                self._ticks += offset
 
     def resume_time(self):
         self._running = True
@@ -351,6 +358,33 @@ class EmuTimeCore:
 
     def systimeRunning(self):
         return self._running
+
+    def getNextEvent(self):
+        '''
+        Return the amount of time to wait before the next event should occur
+        '''
+        if self._timers and self._timers[0].running():
+            return self._timers[0].ticks()
+        else:
+            return None
+
+    def getExpiredTimer(self):
+        '''
+        Checks if the next timer scheduled to expire has expired or not.  If it
+        has expired the EmuTimer object is returned.
+        '''
+        if self._timers and self._timers[0].expired():
+            return self._timers[0]
+        else:
+            return None
+
+    def tick(self):
+        self._ticks += 1
+
+        # Determine if any timers should expire
+        expired_timer = self.getExpiredTimer()
+        if expired_timer is not None:
+            self._handle_expired(expired_timer)
 
 
 class ScaledEmuTimeCore(EmuTimeCore):
@@ -403,9 +437,6 @@ class ScaledEmuTimeCore(EmuTimeCore):
         }
         self._tb_thread = threading.Thread(**args)
         self._tb_thread.start()
-
-    def __del__(self):
-        self.haltEmuTimeThread()
 
     def shutdown(self):
         '''

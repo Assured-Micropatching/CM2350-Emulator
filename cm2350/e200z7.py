@@ -115,8 +115,8 @@ import vivisect.impemu.emulator as vimp_emu
 
 class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
                  eape.Ppc32EmbeddedEmulator, ppc_time.PpcEmuTime,
-                 emutimers.ScaledEmuTimeCore, clocks.EmuClocks):
-                 #emutimers.EmuTimeCore, clocks.EmuClocks):
+                 #emutimers.ScaledEmuTimeCore, clocks.EmuClocks):
+                 emutimers.EmuTimeCore, clocks.EmuClocks):
     def __init__(self, vw):
         # module registry
         self.modules = {}
@@ -141,8 +141,8 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         vimp_emu.WorkspaceEmulator.__init__(self, vw, nostack=True, funconly=False)
 
         ppc_time.PpcEmuTime.__init__(self)
-        emutimers.ScaledEmuTimeCore.__init__(self, 0.1)
-        #emutimers.EmuTimeCore.__init__(self)
+        #emutimers.ScaledEmuTimeCore.__init__(self, 0.1)
+        emutimers.EmuTimeCore.__init__(self)
         clocks.EmuClocks.__init__(self)
 
         # MCU timers

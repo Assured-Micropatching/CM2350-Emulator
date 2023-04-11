@@ -1,13 +1,11 @@
-.PHONY: default cm2350_tests
+VENV ?= ENV
 
-.PHONY: all virtualenv venv tests
+.PHONY: all tests
 
 all: tests
 
-virtualenv venv: $(VENV)
-
 $(VENV):
-	#virtualenv --python=python3 $(VENV)
+	virtualenv --python=python3 $(VENV)
 	. $(VENV)/bin/activate && pip install -r requirements.txt
 
 tests: $(VENV)

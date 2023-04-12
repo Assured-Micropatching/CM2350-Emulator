@@ -261,8 +261,10 @@ class EmuTimeCore:
 
     def shutdown(self):
         # Stop all the timers, probably not necessary
-        for t in self._timers:
-            t.stop()
+        if hasattr(self, '_timers'):
+            for t in self._timers:
+                t.stop()
+            self._timers = []
 
     def systimeReset(self):
         '''
@@ -449,20 +451,21 @@ class ScaledEmuTimeCore(EmuTimeCore):
         if hasattr(self, '_tb_thread') and self._tb_thread:
             self._stop.set()
 
-            # Stop all of the timers
-            if self._timers:
-                with self._timer_update:
-                    for t in self._timers:
-                        # This will cause a timer to be "stopped"
-                        t.target = None
+        # Stop all of the timers
+        if hasattr(self, '_timers'):
+            with self._timer_update:
+                for t in self._timers:
+                    # This will cause a timer to be "stopped"
+                    t.target = None
 
-                    # Signal the timer re-check condition as well which will force the
-                    # thread to re-evaluate which timer is next and it will notice it should
-                    # halt
-                    self._timer_update.notify()
-                self._timers = []
+                # Signal the timer re-check condition as well which will force the
+                # thread to re-evaluate which timer is next and it will notice it should
+                # halt
+                self._timer_update.notify()
+            self._timers = []
 
-            # Wait for the thread to exit
+        # Now wait for the thread to exit
+        if hasattr(self, '_tb_thread') and self._tb_thread:
             self._tb_thread.join(1)
 
             if self._tb_thread.is_alive():

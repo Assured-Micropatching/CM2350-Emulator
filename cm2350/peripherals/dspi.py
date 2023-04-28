@@ -7,11 +7,16 @@ from ..ppc_peripherals import *
 from ..intc_exc import INTC_EVENT
 
 import logging
+import envi.common as e_cmn
 logger = logging.getLogger(__name__)
+
 
 __all__  = [
     'DSPI',
+    'SPI_CS',
+    'SPIBus',
 ]
+
 
 
 DSPI_MCR_OFFSET     = 0x0000
@@ -295,7 +300,51 @@ class DSPI_REGISTERS(PeripheralRegisterSet):
         self.dsicr1 = (DSPI_DSICR1_OFFSET, DSPI_x_DSICR1())
 
 
-class DSPI(ExternalIOPeripheral):
+class SPI_CS(enum.IntEnum):
+    CS0 = 0b000001
+    CS1 = 0b000010
+    CS2 = 0b000100
+    CS3 = 0b001000
+    CS4 = 0b010000
+    CS5 = 0b100000
+
+
+class SPIBus(ExternalIOPeripheral):
+    """
+    The SPI device doesn't require an external IO thread. Instead bus devices
+    are registered and the transmit function identifies the registered device
+    to call that can perform custom handling of the read/write request.
+    """
+    def __init__(self, emu, devname, mapaddr, mapsize, regsetcls=None,
+                 isrstatus=None, isrflags=None, isrevents=None, **kwargs):
+        ExternalIOPeripheral.__init__(self, emu=emu, devname=devname,
+                                      mapaddr=mapaddr, mapsize=mapsize,
+                                      regsetcls=regsetcls, isrstatus=isrstatus,
+                                      isrflags=isrflags, isrevents=isrevents,
+                                      **kwargs)
+
+        # Ensure the server arguments are clear so the io thread is not started
+        self._server_args = None
+
+        # Add a dictionary to lookup SPI bus peripheral devices
+        self.devices = {}
+
+    def registerBusPeripheral(self, device, cs):
+        self.devices[SPI_CS(cs)] = device
+
+    def transmit(self, cs, value):
+        device = self.devices.get(cs)
+        if device is not None:
+            logger.log(e_cmn.EMULOG, '%s -> %s: 0x%x', self.devname, device.name, value)
+            result = device.receive(value)
+            if result is not None:
+                logger.log(e_cmn.EMULOG, '%s <- %s: 0x%x', self.devname, device.name, result)
+                device.transmit(result)
+        else:
+            logger.info('%s TRANSMIT: 0x%x', self.devname, value)
+
+
+class DSPI(SPIBus):
     """
     Class to emulate the DSPI peripheral.
 
@@ -421,7 +470,7 @@ class DSPI(ExternalIOPeripheral):
         """
         # If the peripheral is disabled, just discard this data
         if self.mode == DSPI_MODE.DISABLE or self.registers.sr.txrxs == 0:
-            logger.debug('%s (%s): discarding msg %r', self.devname, self.mode, obj)
+            logger.debug('[%s] %s: discarding msg %r', self.devname, self.mode, obj)
         else:
             # Add the received data to the Rx FIFO (convert to bytes first)
             value = e_bits.buildbytes(obj, DSPI_MSG_SIZE, bigend=self.emu.getEndian())
@@ -437,17 +486,18 @@ class DSPI(ExternalIOPeripheral):
         Returns an indication of if this Tx buffer is configured as the last
         data in the Tx queue.
         """
-        # The CONT and PCS fields are ignored for now since we are not emulating
-        # GPIO states
         pushr_value = e_bits.parsebytes(data, 0, DSPI_MSG_SIZE, bigend=self.emu.getEndian())
+        cont = (pushr_value & PUSHR_CONT_MASK) >> PUSHR_CONT_SHIFT
         ctas = (pushr_value & PUSHR_CTAS_MASK) >> PUSHR_CTAS_SHIFT
         eoq = (pushr_value & PUSHR_EOQ_MASK) >> PUSHR_EOQ_SHIFT
         ctcnt = (pushr_value & PUSHR_CTCNT_MASK) >> PUSHR_CTCNT_SHIFT
+        pcs = (pushr_value & PUSHR_PCS_MASK) >> PUSHR_PCS_SHIFT
 
         ctar = self.registers.ctar[ctas]
 
         # The frame size is the CTARx[FMSZ] field + 1
-        value = pushr_value & e_bits.b_masks[ctar.fmsz + 1]
+        bits = ctar.fmsz + 1
+        value = pushr_value & e_bits.b_masks[bits]
 
         # If the PUSHR[CTCNT] flag is set, change the count to 0 before we
         # transmit
@@ -456,8 +506,9 @@ class DSPI(ExternalIOPeripheral):
         else:
             cur_count = self.registers.tcr.spi_tcnt
 
-        # Send the value
-        self.transmit(value)
+        # Send the value to be transmitted along with chip select signal to 
+        # enable (allows selection of the right destination bus device)
+        self.transmit(pcs, value)
 
         # The message was transmitted so increment the TCR[SPI_TCNT]
         self.registers.tcr.spi_tcnt = (cur_count + 1) & DSPI_MAX_TCNT
@@ -486,7 +537,7 @@ class DSPI(ExternalIOPeripheral):
               doing that level of emulation.
         """
         if self.mode == DSPI_MODE.DISABLE:
-            logger.debug('%s (%s): discarding msg %r', self.devname, self.mode, data)
+            logger.debug('[%s] %s: discarding msg %r', self.devname, self.mode, data)
             return
 
         if self.registers.sr.txrxs == 1:
@@ -541,7 +592,10 @@ class DSPI(ExternalIOPeripheral):
             return data
 
         else:
-            return self._popr_empty_data
+            # return the default value
+            return b'\x00\x00\x00\x00'
+            #return self._popr_empty_data
+
 
     def popTx(self):
         """
@@ -611,9 +665,9 @@ class DSPI(ExternalIOPeripheral):
             if self.registers.mcr.rooe == 1:
                 idx = (fifo_size-1) * DSPI_MSG_SIZE
                 self._rx_fifo[idx:idx+DSPI_MSG_SIZE] = data
-                logger.debug('%s (%s): Rx overflow, overwriting last msg with %r', self.devname, self.mode, data)
+                logger.debug('[%s] %s: Rx overflow, overwriting last msg with %r', self.devname, self.mode, data)
             else:
-                logger.debug('%s (%s): Rx overflow, discarding msg %r', self.devname, self.mode, data)
+                logger.debug('[%s] %s: Rx overflow, discarding msg %r', self.devname, self.mode, data)
 
     def mcrUpdate(self, thing):
         """
@@ -668,7 +722,7 @@ class DSPI(ExternalIOPeripheral):
 
         if self.mode != mode:
             self.mode = mode
-            logger.debug('%s: changing to mode %s', self.devname, self.mode.name)
+            logger.debug('[%s] changing to mode %s', self.devname, self.mode.name)
 
         # Some DSPI modes are not yet supported
         if self.mode in DSPI_MODE_DSI_UNSUPPORTED:
@@ -683,7 +737,7 @@ class DSPI(ExternalIOPeripheral):
         if self.mode == DSPI_MODE.DISABLE or self.registers.mcr.halt == 1:
             self.registers.sr.vsOverrideValue('txrxs', 0)
             if old_txrxs == 1:
-                logger.debug('%s: disabling Tx/Rx', self.devname)
+                logger.debug('[%s] disabling Tx/Rx', self.devname)
         else:
             self.registers.sr.vsOverrideValue('txrxs', 1)
 
@@ -691,7 +745,7 @@ class DSPI(ExternalIOPeripheral):
             # in the Tx FIFO, and this peripheral is in controller mode,
             # transmit it now.
             if old_txrxs == 0:
-                logger.debug('%s: enabling Tx/Rx (%d msgs in Tx FIFO)',
+                logger.debug('[%s] enabling Tx/Rx (%d msgs in Tx FIFO)',
                         self.devname, self.registers.sr.txctr)
                 if self.registers.sr.txctr > 0:
                     # Pull data from the Tx FIFO until we run out of data or the

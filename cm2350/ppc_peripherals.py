@@ -25,6 +25,7 @@ __all__ = [
     'Peripheral',
     'MMIOPeripheral',
     'ExternalIOPeripheral',
+    'BusPeripheral',
     'TimerRegister',
 ]
 
@@ -678,7 +679,7 @@ def _recvData(sock):
     data = sock.recv(4)
     if len(data) < 4:
         # If no data is received, assume this is an error and exit
-        logger.debug('Incomplete data received %d bytes: %r', len(data), data)
+        logger.log(EMULOG, 'Incomplete data received %d bytes: %r', len(data), data)
         raise OSError(errno.EAGAIN)
     size = struct.unpack('>I', data)[0]
 
@@ -1046,9 +1047,9 @@ class ExternalIOPeripheral(MMIOPeripheral):
                         if len(exc.args) >= 1 and exc.args[0] == errno.EAGAIN:
                             # If this indicates a connection lost (EAGAIN), 
                             # don't print the exception information.
-                            logger.warning('Lost connection to main thread, exiting')
+                            logger.log(EMULOG, 'Lost connection to main thread, exiting')
                         else:
-                            logger.warning('Lost connection to main thread, exiting', exc_info=1)
+                            logger.log(EMULOG, 'Lost connection to main thread, exiting', exc_info=1)
                         return
 
                 elif sock == self._server:
@@ -1075,6 +1076,23 @@ class ExternalIOPeripheral(MMIOPeripheral):
                             logger.debug('client sock %r disconnected', sock, exc_info=1)
                         self._clients.remove(sock)
                         inputs.remove(sock)
+
+
+class BusPeripheral:
+    def __init__(self, emu, name, bus, *args, **kwargs):
+        self.name = name
+
+        self.emu = emu
+
+        self.bus = emu.modules[bus]
+        self.bus.registerBusPeripheral(self, *args, **kwargs)
+
+    def receive(self, value):
+        logger.info('%s -> %s: 0x%x', self.bus.devname, self.name, value)
+
+    def transmit(self, value):
+        logger.info('%s <- %s: 0x%x', self.bus.devname, self.name, value)
+        self.emu.putIO(self.bus.devname, value)
 
 
 class TimerRegister:

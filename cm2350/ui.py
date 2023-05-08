@@ -329,8 +329,6 @@ class TestEmulator:
                     print("PC reached 0x%x." % pc)
                     break
 
-                i += 1
-
                 op = emu.parseOpcode(pc)
                 self.op = op    # store it for later in case of post-mortem
 
@@ -690,6 +688,10 @@ class TestEmulator:
 
     def printWriteLog(emu):
         print('\n'.join(['0x%.8x: 0x%.8x << %32r %r' % (x,y,d.hex(),d) for x,y,d in emu.path[2].get('writelog')]))
+
+    def dump(self, addr, size=64):
+        for i in range(0, size, 32):
+            print('0x%08x:  %s' % (addr+i, self.emu.readMemory(addr+i, 32).hex(' ', 4)))
 
 
 if __name__ == "__main__":

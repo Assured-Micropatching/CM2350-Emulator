@@ -536,11 +536,7 @@ class DSPI(SPIBus):
               emulate the clock, chip select, and data pins.  For now I am not
               doing that level of emulation.
         """
-        if self.mode == DSPI_MODE.DISABLE:
-            logger.debug('[%s] %s: discarding msg %r', self.devname, self.mode, data)
-            return
-
-        if self.registers.sr.txrxs == 1:
+        if self.registers.sr.txrxs == 0:
             # If Tx/Rx is enabled, just send it
             # TODO: strictly speaking in peripheral mode the chip select must be
             # enabled to allow data to be transmitted, but we aren't emulating

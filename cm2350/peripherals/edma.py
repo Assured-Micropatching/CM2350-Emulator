@@ -390,6 +390,19 @@ EDMA_INT_FLAG_REGS = {
 # Channel event masks
 EDMA_INT_MASKS = tuple(2 ** i for i in range(32)) + tuple(2 ** i for i in range(32))
 
+# masks combined with PPC bit positions
+BIT_POSITIONS_AND_MASKS = tuple((i, 2 ** i) for i in range(32))
+
+
+def gen_set_bits(value):
+    '''
+    Returns channel/bit numbers that are set assuming 32-bit wide registers and
+    PPC bit numbering.
+    '''
+    for bit, mask in BIT_POSITIONS_AND_MASKS:
+        if value & mask:
+            yield bit
+
 
 # Object to hold the parsed TCD configuration values
 class TCDConfig:
@@ -514,6 +527,8 @@ class eDMA(MMIOPeripheral):
             )
 
         self._convenience_handlers = {
+            EDMA_ERQRH_OFFSET: self.handleWriteERQRH,
+            EDMA_ERQRL_OFFSET: self.handleWriteERQRL,
             EDMA_SERQR_OFFSET: self.setERQR,
             EDMA_CERQR_OFFSET: self.clearERQR,
             EDMA_SEEIR_OFFSET: self.setEEIR,
@@ -640,10 +655,11 @@ class eDMA(MMIOPeripheral):
             - SSBR:  set tcd[chan].start
             - CDSBR: clear tcd[chan].done
         """
-        if offset in self._convenience_handlers:
+        if offset not in self._convenience_handlers or \
+                offset in (EDMA_ERQRH_OFFSET, EDMA_ERQRL_OFFSET):
             # The convenience registers should always read 0 and are all 1 byte
             # wide.
-            return b'\x00'
+            return b'\x00' * size
         else:
             return super()._getPeriphReg(offset, size)
 
@@ -692,6 +708,25 @@ class eDMA(MMIOPeripheral):
             })
             raise exc
 
+    def handleWriteERQRH(self, value):
+        new_bits = value & ~self.registers.erqrh
+        self.registers.erqrh = value
+
+        # Attempt to start any new transfers
+        for channel in gen_set_bits(new_bits):
+            channel += EDMA_B_NUM_CHAN
+            if self.registers.hrsh & EDMA_INT_MASKS[channel]:
+                self.startTransfer(channel)
+
+    def handleWriteERQRL(self, value):
+        new_bits = value & ~self.registers.erqrl
+        self.registers.erqrh = value
+
+        # Attempt to start any new transfers
+        for channel in gen_set_bits(new_bits):
+            if self.registers.hrsl & EDMA_INT_MASKS[channel]:
+                self.startTransfer(channel)
+
     def setERQR(self, channel):
         # If bit 0 is set, ignore the write
         if channel & 0x80:
@@ -701,13 +736,27 @@ class eDMA(MMIOPeripheral):
         if channel & 0x40:
             if self.num_channels == EDMA_A_NUM_CHAN:
                 self.registers.erqrh = 0xFFFFFFFF
+
             self.registers.erqrl = 0xFFFFFFFF
+
+            if channel >= EDMA_B_NUM_CHAN:
+                for channel in gen_set_bits(self.registers.hrsh):
+                    self.startTransfer(channel + EDMA_B_NUM_CHAN)
+
+            for channel in gen_set_bits(self.registers.hrsl):
+                self.startTransfer(channel)
+
         else:
             # Otherwise only set the specified ERQR flag
             if channel >= EDMA_B_NUM_CHAN:
                 self.registers.erqrh |= EDMA_INT_MASKS[channel]
+                if self.registers.hrsh & EDMA_INT_MASKS[channel]:
+                    self.startTransfer(channel)
+
             else:
                 self.registers.erqrl |= EDMA_INT_MASKS[channel]
+                if self.registers.hrsl & EDMA_INT_MASKS[channel]:
+                    self.startTransfer(channel)
 
     def clearERQR(self, channel):
         # If bit 0 is set, ignore the write
@@ -949,28 +998,18 @@ class eDMA(MMIOPeripheral):
                     logger.debug('[%s] Starting DMA channel %d from SW trigger', self.devname, channel)
                     self.startTransfer(channel)
 
-    def isChannelEnabled(self, channel):
-        if channel >= EDMA_B_NUM_CHAN:
-            return bool(self.registers.erqrh & EDMA_INT_MASKS[channel])
-        else:
-            return bool(self.registers.erqrl & EDMA_INT_MASKS[channel])
-
     def dmaRequest(self, channel):
         """
         Hardware initiated DMA request for a specific channel
         """
+        self.setHRS(channel)
+
         # Only initiate a request if hardware service requests are enabled
-        if self.isChannelEnabled(channel):
-            self.setHRS(channel)
-
-            # Now set the start flag
-            self.registers.tcd[channel].start = 1
-
-            # And start the transfer, if DMA is enabled
-            if self.registers.mcr.halt == 1:
-                logger.debug('[%s] ignoring peripheral initiated transfer for channel %d: DMA halted',
-                             self.devname, channel)
-            else:
+        if channel >= EDMA_B_NUM_CHAN:
+            if self.registers.erqrh & EDMA_INT_MASKS[channel]:
+                self.startTransfer(channel)
+        else:
+            if self.registers.erqrl & EDMA_INT_MASKS[channel]:
                 self.startTransfer(channel)
 
     def verifyChannelConfig(self, channel):
@@ -1089,6 +1128,19 @@ class eDMA(MMIOPeripheral):
         self.event('error', channel, EDMA_INT_MASKS[channel])
 
     def startTransfer(self, channel):
+        # Ensure that the channel does not have a transfer pending already
+        if channel in self._pending:
+            return
+
+        # Now set the start flag
+        self.registers.tcd[channel].start = 1
+
+        # And start the transfer, if DMA is enabled
+        if self.registers.mcr.halt == 1:
+            logger.debug('[%s] ignoring peripheral initiated transfer for channel %d: DMA halted',
+                         self.devname, channel)
+            return
+
         config = self.verifyChannelConfig(channel)
         if config is None:
             logger.debug('[%s] aborting transfer for channel %d: config error',
@@ -1096,6 +1148,10 @@ class eDMA(MMIOPeripheral):
         else:
             logger.debug('[%s] queuing transfer for channel %d',
                     self.devname, channel)
+
+            # Now set the start flag (may be necessary if this was hardware 
+            # initiated)
+            self.registers.tcd[channel].start = 1
 
             # Save the current active configuration
             self.addPending(config)

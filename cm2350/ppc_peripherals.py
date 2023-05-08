@@ -451,7 +451,7 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
             except (MceDataReadBusError, AlignmentException) as exc:
                 # See if any data was able to be read
                 try:
-                    value = exc.kwargs.data
+                    value = exc.kwargs['data']
                 except AttributeError:
                     value = PPC_INVALID_READ_VAL
 
@@ -510,7 +510,7 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
             except (MceWriteBusError, AlignmentException) as exc:
                 # See if any data was written
                 try:
-                    idx += len(exc.kwargs.data)
+                    idx += len(exc.kwargs['data'])
                 except AttributeError:
                     # Just move to the next byte and try again
                     idx += 1
@@ -604,7 +604,7 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
         there is a dma event associated with the supplied field then a DMA event
         will also be initiated.
         """
-        logger.debug('[%s] event %d = %s', self.devname, channel, value)
+        logger.debug('[%s] event [%d].%s = %s', self.devname, channel, field, value)
 
         field_value = self.isrstatus[channel].vsGetField(field)
         if value and field_value == 0:

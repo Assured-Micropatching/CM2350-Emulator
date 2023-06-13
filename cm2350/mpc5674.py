@@ -357,7 +357,7 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
                 },
                 'SRAM': {
                     # SRAM size depends on the specific MPC5674 part in use
-                    'size': 0,
+                    'size': 0x00040000,
                     'addr': 0x40000000,
                     # Indicates how much of the ram is preserved during resets
                     'standby_size': 0x8000,
@@ -375,22 +375,6 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
                     'port': None,
                 },
                 'FlexCAN_D': {
-                    'host': None,
-                    'port': None,
-                },
-                'DSPI_A': {
-                    'host': None,
-                    'port': None,
-                },
-                'DSPI_B': {
-                    'host': None,
-                    'port': None,
-                },
-                'DSPI_C': {
-                    'host': None,
-                    'port': None,
-                },
-                'DSPI_D': {
                     'host': None,
                     'port': None,
                 },
@@ -444,32 +428,16 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
                     'port': 'Host TCP port for FlexCAN_C IO server'
                 },
                 'FlexCAN_D': {
-                    'host': 'Host IP address for DSPI_D IO server',
-                    'port': 'Host TCP port for DSPI_D IO server',
-                },
-                'DSPI_A': {
-                    'host': 'Host IP address for DSPI_A IO server',
-                    'port': 'Host TCP port for DSPI_A IO server',
-                },
-                'DSPI_B': {
-                    'host': 'Host IP address for DSPI_B IO server',
-                    'port': 'Host TCP port for DSPI_B IO server',
-                },
-                'DSPI_C': {
-                    'host': 'Host IP address for DSPI_C IO server',
-                    'port': 'Host TCP port for DSPI_C IO server'
-                },
-                'DSPI_D': {
-                    'host': 'Host IP address for DSPI_D IO server',
-                    'port': 'Host TCP port for DSPI_D IO server',
+                    'host': 'Host IP address for FlexCAN_D IO server',
+                    'port': 'Host TCP port for FlexCAN_D IO server',
                 },
                 'eQADC_A': {
-                    'host': 'Host IP address for DSPI_D IO server',
-                    'port': 'Host TCP port for DSPI_D IO server',
+                    'host': 'Host IP address for eQADC_D IO server',
+                    'port': 'Host TCP port for eQADC_D IO server',
                 },
                 'eQADC_B': {
-                    'host': 'Host IP address for DSPI_D IO server',
-                    'port': 'Host TCP port for DSPI_D IO server',
+                    'host': 'Host IP address for eQADC_D IO server',
+                    'port': 'Host TCP port for eQADC_D IO server',
                 },
             }
         }

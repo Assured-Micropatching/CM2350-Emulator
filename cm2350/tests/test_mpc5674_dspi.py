@@ -2,7 +2,7 @@ import random
 import struct
 import unittest
 
-from cm2350 import intc_exc
+from cm2350 import intc_exc, ppc_peripherals
 from cm2350.peripherals import dspi
 
 from .helpers import MPC5674_Test
@@ -58,6 +58,7 @@ DSPI_CTAR_FMSZ_SHIFT     = 27
 
 DSPI_PUSHR_EOQ_MASK      = 0x08000000
 DSPI_PUSHR_CTCNT_MASK    = 0x04000000
+DSPI_PUSHR_CS0_MASK      = 0x00010000
 
 DSPI_PUSHR_CTAS_SHIFT    = 28
 DSPI_PUSHR_EOQ_SHIFT     = 27
@@ -125,6 +126,20 @@ def get_int(dev, event):
         interrupt source value (int)
     """
     return intc_exc.ExternalException(intc_exc.INTC_SRC(get_int_src(dev, event)))
+
+
+class TestPeriph(ppc_peripherals.BusPeripheral):
+    def __init__(self, emu, bus):
+        ppc_peripherals.BusPeripheral.__init__(self, emu, 'TestPeriph_' + bus, bus, dspi.SPI_CS.CS0)
+        self.msgs = []
+
+    def receive(self, data):
+        self.msgs.append(data)
+
+    def getMsgs(self):
+        msgs = self.msgs
+        self.msgs = []
+        return msgs
 
 
 class MPC5674_DSPI_Test(MPC5674_Test):
@@ -558,6 +573,9 @@ class MPC5674_DSPI_Test(MPC5674_Test):
                 val |= DSPI_PUSHR_EOQ_MASK
             if i == 7:
                 val |= DSPI_PUSHR_CTCNT_MASK
+
+            # The test peripheral uses CS0
+            val |= DSPI_PUSHR_CS0_MASK
             pushr_values.append(val)
 
         # Value to enable all interrupts
@@ -572,6 +590,14 @@ class MPC5674_DSPI_Test(MPC5674_Test):
             (1, dspi.DSPI_MODE.SPI_CNTRLR),
             (0, dspi.DSPI_MODE.SPI_PERIPH),
         )
+
+        # Register a peripheral for each bus
+        periphs = [
+            TestPeriph(self.emu, 'DSPI_A'),
+            TestPeriph(self.emu, 'DSPI_B'),
+            TestPeriph(self.emu, 'DSPI_C'),
+            TestPeriph(self.emu, 'DSPI_D'),
+        ]
 
         for dev in range(len(DSPI_DEVICES)):
             devname, baseaddr = DSPI_DEVICES[dev]
@@ -735,8 +761,7 @@ class MPC5674_DSPI_Test(MPC5674_Test):
 
                 # Verify the message values in the transmit queue match the expected
                 # value for msgs 0, 1, and 2.
-                txd_msgs = self.emu.dspi[dev].getTransmittedObjs()
-                self.assertEqual(txd_msgs, expected_msgs[:3], msg=testmsg)
+                self.assertEqual(periphs[dev].getMsgs(), expected_msgs[:3], msg=testmsg)
 
                 # Manually change the transmit count to the 0xFFFF so after sending
                 # 2 more messages the TCNT will have wrapped around to 1
@@ -823,7 +848,7 @@ class MPC5674_DSPI_Test(MPC5674_Test):
                 # Verify the message values in the transmit queue match the expected
                 # value for msgs 4 and 5
                 txd_msgs = self.emu.dspi[dev].getTransmittedObjs()
-                self.assertEqual(txd_msgs, expected_msgs[4:6], msg=testmsg)
+                self.assertEqual(periphs[dev].getMsgs(), expected_msgs[4:6], msg=testmsg)
 
                 # Enable Tx/Rx to transmit the last message
                 self.assertEqual(self.emu.dspi[dev].registers.sr.eoqf, 0, msg=testmsg)
@@ -864,8 +889,7 @@ class MPC5674_DSPI_Test(MPC5674_Test):
 
                 # Verify there is are two remaining messages that has been
                 # transmitted, msgs 6 and 7
-                txd_msgs = self.emu.dspi[dev].getTransmittedObjs()
-                self.assertEqual(txd_msgs, expected_msgs[6:], msg=testmsg)
+                self.assertEqual(periphs[dev].getMsgs(), expected_msgs[6:], msg=testmsg)
 
     def test_dspi_controller_rx(self):
         # The transmit behavior should be the same for both controller and

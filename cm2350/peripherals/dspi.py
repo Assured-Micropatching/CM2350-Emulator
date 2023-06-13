@@ -536,12 +536,16 @@ class DSPI(SPIBus):
               emulate the clock, chip select, and data pins.  For now I am not
               doing that level of emulation.
         """
-        if self.registers.sr.txrxs == 0:
+        if self.registers.sr.txrxs == 1:
             # If Tx/Rx is enabled, just send it
             # TODO: strictly speaking in peripheral mode the chip select must be
             # enabled to allow data to be transmitted, but we aren't emulating
             # that yet.
             self.normalTx(data)
+
+            # The TFFF event should always be set here because more data can be 
+            # sent.
+            self.event('tfff', 1)
 
         else:
             # Otherwise we need to add this message to the Tx queue
@@ -591,7 +595,6 @@ class DSPI(SPIBus):
             # return the default value
             return b'\x00\x00\x00\x00'
             #return self._popr_empty_data
-
 
     def popTx(self):
         """

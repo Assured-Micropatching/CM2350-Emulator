@@ -655,7 +655,7 @@ class eDMA(MMIOPeripheral):
             - SSBR:  set tcd[chan].start
             - CDSBR: clear tcd[chan].done
         """
-        if offset not in self._convenience_handlers or \
+        if offset in self._convenience_handlers and not \
                 offset in (EDMA_ERQRH_OFFSET, EDMA_ERQRL_OFFSET):
             # The convenience registers should always read 0 and are all 1 byte
             # wide.
@@ -679,9 +679,7 @@ class eDMA(MMIOPeripheral):
         """
         handler = self._convenience_handlers.get(offset)
         if handler is not None:
-            # The argument to all of the set/clear functions is just a single
-            # byte
-            handler(data[0])
+            handler(e_bits.parsebytes(data, 0, len(data), bigend=self.emu.getEndian()))
         else:
             super()._setPeriphReg(offset, data)
 
@@ -736,13 +734,11 @@ class eDMA(MMIOPeripheral):
         if channel & 0x40:
             if self.num_channels == EDMA_A_NUM_CHAN:
                 self.registers.erqrh = 0xFFFFFFFF
-
             self.registers.erqrl = 0xFFFFFFFF
 
-            if channel >= EDMA_B_NUM_CHAN:
+            if self.num_channels == EDMA_A_NUM_CHAN:
                 for channel in gen_set_bits(self.registers.hrsh):
                     self.startTransfer(channel + EDMA_B_NUM_CHAN)
-
             for channel in gen_set_bits(self.registers.hrsl):
                 self.startTransfer(channel)
 

@@ -1,6 +1,5 @@
 from ..ppc_vstructs import *
 from ..ppc_peripherals import *
-from ..intc_exc import ResetException
 
 import logging
 logger = logging.getLogger(__name__)

@@ -135,7 +135,12 @@ class e200INTC:
         # If this was a debug exception and the external debugger is connected 
         # it should have been handled through the external debugger by now, 
         # don't change the PC
-        if isinstance(newexc, intc_exc.DebugException) and \
+        #
+
+        if isinstance(newexc, intc_exc.ResetException):
+            raise newexc
+
+        elif isinstance(newexc, intc_exc.DebugException) and \
                 self.emu.gdbstub.isClientConnected():
             # Before halting re-evaluate if there are any pending interrupts. If 
             # a stepi happens it may be done from the GDB server thread in which 
@@ -182,7 +187,7 @@ class e200INTC:
         newpc = self.getHandler(newexc)
 
         logger.debug('PC: 0x%08x (%r)  LVL: %d -> %d  NEWPC: 0x%08x',
-                self.emu.getProgramCounter(), newexc, self.curlvl, newexc.prio, newpc)
+                self.emu._cur_instr[2], newexc, self.curlvl, newexc.prio, newpc)
         self.emu.setProgramCounter(newpc)
 
         # change self.curlvl

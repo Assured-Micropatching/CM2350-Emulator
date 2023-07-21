@@ -18,7 +18,19 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     'MPC5674_Test',
+    'initLogging',
 ]
+
+
+def initLogging(logobj):
+    log_lvl = os.environ.get('LOG_LEVEL')
+    if log_lvl:
+        if hasattr(logging, log_lvl):
+            e_common.initLogging(logobj, getattr(logging, log_lvl))
+        elif hasattr(e_common, log_lvl):
+            e_common.initLogging(logobj, getattr(e_common, log_lvl))
+        else:
+            raise Exception('Invalid log level: %s' % log_lvl)
 
 
 class MPC5674_Test(unittest.TestCase):
@@ -26,28 +38,21 @@ class MPC5674_Test(unittest.TestCase):
 
     # When set to False automatically sets the following options:
     #   - _start_timebase_paused = False
-    #   - _systime_scaling = 1
     #   - _disable_gc = False
     #
     # When set to True automatically sets the following options:
     #   - _start_timebase_paused = True
-    #   - _systime_scaling = 0.1
     #   - _disable_gc = True
     #
     # If any of the specific performance settings are not None, the specific
     # performance setting will be used instead of the default.
     accurate_timing = False
-    _systime_scaling = None
     _start_timebase_paused = None
     _disable_gc = None
 
     def setUp(self):
-        if os.environ.get('LOG_LEVEL', 'INFO') == 'DEBUG':
-            e_common.initLogging(logger, logging.DEBUG)
-            #self.args.append('-vvv')
+        initLogging(logger)
 
-        if self._systime_scaling is None:
-            self._systime_scaling = 0.1 if self.accurate_timing else 1.0
         if self._start_timebase_paused is None:
             self._start_timebase_paused = True if self.accurate_timing else False
         if self._disable_gc is None:
@@ -56,9 +61,6 @@ class MPC5674_Test(unittest.TestCase):
         logger.debug('Creating CM2350 with args: %r', self.args)
         self.ECU = CM2350(self.args)
         self.emu = self.ECU.emu
-
-        # Set the emulator systime scaling
-        self.emu._systime_scaling = self._systime_scaling
 
         # Check if the garbage collector should be disabled for these tests
         if self._disable_gc:
@@ -75,7 +77,8 @@ class MPC5674_Test(unittest.TestCase):
         self.emu.setRegister(eapr.REG_MSR, msr_val)
 
         # Enable the timebase (normally done by writing a value to HID0)
-        self.emu.enableTimebase(start_paused=self._start_timebase_paused)
+        if not self._start_timebase_paused:
+            self.emu.enableTimebase()
 
     def _getPendingExceptions(self):
         # Remove all the exceptions in the pending list
@@ -83,12 +86,33 @@ class MPC5674_Test(unittest.TestCase):
         self.emu.mcu_intc.pending = []
         return pending
 
+    def checkPendingExceptions(self):
+        # Just return the list of pending exceptions but leave them queued
+        return self.emu.mcu_intc.pending
+
     def tearDown(self):
         # Ensure that there are no unprocessed exceptions
         pending_excs = self._getPendingExceptions()
         for exc in pending_excs:
             print('Unhanded PPC Exception %s' % exc)
-        self.assertEqual(pending_excs, [])
+
+        # Only assert if the test is current succeeding, we don't want to 
+        # override the error of a failure, the success attribute isn't set yet, 
+        # instead look at the errors attribute.
+        #
+        # Unfortunately python3.11 changed how to check this so we have to check 
+        # for the existence of the 'errors' attribute on the TestCase.outcome 
+        # object, and if that attribute doesn't exist get the errors list from 
+        # the result object.
+
+        # How the Python 3.4 - 3.10 unittest module tracks failures
+        if hasattr(self._outcome, 'errors'):
+            if not self._outcome.errors:
+                self.assertEqual(pending_excs, [])
+
+        # How the Python 3.11+ unittest module tracks failures
+        elif not self._outcome.result.errors:
+            self.assertEqual(pending_excs, [])
 
         # Clean up the resources
         self.ECU.shutdown()
@@ -262,3 +286,41 @@ class MPC5674_Test(unittest.TestCase):
     def get_spr_num(self, reg):
         regname = self.emu.getRegisterName(reg)
         return next(num for num, (name, _, _) in eaps.sprs.items() if name == regname)
+
+    def assert_timer_within_range(self, value, expected, margin, maxval=0xFFFFFFFF, msg=None):
+        compare_msg = '%d =? %d +/- %d' % (value, expected, margin)
+        if msg is None:
+            msg = ''
+        else:
+            msg = ' (' + msg + ')'
+
+        logger.debug(msg)
+        if value < expected:
+            # See if perhaps the value just wrapped around, otherwise do the 
+            # normal margin check
+            if (maxval + value <= expected + margin) or value >= expected - margin:
+                result = True
+                extra = ' (max: %d)' % maxval
+            else:
+                result = False
+                toobig_diff = (maxval + value) - (expected + margin)
+                toosmall_diff = (expected - margin) - value
+                if toosmall_diff < toobig_diff:
+                    extra = ' (max: %d, diff:%d)' % (maxval, -toosmall_diff)
+                else:
+                    extra = ' (max: %d, diff:%d)' % (maxval, toobig_diff)
+
+        else:
+            # It should be less than expected plus the margin
+            if value <= expected + margin:
+                result = True
+                extra = ' (max: %#x)' % maxval
+            else:
+                result = False
+                diff = value - (expected + margin)
+                extra = ' (max: %d, diff:%d)' % (maxval, diff)
+
+        if result:
+            self.assertTrue(result, msg=compare_msg+extra+msg)
+        else:
+            self.fail(msg=compare_msg+extra+msg)

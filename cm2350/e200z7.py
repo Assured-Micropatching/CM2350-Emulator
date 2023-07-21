@@ -21,18 +21,19 @@ import threading
 import logging
 logger = logging.getLogger(__name__)
 
+# Standard Vivisect/Envi packages
 import envi
 import envi.bits as e_bits
 import envi.memory as e_mem
+
+# PPC registers
 from envi.archs.ppc.regs import REG_MCSR, REG_MSR, REG_TSR, REG_TCR, REG_DEC, \
         REG_DECAR, REG_HID0, REG_HID1, REG_TBU, REG_TB, REG_TBU_WO, REG_TBL_WO
 from .ppc_vstructs import BitFieldSPR, v_const, v_w1c, v_bits
 
-from . import emutimers, mmio, ppc_mmu, e200_intc, e200_gdb
-from .const import *
-
-# PPC/MCU Exceptions
-from . import intc_exc, ppc_xbar
+# PPC Specific packages
+from . import emutimers, clocks, ppc_time, mmio, ppc_mmu, ppc_xbar, e200_intc, \
+        intc_exc, e200_gdb
 
 
 __all__ = [
@@ -108,115 +109,14 @@ class MCSR(BitFieldSPR):
         self.flags = v_w1c(32)
 
 
-class PpcEmulationTime(emutimers.EmulationTime):
-    '''
-    PowerPC specific emulator time and timer handling.
-    '''
-    def __init__(self, systime_scaling=0.01):
-        super().__init__(systime_scaling)
-
-        # The time base can be written to which is supposed to reset the point
-        # that the system time is counting from.  We don't want to change the
-        # EmulationTime._sysoffset offset because that may impact the tracking
-        # of any timers currently running.  Instead use a timebase offset value
-        # so values read from TBU/TBL will have the correct values but the
-        # systicks() will be unmodified.
-        self._tb_offset = 0
-
-        # Register the TBU/TBL callbacks, these are read-only so no write
-        # callback is attached.
-        self.addSprReadHandler(REG_TB, self.tblRead)
-        self.addSprReadHandler(REG_TBU, self.tbuRead)
-        self.addSprWriteHandler(REG_TB, self._invalid_tb_write)
-        self.addSprWriteHandler(REG_TBU, self._invalid_tb_write)
-
-        # TODO: The TBU/TBL hypervisor access registers are write-only, but this
-        # is not yet implemented
-
-        # The TBU_WO/TBL_WO SPRs are used to hold the desired timebase offset
-        # value in them.  They are write-only so these callback functions ensure
-        # the reads are correctly emulated.
-        self.addSprReadHandler(REG_TBL_WO, self._invalid_tb_read)
-        self.addSprReadHandler(REG_TBU_WO, self._invalid_tb_read)
-        self.addSprWriteHandler(REG_TBL_WO, self.tblWrite)
-        self.addSprWriteHandler(REG_TBU_WO, self.tbuWrite)
-
-    def _invalid_tb_write(self, emu, op):
-        pass
-
-    def _invalid_tb_read(self, emu, op):
-        return 0
-
-    def tblRead(self, emu, op):
-        '''
-        Read callback handler to associate the value of the TBL SPR with the
-        EmulationTime.
-        '''
-        # In 64-bit mode reading the TBL returns the entire 64-bit TB value, in
-        # 32-bit mode its just the lower 32-bits, but this masking is done
-        # already in the PpcRegOper class (and will be set in the i_mfspr()
-        # handler that calls this)
-        return self.systicks()
-
-    def tbuRead(self, emu, op):
-        '''
-        Read callback handler to associate the value of the TBU SPR with the
-        EmulationTime.
-        '''
-        # Get the top 32-bits of the "ticks" value.  This should be only 32-bits
-        # wide regardless of if this is a 64-bit or 32-bit machine.
-        return (self.systicks() >> 32) & 0xFFFFFFFF
-
-    def tblWrite(self, emu, op):
-        '''
-        Update the tb_offset so TBL values returned from this point on
-        reflect the new offset.
-        '''
-        # Ensure that the offset value is only 32-bits wide regardless of the
-        # platform size.
-        tbl_offset = self.getOperValue(op, 1) & 0xFFFFFFFF
-
-        # Based on the new TBL offset and the current value of TBU_WO, calculate
-        # the new desired timebase offset
-        tbu_offset = emu.getRegister(REG_TBU_WO)
-        offset = (tbu_offset << 32) | tbl_offset
-        self._tb_offset = super().systicks() - offset
-
-        # Return the offset so that TBL_WO has the correct offset to use to
-        # calculate the desired timebase offset.
-        return tbl_offset
-
-    def tbuWrite(self, emu, op):
-        '''
-        Update the tb_offset so TBU values returned from this point on
-        reflect the new offset.
-        '''
-        # Ensure that the offset value is only 32-bits wide regardless of the
-        # platform size.
-        tbu_offset = self.getOperValue(op, 1) & 0xFFFFFFFF
-
-        # Based on the new TBU offset and the current value of TBL_WO, calculate
-        # the new desired timebase offset
-        tbl_offset = emu.getRegister(REG_TBL_WO)
-        offset = (tbu_offset << 32) | tbl_offset
-        self._tb_offset = super().systicks() - offset
-
-        # Return the offset so that TBU_WO has the correct offset to use to
-        # calculate the desired timebase offset.
-        return tbu_offset
-
-    def systicks(self):
-        '''
-        Because PowerPC allows writes to the "Write-Only" TBL/TBU registers,
-        adjust the returned systicks value by the current offset.
-        '''
-        return super().systicks() - self._tb_offset
-
-
 import envi.archs.ppc.emu as eape
-import vivisect.impemu.platarch.ppc as vimp_ppc_emu
-#class PPC_e200z7(mmio.ComplexMemoryMap, eape.Ppc32EmbeddedEmulator, PpcEmulationTime):
-class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.Ppc32EmbeddedEmulator, PpcEmulationTime):
+import vivisect.impemu.emulator as vimp_emu
+#import vivisect.impemu.platarch.ppc as vimp_ppc_emu
+
+class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
+                 eape.Ppc32EmbeddedEmulator, ppc_time.PpcEmuTime,
+                 #emutimers.ScaledEmuTimeCore, clocks.EmuClocks):
+                 emutimers.EmuTimeCore, clocks.EmuClocks):
     def __init__(self, vw):
         # module registry
         self.modules = {}
@@ -237,13 +137,13 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         # class the PPC_e200z7 is designed so that the core vivisect workspace
         # emulator can be removed in the future to improve performance (at the
         # cost of analysis/inspection/live debug capabilities).
-        #
-        # TODO: CLI enabled logread/logwrite functionality?
-        #vimp_ppc_emu.PpcWorkspaceEmulator.__init__(self, vw, nostack=True, funconly=False, logread=True, logwrite=True)
-        vimp_ppc_emu.PpcWorkspaceEmulator.__init__(self, vw, nostack=True, funconly=False)
 
-        #PpcEmulationTime.__init__(self, 0.1)
-        PpcEmulationTime.__init__(self)
+        vimp_emu.WorkspaceEmulator.__init__(self, vw, nostack=True, funconly=False)
+
+        ppc_time.PpcEmuTime.__init__(self)
+        #emutimers.ScaledEmuTimeCore.__init__(self, 0.1)
+        emutimers.EmuTimeCore.__init__(self)
+        clocks.EmuClocks.__init__(self)
 
         # MCU timers
         self.mcu_wdt = None
@@ -252,6 +152,9 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
 
         # The TCR register controls the MCU watchdog, Decrementer and
         # Fixed-Interval Timers.
+        # TODO: These timers should be running when the timebase is enabled 
+        # regardless of the resulting interrrupt on/off action that is 
+        # configured.
         self.tcr = TCR(self)
         self.tcr.vsAddParseCallback('wie', self._tcrWIEUpdate)
         self.tcr.vsAddParseCallback('fie', self._tcrFIEUpdate)
@@ -279,7 +182,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         self.mcu_intc = e200_intc.e200INTC(emu=self, ivors=True)
 
         # Create GDBSTUB Server
-        self.gdbstub = e200_gdb.e200GDB(self)
+        #self.gdbstub = e200_gdb.e200GDB(self)
         self._run = threading.Event()
 
         # By default the debugger _run event flag should be set.
@@ -297,7 +200,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         # - PC
         # - "next" PC
         # - if PC is in a VLE context or not
-        self._cur_instr = None
+        self._cur_instr = (None, 0, 0, False)
 
         # Support read and write callbacks
         self._read_callbacks = {}
@@ -324,13 +227,13 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
             # If TSR[ENW] and TSR[WIS] are both cleared, set TSR[ENW] and start
             # the watchdog timer again
             self.tsr.vsOverrideValue('enw', 1)
-            self.watchdog.start()
+            self.mcu_wdt.start()
 
         elif not self.tsr.wis:
             # If TSR[ENW] is set but not TSR[WIS], set WIS and start the
             # watchdog timer again
             self.tsr.vsOverrideValue('wis', 1)
-            self.watchdog.start()
+            self.mcu_wdt.start()
 
             # Trigger the watchdog exception
             self.queueException(intc_exc.WatchdogTimerException())
@@ -338,7 +241,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         elif self.tcr.wrc:
             # Any value in TCR[WRC] when TSR[ENW] and TSR[WIS] are set causes a
             # reset to happen
-            self.queueException(intc_exc.ResetException())
+            self.queueException(intc_exc.ResetException(intc_exc.ResetSource.CORE_WATCHDOG))
 
     def _mcuFITHandler(self):
         # Indicate that a fixed-interval timer event has occured
@@ -368,7 +271,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         wdt_bit = self.tcr.wp << 4 | self.tcr.wpext
 
         # Determine the actual bit number and then the bit mask is the period
-        self.mcu_wdt.start(period=e_bits.b_mask[63 - wdt_bit])
+        self.mcu_wdt.start(ticks=e_bits.b_mask[63 - wdt_bit])
 
     def _startMCUFIT(self):
         # The fixed-interval period is determined by the TCR[WP] and TCR[WPEXT]
@@ -377,7 +280,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         fit_bit = self.tcr.fp << 4 | self.tcr.fpext
 
         # Determine the actual bit number and then the bit mask is the period
-        self.mcu_fit.start(period=e_bits.b_mask[63 - fit_bit])
+        self.mcu_fit.start(ticks=e_bits.b_mask[63 - fit_bit])
 
     def _startMCUDEC(self):
         # If there is a queued or active decrementer exception already, attach a
@@ -392,7 +295,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
             exc.setCleanup(self._startMCUDEC)
         else:
             # There is no active decrementer exception, so start the timer
-            self.mcu_dec.start(period=self.getRegister(REG_DEC))
+            self.mcu_dec.start(ticks=self.getRegister(REG_DEC))
 
     def _tcrWIEUpdate(self, tcr):
         if self.tcr.wie and self.systimeRunning():
@@ -425,38 +328,21 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
 
         # If the decrementer is enabled, restart it.
         if self.tcr.die:
-            self.mcu_dec.start(period=value)
+            self.mcu_dec.start(ticks=value)
 
         return value
 
     def _hid0TBUpdate(self, hid0):
         if self.hid0.tben:
             self.enableTimebase()
-
-            # When the timebase is enabled also check if the WDT, FIT or DEC
-            # timers should be started
-            if self.tcr.wie:
-                self._startMCUWDT()
-            if self.tcr.fie:
-                self._startMCUFIT()
-            if self.tcr.die:
-                self._startMCUWDT()
-
         else:
             self.disableTimebase()
 
-            # If any of the timebase-run MCU timers are running, stop them now
-            if self.tcr.wie:
-                self.mcu_wdt.stop()
-            if self.tcr.fie:
-                self.mcu_fit.stop()
-            if self.tcr.die:
-                self.mcu_dec.stop()
-
-    def init_core(self):
+    def init(self):
         '''
         Setup the Peripherals supported on this chip
         '''
+        # TODO: move MCU timers into the official PowerPC "timebase" class
         # Create the MCU timers
         self.mcu_wdt = self.registerTimer('MCU_WDT', self._mcuWDTHandler)
         self.mcu_fit = self.registerTimer('MCU_FIT', self._mcuFITHandler)
@@ -472,35 +358,41 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
         # for processing
         self.external_io = queue.Queue()
 
+        # reset the system emulation time, then init all modules
+        self.systimeReset()
+
         # initialize the various modules on this chip.
         for key, module in self.modules.items():
-            logger.debug("init_core: Initializing %r...", key)
+            logger.debug("init: Initializing %r...", key)
             module.init(self)
 
-    def reset_core(self):
+        # Start the core emulator time now
+        self.resume_time()
+
+    def reset(self):
         '''
         Reset all registered peripherals that have a reset function.
         Peripherals that should be returned to some pre-determined state when
         the processor resets should implement this function.
         '''
-        # TODO: move MCU timers into the official PowerPC "timebase" class
         self.disableTimebase()
+
+        # Reset the cached "current instruction" data
+        self._cur_instr = (None, 0, 0, False)
 
         # Clear out all pending extra processing
         with self.extra_processing_lock:
             self.extra_processing = []
 
-        # Stop all MCU timers
-        self.mcu_wdt.stop()
-        self.mcu_fit.stop()
-        self.mcu_dec.stop()
-
         # First reset the system emulation time, then reset all modules
         self.systimeReset()
         for key, module in self.modules.items():
             if hasattr(module, 'reset'):
-                logger.debug("reset_core: Resetting %r...", key)
+                logger.debug("reset: Resetting %r...", key)
                 module.reset(self)
+
+        # Start the core emulator time now
+        self.resume_time()
 
     def halt_exec(self):
         '''
@@ -733,9 +625,24 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
             # do normal opcode parsing and execution
             pc = self.getProgramCounter()
             op = self.parseOpcode(pc)
+
             # TODO: check MSR for FP (MSR_FP_MASK) and SPE (MSR_SPE_MASK)
             # support here?
             self.executeOpcode(op)
+
+            # Increment the tick counter
+            self.tick()
+
+        except intc_exc.ResetException as exc:
+            # Reset the entire CPU
+            self.reset()
+
+            # If any peripherals have registered a "setResetSource" function 
+            # call it now.
+            for key, module in self.modules.items():
+                if hasattr(module, 'setResetSource'):
+                    logger.debug("system reset: setting reset source %s in %s", exc.source, key)
+                    module.setResetSource(exc.source)
 
         except intc_exc.DebugException as exc:
             # TODO: If the op is DNH
@@ -761,24 +668,19 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_ppc_emu.PpcWorkspaceEmulator, eape.
             tb = sys.exc_info()[2]
             self.queueException(intc_exc.ProgramException().with_traceback(tb))
 
-        except intc_exc.ResetException:
-            # Special case, don't queue a reset exception, just do a reset
-            self.reset()
-
         except intc_exc.INTCException as exc:
             # If any PowerPC-specific exception occurs, queue it to be handled
             # on the next call
             self.queueException(exc)
 
     def run(self):
-        """
-        Faster tight loop of what the stepi() function does.
-        Make sure this stays in sync with stepi()!
-        """
+        # TODO: potentially slightly faster without calling a separate function,
+        # but keeping them in sync is difficult.
         while True:
             self.stepi()
 
     def queueException(self, exception):
+        logger.debug('queuing expcetion %s', exception)
         self.mcu_intc.queueException(exception)
 
     def isExceptionActive(self, exctype):

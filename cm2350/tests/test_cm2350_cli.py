@@ -171,64 +171,44 @@ def dict_merge(a, b):
 
 
 # Default project configuration using the DEFAULT_CONFIG path, so it has an
-# empty firmware configuration.
-CM2350_DEFAULT_CONFIG = {
-    'viv': {
-        'parsers': {
-            'blob': {
-                'arch': 'ppc32-embedded',
-                'bigend': True,
-                'baseaddr': 0,
-            },
-            'ihex': {
-                'arch': 'ppc32-embedded',
-                'bigend': True,
-                'offset': 0,
-            },
-            'srec': {
-                'arch': 'ppc32-embedded',
-                'bigend': True,
-                'offset': 0,
-            }
-        }
-    },
-
-    'project': {
-        'name': PROJECT_NAME,
-        'platform': 'CM2350',
-        'arch': 'ppc32-embedded',
-        'bigend': True,
-        'format': 'blob',
-        'CM2350': { 'p89': 1, 'p90': 0, 'p91': 1, 'p92': 0},
-        'MPC5674': {
-            'SIU': {'pllcfg': 5, 'bootcfg': 0, 'wkpcfg': 1},
-            'FMPLL': {'extal': 40000000},
-            'FLASH': {
-                'fwFilename': None,
-                'baseaddr': 0,
-                'shadowAFilename': None,
-                'shadowAOffset': 0,
-                'shadowBFilename': None,
-                'shadowBOffset': 0,
-                'backup': 'backup.flash'
-            },
-            'SRAM': {'addr': 1073741824, 'size': 262144, 'standby_size': 32768},
-            'FlexCAN_A': {'host': None, 'port': None},
-            'FlexCAN_B': {'host': None, 'port': None},
-            'FlexCAN_C': {'host': None, 'port': None},
-            'FlexCAN_D': {'host': None, 'port': None},
-            'DSPI_A': {'host': None, 'port': None},
-            'DSPI_B': {'host': None, 'port': None},
-            'DSPI_C': {'host': None, 'port': None},
-            'DSPI_D': {'host': None, 'port': None},
-            'eQADC_A': {'host': None, 'port': None},
-            'eQADC_B': {'host': None, 'port': None},
-        }
-    },
+# empty firmware configuration
+DEFAULT_PROJECT_CONFIG = vivisect.defconfig
+DEFAULT_PROJECT_CONFIG['project'] = {
+    'name': PROJECT_NAME,
+    'platform': 'CM2350',
+    'arch': 'ppc32-embedded',
+    'bigend': True,
+    'format': 'blob',
+    'CM2350': { 'p89': 1, 'p90': 0, 'p91': 1, 'p92': 0},
+    'MPC5674': {
+        'SIU': {'pllcfg': 5, 'bootcfg': 0, 'wkpcfg': 1},
+        'FMPLL': {'extal': 40000000},
+        'FLASH': {
+            'fwFilename': None,
+            'baseaddr': 0,
+            'shadowAFilename': None,
+            'shadowAOffset': 0,
+            'shadowBFilename': None,
+            'shadowBOffset': 0,
+            'backup': 'backup.flash'
+        },
+        'SRAM': {
+            'addr': 0x40000000,
+            'size': 0x40000,
+            'standby_size': 0x8000,
+        },
+        'FlexCAN_A': {'host': None, 'port': None},
+        'FlexCAN_B': {'host': None, 'port': None},
+        'FlexCAN_C': {'host': None, 'port': None},
+        'FlexCAN_D': {'host': None, 'port': None},
+        'DSPI_A': {'host': None, 'port': None},
+        'DSPI_B': {'host': None, 'port': None},
+        'DSPI_C': {'host': None, 'port': None},
+        'DSPI_D': {'host': None, 'port': None},
+        'eQADC_A': {'host': None, 'port': None},
+        'eQADC_B': {'host': None, 'port': None},
+    }
 }
-
-# Merge the CM2350 default config with the vivisect default config
-DEFAULT_PROJECT_CONFIG = dict_merge(vivisect.defconfig, CM2350_DEFAULT_CONFIG)
 
 
 def get_config(config, flash_cfg=None):

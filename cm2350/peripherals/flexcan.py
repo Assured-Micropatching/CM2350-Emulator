@@ -573,7 +573,7 @@ class FlexCAN(ExternalIOPeripheral):
                 isrflags=FLEXCAN_INT_FLAG_REGS,
                 isrevents=FLEXCAN_INT_EVENTS)
         # timer register
-        self._timer = TimerRegister(16)
+        self._timer = TimerRegister(emu=emu, bits=16)
 
         self.mode = None
         self.speed = None
@@ -941,7 +941,6 @@ class FlexCAN(ExternalIOPeripheral):
             # Set the code to indicate that a message has been received (this
             # isn't done for the RxFIFO received messages)
             msg.into_mb(self.registers.mb.value, offset=idx, code=FLEXCAN_CODE_RX_FULL, timestamp=self._timer.get())
-
             self.event('msg', mb, FLEXCAN_IFLAG2_MASK[mb])
 
     def normalTx(self, mb):
@@ -1359,9 +1358,9 @@ class FlexCAN(ExternalIOPeripheral):
 
         # source clock = CPI source clock / (PRESDIV + 1)
         if ctrl.clk_src:
-            sclk = self.emu.siu.f_periph() / (ctrl.presdiv + 1)
+            sclk = self.emu.getClock('periph') / (ctrl.presdiv + 1)
         else:
-            sclk = self.emu.fmpll.f_extal() / (ctrl.presdiv + 1)
+            sclk = self.emu.getClock('extal') / (ctrl.presdiv + 1)
 
         # SYNC (1) + PROPSEG (0-7 + 1) + SEG1 (0-7 + 1) + SEG2 (0-7 + 1)
         tq_per_bit = ctrl.propseg + ctrl.pseg1 + ctrl.pseg2 + 4
@@ -1369,4 +1368,4 @@ class FlexCAN(ExternalIOPeripheral):
         self.speed = sclk / tq_per_bit
 
         # Set the timer register to run at the bus bit clock
-        self._timer.setFreq(self.emu, self.speed)
+        self._timer.setFreq(self.speed)

@@ -1,6 +1,6 @@
 from ..ppc_vstructs import *
 from ..ppc_peripherals import *
-from ..intc_exc import ResetException
+from ..intc_exc import ResetException, ResetSource
 
 import logging
 logger = logging.getLogger(__name__)
@@ -25,13 +25,6 @@ class SIU_MIDR(ReadOnlyRegister):
 
 
 class SIU_RSR(PeriphRegister):
-    # TODO: SYSTEM_RESET reasons should eventually be linked to the e200z7
-    # setException API.
-    #
-    # TODO: there are various fields in this register that appear to be
-    # read-only (like the PORS field) but may need to be able to be changed to
-    # reflect system reset information. For now set these bits as
-    # const/read-only
     def __init__(self, wkpcfg, bootcfg):
         super().__init__()
         self.pors = v_const(1)
@@ -52,7 +45,6 @@ class SIU_RSR(PeriphRegister):
 
 
 class SIU_SRCR(PeriphRegister):  # System Reset Control Register...
-    # TODO: might need to hook this one with some special logic
     def __init__(self):
         super().__init__()
         self.ssr = v_bits(1)
@@ -417,8 +409,74 @@ class SIU_REGISTERS(PeripheralRegisterSet):
     def __init__(self, wkpcfg, bootcfg):
         super().__init__()
 
-        #############################################
+        # Set PCR defaults
 
+        self._init_pcr_defaults(wkpcfg)
+
+        # Registers
+
+        self.midr    = (0x0004, SIU_MIDR())
+        self.rsr     = (0x000C, SIU_RSR(wkpcfg, bootcfg))
+        self.srcr    = (0x0010, SIU_SRCR())
+        self.eisr    = (0x0014, SIU_EISR())
+        self.direr   = (0x0018, SIU_DIRER())
+        self.dirsr   = (0x001C, SIU_DIRSR())
+        self.osr     = (0x0020, SIU_OSR())
+        self.orer    = (0x0024, SIU_ORER())
+        self.ireer   = (0x0028, SIU_IREER())
+        self.ifeer   = (0x002C, SIU_IFEER())
+        self.idfr    = (0x0030, SIU_IDFR())
+        self.ifir    = (0x0034, SIU_IFIR())
+
+        # PCR (Pin Control Registers)
+        # PCR registers must be initialized using the PCR_DEFAULT values because
+        # not all PCR fields can be modified for all pins.
+        self.pcr     = (0x0040, VTuple([SIU_PCRn() if c is None else SIU_PCRn(**c) for c in self._pcr_defaults]))
+
+        # Legacy GPDO
+        self.gpdo    = (0x0600, VTuple([SIU_GPDOn() for i in range(NUM_GPDIO_PINS)]))
+
+        # Legacy GPDI (only first 256 pins)
+        self.gpdi    = (0x0800, VTuple([SIU_GPDIn() for i in range(NUM_GPDIO_PINS // 2)]))
+
+        self.eiisr   = (0x0904, SIU_EIISR())
+        self.disr    = (0x0908, SIU_DISR())
+        self.isel4   = (0x0910, SIU_ISEL4())
+        self.isel5   = (0x0914, SIU_ISEL5())
+        self.isel6   = (0x0918, SIU_ISEL6())
+        self.isel7   = (0x091C, SIU_ISEL7())
+        self.isel8   = (0x0920, SIU_ISEL8())
+        self.isel9   = (0x0924, SIU_ISEL9())
+        self.decfil1 = (0x0928, SIU_DECFIL())
+        self.decfil2 = (0x092C, SIU_DECFIL())
+        self.ccr     = (0x0980, SIU_CCR())
+        self.eccr    = (0x0984, SIU_ECCR())
+        self.cbrh    = (0x0990, SIU_CBRH())
+        self.cbrl    = (0x0994, SIU_CBRL())
+        self.sysdiv  = (0x09A0, SIU_SYSDIV())
+        self.hlt     = (0x09A4, SIU_HLT())
+        self.hltack  = (0x09A8, SIU_HLTACK())
+
+        # Parallel GPDO
+        # 4 bytes for every 32 pins
+        self.pgpdo   = (0x0C00, VTuple([SIU_PGPDOn() for i in range(NUM_GPDIO_PINS // 32)]))
+
+        # Parallel GPDI
+        # 4 bytes for every 32 pins
+        self.pgpdi   = (0x0C40, VTuple([SIU_PGPDIn() for i in range(NUM_GPDIO_PINS // 32)]))
+
+        # Masked Parallel GPDO
+        # 2 bytes of mask and 2 bytes of data for every 16 pins
+        self.mpgpdo  = (0x0C80, VTuple([SIU_MPGPDOn() for i in range(NUM_GPDIO_PINS // 16)]))
+
+        # 0x0D00-0x0E00 is unimplemented (related to DSPI or eTPU functionality)
+        # 0x100 * 8 bits = size of the placeholder
+        self.tbd     = (0x0D00, VTuple([PlaceholderRegister(8) for i in range(0x100)]))
+
+        # Legacy GPDI (full range)
+        self.gpdi_full = (0x0E00, VTuple([SIU_GPDIn() for i in range(NUM_GPDIO_PINS)]))
+
+    def _init_pcr_defaults(self, wkpcfg):
         # There are 512 PCR registers but not all of them are valid, initialize
         # the PCR configurations with all fields set to None.
         #
@@ -484,85 +542,6 @@ class SIU_REGISTERS(PeripheralRegisterSet):
         self._pcr_defaults[440] = {'pa': 0,    'obe': 0,    'ibe': 0,    'dsc': None, 'ode': 0,    'hys': 0,    'src': 0,    'wpe': 1,    'wps': 1}
         for pin in range(441, 472):
             self._pcr_defaults[pin] = {'pa': 0,    'obe': 0,    'ibe': 0,    'dsc': None, 'ode': 0,    'hys': 0,    'src': 0,    'wpe': 1,    'wps': wkpcfg}
-
-        #############################################
-
-        # Registers
-
-        self.midr    = (0x0004, SIU_MIDR())
-        self.rsr     = (0x000C, SIU_RSR(wkpcfg, bootcfg))
-        self.srcr    = (0x0010, SIU_SRCR())
-        self.eisr    = (0x0014, SIU_EISR())
-        self.direr   = (0x0018, SIU_DIRER())
-        self.dirsr   = (0x001C, SIU_DIRSR())
-        self.osr     = (0x0020, SIU_OSR())
-        self.orer    = (0x0024, SIU_ORER())
-        self.ireer   = (0x0028, SIU_IREER())
-        self.ifeer   = (0x002C, SIU_IFEER())
-        self.idfr    = (0x0030, SIU_IDFR())
-        self.ifir    = (0x0034, SIU_IFIR())
-
-
-        # PCR (Pin Control Registers)
-        # PCR registers must be initialized using the PCR_DEFAULT values because
-        # not all PCR fields can be modified for all pins.
-        self.pcr     = (0x0040, VTuple([SIU_PCRn() if c is None else SIU_PCRn(**c) for c in self._pcr_defaults]))
-
-        # Legacy GPDO
-        self.gpdo    = (0x0600, VTuple([SIU_GPDOn() for i in range(NUM_GPDIO_PINS)]))
-
-        # Legacy GPDI (only first 256 pins)
-        self.gpdi    = (0x0800, VTuple([SIU_GPDIn() for i in range(NUM_GPDIO_PINS // 2)]))
-
-        self.eiisr   = (0x0904, SIU_EIISR())
-        self.disr    = (0x0908, SIU_DISR())
-        self.isel4   = (0x0910, SIU_ISEL4())
-        self.isel5   = (0x0914, SIU_ISEL5())
-        self.isel6   = (0x0918, SIU_ISEL6())
-        self.isel7   = (0x091C, SIU_ISEL7())
-        self.isel8   = (0x0920, SIU_ISEL8())
-        self.isel9   = (0x0924, SIU_ISEL9())
-        self.decfil1 = (0x0928, SIU_DECFIL())
-        self.decfil2 = (0x092C, SIU_DECFIL())
-        self.ccr     = (0x0980, SIU_CCR())
-        self.eccr    = (0x0984, SIU_ECCR())
-        self.cbrh    = (0x0990, SIU_CBRH())
-        self.cbrl    = (0x0994, SIU_CBRL())
-        self.sysdiv  = (0x09A0, SIU_SYSDIV())
-        self.hlt     = (0x09A4, SIU_HLT())
-        self.hltack  = (0x09A8, SIU_HLTACK())
-
-        # Parallel GPDO
-        # 4 bytes for every 32 pins
-        self.pgpdo   = (0x0C00, VTuple([SIU_PGPDOn() for i in range(NUM_GPDIO_PINS // 32)]))
-
-        # Parallel GPDI
-        # 4 bytes for every 32 pins
-        self.pgpdi   = (0x0C40, VTuple([SIU_PGPDIn() for i in range(NUM_GPDIO_PINS // 32)]))
-
-        # Masked Parallel GPDO
-        # 2 bytes of mask and 2 bytes of data for every 16 pins
-        self.mpgpdo  = (0x0C80, VTuple([SIU_MPGPDOn() for i in range(NUM_GPDIO_PINS // 16)]))
-
-        # 0x0D00-0x0E00 is unimplemented (related to DSPI or eTPU functionality)
-        # 0x100 * 8 bits = size of the placeholder
-        self.tbd     = (0x0D00, VTuple([PlaceholderRegister(8) for i in range(0x100)]))
-
-        # Legacy GPDI (full range)
-        self.gpdi_full = (0x0E00, VTuple([SIU_GPDIn() for i in range(NUM_GPDIO_PINS)]))
-
-    def reset(self, emu):
-        # TODO: Will probably need to set some other register values based on
-        # the reset reason, like watchdog and such
-
-        # Read the current state of SRCR[SER]
-        ser_value = self.srcr.ser
-
-        super().reset(emu)
-
-        # Change the default value of the RSR[SERF] flag to indicate if a reset
-        # has happened because the SRCR[SER] bit was set or not
-        self.rsr.vsOverrideValue('serf', ser_value)
 
 
 # Cache the byte offset, bit offset, and pin mask values for each pin.
@@ -721,6 +700,9 @@ class SIU(MMIOPeripheral):
         # clock divider changes the main system time frequency is updated
         self.registers.vsAddParseCallback('sysdiv', self.updateSystemFreq)
 
+        # TODO: callbacks for each register that impacts the system clocks and 
+        # updates the each in turn.
+
         # Attach the callback functions to handle writes that need to cause GPIO
         # value updates
         self.registers.pcr.vsAddParseCallback('by_idx', self.pcrUpdate)
@@ -728,12 +710,28 @@ class SIU(MMIOPeripheral):
         self.registers.pgpdo.vsAddParseCallback('by_idx', self.pgpdoUpdate)
         self.registers.mpgpdo.vsAddParseCallback('by_idx', self.mpgpdoUpdate)
 
+    def init(self, emu):
+        super().init(emu)
+
+        # Register the system clocks
+        emu.registerClock('sys',    self.f_sys)
+        emu.registerClock('periph', self.f_periph)
+        emu.registerClock('cpu',    self.f_cpu)
+        emu.registerClock('etpu',   self.f_etpu)
+        emu.registerClock('engclk', self.f_engclk)
+        emu.registerClock('clkout', self.f_clkout)
+
     def reset(self, emu):
         """
         Return the SIU peripheral to a reset state
         """
         # Reset the peripheral registers
         super().reset(emu)
+
+        # Indicate this is the initial power on reset, if this happened because 
+        # of a ResetException the handler in the CPU core will set a more 
+        # accurate reason.
+        self.registers.rsr.vsOverrideValue('pors', 1)
 
         # Set the system frequency now based on the default register values.
         self.updateSystemFreq()
@@ -754,6 +752,28 @@ class SIU(MMIOPeripheral):
         for idx in range(NUM_GPDIO_PINS // 32):
             self.refreshBlockValue(idx)
 
+    def setResetSource(self, source):
+        # First clear out any currently set reset sources
+        self.registers.rsr.reset(self.emu)
+        if source == ResetSource.POWER_ON:
+            self.registers.rsr.vsOverrideValue('pors', 1)
+        elif source == ResetSource.EXTERNAL:
+            self.registers.rsr.vsOverrideValue('ers', 1)
+        elif source == ResetSource.SOFTWARE_SYSTEM:
+            self.registers.rsr.vsOverrideValue('ssrs', 1)
+        elif source == ResetSource.LOSS_OF_CLOCK:
+            self.registers.rsr.vsOverrideValue('lcrs', 1)
+        elif source == ResetSource.LOSS_OF_LOCK:
+            self.registers.rsr.vsOverrideValue('llrs', 1)
+        elif source == ResetSource.CORE_WATCHDOG:
+            self.registers.rsr.vsOverrideValue('wdrs', 1)
+        elif source == ResetSource.DEBUG:
+            self.registers.rsr.vsOverrideValue('wdrs', 1)
+        elif source == ResetSource.WATCHDOG:
+            self.registers.rsr.vsOverrideValue('swtrs', 1)
+        elif source == ResetSource.SOFTWARE_EXTERNAL:
+            self.registers.rsr.vsOverrideValue('serf', 1)
+
     def checkCBRMatch(self, thing):
         # TODO: Eventually this should be compared against the password values
         # in shadow flash
@@ -763,8 +783,11 @@ class SIU(MMIOPeripheral):
             self.registers.ccr.vsOverrideValue('match', 0)
 
     def srcrUpdate(self, thing):
-        if self.registers.srcr.ser or self.registers.srcr.ssr:
-            raise ResetException()
+        if self.registers.srcr.ser:
+            self.emu.queueException(ResetException(ResetSource.SOFTWARE_EXTERNAL))
+
+        elif self.registers.srcr.ssr:
+            self.emu.queueException(ResetException(ResetSource.SOFTWARE_SYSTEM))
 
     def updateSystemFreq(self, thing=None):
         logger.debug('SIU: Setting system clock to %f MHz', self.f_cpu() / 1000000)
@@ -775,7 +798,7 @@ class SIU(MMIOPeripheral):
             divider = 1
         else:
             divider = (2, 4, 8, 16)[self.registers.sysdiv.sysclkdiv]
-        return self.emu.fmpll.f_pll() // divider
+        return self.emu.getClock('pll') // divider
 
     def updateMasksFromPCR(self, pin):
         """
@@ -951,7 +974,7 @@ class SIU(MMIOPeripheral):
         # 1 The external clock (the EXTAL frequency of the oscillator) is the
         # source of the ENGCLK
         if self.registers.eccr.ecss:
-            freq = self.emu.fmpll.f_extal()
+            freq = self.emu.getClock('extal')
         elif self.registers.eccr.engdiv != 0:
             freq = self.f_periph() / (self.registers.eccr.engdiv * 2)
         else:

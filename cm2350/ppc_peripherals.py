@@ -1,4 +1,3 @@
-import time
 import weakref
 import threading
 import socket
@@ -10,6 +9,7 @@ import atexit
 import inspect
 
 import envi.bits as e_bits
+from envi.common import EMULOG
 
 from . import mmio
 from .ppc_vstructs import *
@@ -80,9 +80,9 @@ class Peripheral:
     def init(self, emu):
         """
         Standard "module" peripheral init function. This is called only once
-        during emulator initialization when the emulator's init_core() function
-        is called. Any emulator-dependant initialization should be done in this
-        function and not in the constructor.
+        during emulator initialization when the emulator processor core's
+        init() function is called. Any emulator-dependant initialization should
+        be done in this function and not in the constructor.
 
         By default this function calls it's own reset() function at the end of
         this init() function. This should make it easy for a peripheral to
@@ -100,10 +100,10 @@ class Peripheral:
     def reset(self, emu):
         """
         Standard "module" peripheral reset function. This is called every time
-        the emulator's reset_core() function is called, and also by default by
-        this class's own init() function. This means that each peripheral only
-        needs to implement one function to initialize all values to the correct
-        default state.
+        the emulator processor core's reset() function is called, and also by
+        default by this class's own init() function. This means that each
+        peripheral only needs to implement one function to initialize all
+        values to the correct default state.
 
         This function is required to be implemented by all peripherals.
         """
@@ -471,7 +471,8 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
 
         try:
             value = self._getPeriphReg(offset, size)
-            #logger.debug("0x%x:  %s: read  [%x:%r] (%r)", self.emu.getProgramCounter(), self.devname, va, size, value)
+            logger.log(EMULOG, "0x%x:  %s: read  [%x:%r] (%r)",
+                       self.emu._cur_instr[2], self.devname, va, size, value)
             return value
 
         except VStructUnimplementedError as exc:
@@ -523,7 +524,8 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
             # TODO: this seems inefficient, but should be good enough for now
             return self._slow_mmio_write(va, offset, data)
 
-        #logger.debug("0x%x:  %s: write [%x] = %r", self.emu.getProgramCounter(), self.devname, va, data)
+        logger.log(EMULOG, "0x%x:  %s: write [%x] = %r",
+                   self.emu._cur_instr[2], self.devname, va, data)
         try:
             self._setPeriphReg(offset, data)
 
@@ -1084,13 +1086,13 @@ class TimerRegister:
     thread to track individual timers. This uses the primary emulator systime
     scaling factor.
     """
-    def __init__(self, bits=None):
+    def __init__(self, emu, bits=None):
         """
         Constructor for the TimerRegister class. If the bits parameter is
         specified then all timer values will be masked to ensure they are
         always within the allowed bit size.
         """
-        self._systime_scaling = None
+        self.emu = emu
         self.freq = 0
 
         if bits is not None:
@@ -1103,36 +1105,33 @@ class TimerRegister:
         self._timer_offset = None
         self._running = False
 
-    def setFreq(self, emu, freq):
+    def setFreq(self, freq):
         """
         Set the frequency of this timer. Uses the emulator's systime_scaling
         value to ensure that all timers are running with the same relative
         speed.
         """
-        self._systime_scaling = emu._systime_scaling
         self.freq = freq
 
     def stop(self):
         """
         Stops this timer from running.
         """
-        self._running = False
         self._timer_offset = None
 
     def start(self):
         """
         Starts this timer running (if it is not already running)
         """
-        if not self._running:
-            self._running = True
-            self._timer_offset = time.time()
+        if self._timer_offset is None:
+            self._timer_offset = self.emu.systime()
 
     def _time(self):
         """
         Internal function to return the scaled amount of time since the timer
         started counting scaled according to the emulator system scaling factor.
         """
-        return (time.time() - self._timer_offset) * self._systime_scaling
+        return self.emu.systime() - self._timer_offset
 
     def _ticks(self):
         """
@@ -1146,7 +1145,7 @@ class TimerRegister:
         Return the number of ticks since the timer started counting wrapped to
         the specified bit width (if a bit width is configured)
         """
-        if not self._running:
+        if self._timer_offset is None:
             return 0
         elif self._bitmask is not None:
             return self._ticks() & self._bitmask
@@ -1157,7 +1156,10 @@ class TimerRegister:
         """
         Set a custom timer offset
         """
-        self._timer_offset = time.time() - value
+
+        # Convert ticks to time
+        offset = value / self.freq
+        self._timer_offset = self.emu.systime() - offset
 
 
 class ExternalIOClient:
@@ -1193,8 +1195,11 @@ class ExternalIOClient:
         Closes the client connection
         """
         if self._sock is not None:
-            self._sock.shutdown(socket.SHUT_RDWR)
-            self._sock.close()
+            try:
+                self._sock.shutdown(socket.SHUT_RDWR)
+                self._sock.close()
+            except OSError:
+                pass
             self._sock = None
 
     def send(self, obj):

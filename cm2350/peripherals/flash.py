@@ -6,6 +6,7 @@ import os.path
 import envi
 import envi.bits as e_bits
 import envi.memory as e_mem
+from envi.common import EMULOG
 
 from .. import mmio
 from ..ppc_vstructs import *
@@ -682,7 +683,8 @@ class FlashArray:
         # If the value being written is 0xC3C33333 set the SLMLR[SLE] bit
         if data == b'\xC3\xC3\x33\x33':
             self.slmlr.vsOverrideValue('sle', 1)
-            logger.debug("%s[%s] shadow blocks unlocked for writing", self.__class__.__name__, self.name)
+            logger.debug("%s[%s] shadow blocks unlocked for writing",
+                         self.__class__.__name__, self.name)
         elif self.slmlr.sle == 1:
             # If the SLMLR[SLE] bit is set then the lock fields can be modified
             self.slmlr.vsParse(data)
@@ -704,12 +706,13 @@ class FlashArray:
             val = vst
 
         elif callable(vst):
-            val = e_bits.buildbytes(vst(), size, bigend=self.emu.getEndian())
+            val = e_bits.buildbytes(vst(), size,
+                                    bigend=self.flashdev.emu.getEndian())
 
         elif vst is None:
             state = {
                 'va': va,
-                'pc': self.emu.getProgramCounter(),
+                'pc': self.flashdev.emu.getProgramCounter(),
             }
             raise MceDataReadBusError(**state)
 
@@ -717,15 +720,15 @@ class FlashArray:
             # This shouldn't happen
             raise Exception('Invalid FLASH CONFIG register @ 0x%x: %r' % (va, vst))
 
-        logger.debug("0x%x:  %s[%s] read  [%x:%r] (%r)",
-                     self.flashdev.emu.getProgramCounter(),
-                     self.__class__.__name__, self.name, va, size, val)
+        logger.log(EMULOG, "0x%x:  %s[%s] read  [%x:%r] (%r)",
+                   self.flashdev.emu._cur_instr[2],
+                   self.__class__.__name__, self.name, va, size, val)
         return val
 
     def _mmio_write(self, va, offset, bytez):
-        logger.debug("0x%x:  %s[%s] write [%x] = %r",
-                     self.flashdev.emu.getProgramCounter(),
-                     self.__class__.__name__, self.name, va, bytez)
+        logger.log(EMULOG, "0x%x:  %s[%s] write [%x] = %r",
+                   self.flashdev.emu._cur_instr[2],
+                   self.__class__.__name__, self.name, va, bytez)
         try:
             vst = self._write_registers[offset//4]
         except IndexError:
@@ -742,7 +745,7 @@ class FlashArray:
             state = {
                 'va': va,
                 'data': bytez,
-                'pc': self.emu.getProgramCounter(),
+                'pc': self.flashdev.emu.getProgramCounter(),
             }
             raise MceWriteBusError(**state)
 
@@ -1368,7 +1371,8 @@ class FLASH(mmio.MMIO_DEVICE):
 
     def _flash_read(self, va, offset, size):
         value = self.data[offset:offset+size]
-        #logger.debug("0x%x:  FLASH read  [%x:%r] (%r)", self.emu.getProgramCounter(), offset, size, value)
+        logger.log(EMULOG, "0x%x:  FLASH read  [%x:%r] (%r)",
+                   self.emu._cur_instr[2], offset, size, value)
         return value
 
     def _flash_write(self, va, offset, bytez):
@@ -1377,7 +1381,8 @@ class FLASH(mmio.MMIO_DEVICE):
         if self.emu._supervisor:
             self.writeMemory(offset, bytez)
         else:
-            #logger.debug("0x%x:  FLASH write [%x] = %s", self.emu.getProgramCounter(), va, bytez.hex())
+            logger.log(EMULOG, "0x%x:  FLASH write [%x] = %s",
+                       self.emu._cur_instr[2], va, bytez.hex())
             # The array corresponding to the block being modified must be 
             # identified because the writes are cached by the sub-array until 
             # the MCR[EHV] bit is written which causes the cached data to be 
@@ -1394,11 +1399,13 @@ class FLASH(mmio.MMIO_DEVICE):
 
     def _shadow_A_read(self, va, offset, size):
         value = self.A.shadow[offset:offset+size]
-        #logger.debug("0x%x:  ShadowFlash[A] read  [%x:%r] (%r)", self.emu.getProgramCounter(), va, size, value)
+        logger.log(EMULOG, "0x%x:  ShadowFlash[A] read  [%x:%r] (%r)",
+                   self.emu._cur_instr[2], va, size, value)
         return value
 
     def _shadow_A_write(self, va, offset, bytez):
-        #logger.debug("0x%x:  ShadowFlash[A] write [%x] = %r", self.emu.getProgramCounter(), va, bytez)
+        logger.log(EMULOG, "0x%x:  ShadowFlash[A] write [%x] = %r", 
+                   self.emu._cur_instr[2], va, bytez)
         self.A.write(FlashBlock.S0, offset, bytez)
 
     def _shadow_A_bytes(self):
@@ -1410,11 +1417,13 @@ class FLASH(mmio.MMIO_DEVICE):
 
     def _shadow_B_read(self, va, offset, size):
         value = self.B.shadow[offset:offset+size]
-        #logger.debug("0x%x:  ShadowFlash[B] read  [%x:%r] (%r)", self.emu.getProgramCounter(), va, size, value)
+        logger.log(EMULOG, "0x%x:  ShadowFlash[B] read  [%x:%r] (%r)",
+                   self.emu._cur_instr[2], va, size, value)
         return value
 
     def _shadow_B_write(self, va, offset, bytez):
-        #logger.debug("0x%x:  ShadowFlash[B] write [%x] = %r", self.emu.getProgramCounter(), va, bytez)
+        logger.debug("0x%x:  ShadowFlash[B] write [%x] = %r",
+                     self.emu._cur_instr[2], va, bytez)
         self.B.write(FlashBlock.S0, offset, bytez)
 
     def _shadow_B_bytes(self):

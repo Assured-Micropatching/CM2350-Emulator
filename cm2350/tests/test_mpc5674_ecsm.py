@@ -203,6 +203,70 @@ class MPC5674_ECSM_Test(MPC5674_Test):
         self.assertEqual(self.emu.readMemValue(addr, size), 0)
         self.assertEqual(self.emu.readMemory(addr, size), b'\x00'*size)
 
+    def test_ecsm_reset_reason(self):
+        # Verify RSR[SERF] default. The RSR register has WKPCFG and BOOTCFG
+        # read-only values
+        # For this configuration WKPCFG is 1 and BOOTCFG is 0 so the default RSR
+        # value is:
+        #   0xx00008000
+        addr, size = ECSM_MRSR
+
+        # By default the POR flag should be set
+        self.assertEqual(self.emu.readMemValue(addr, size), ECSM_MRSR_DEFAULT_VALUE)
+        self.assertEqual(self.emu.ecsm.registers.mrsr.por, 1)
+        self.assertEqual(self.emu.ecsm.registers.mrsr.dir, 0)
+        self.assertEqual(self.emu.ecsm.registers.mrsr.swtr, 0)
+
+        # Trigger some resets and ensure the correct reset source is set (also 
+        # the weak pullup flag is set)
+        source_tests = [
+            (intc_exc.ResetSource.POWER_ON,          'por',  0x80),
+            (intc_exc.ResetSource.EXTERNAL,          'dir',  0x40),
+            (intc_exc.ResetSource.LOSS_OF_LOCK,      'dir',  0x40),
+            (intc_exc.ResetSource.LOSS_OF_CLOCK,     'dir',  0x40),
+            (intc_exc.ResetSource.CORE_WATCHDOG,     'dir',  0x40),
+            (intc_exc.ResetSource.DEBUG,             'dir',  0x40),
+            (intc_exc.ResetSource.WATCHDOG,          'swtr', 0x20),
+            (intc_exc.ResetSource.SOFTWARE_SYSTEM,   'dir',  0x40),
+            (intc_exc.ResetSource.SOFTWARE_EXTERNAL, 'dir',  0x40),
+        ]
+
+        for source, test_field, test_value in source_tests:
+            # Queue a reset exception with the desired reset reason and step to 
+            # reset the emulator
+            self.emu.queueException(intc_exc.ResetException(source))
+            self.emu.stepi()
+
+            # Verify that the reset reason is now set correctly
+            self.assertEqual(self.emu.readMemValue(addr, size), test_value, msg=test_field)
+
+            for field, value in self.emu.ecsm.registers.mrsr.vsGetFields():
+                msg = '%s (%s)' % (field, test_field)
+                if field == test_field:
+                    self.assertEqual(value, 1, msg=msg)
+                else:
+                    self.assertEqual(value, 0, msg=msg)
+
+            # Writing 0 to all fields should not change anything
+            self.emu.writeMemory(addr, b'\x00' * size)
+
+            for field, value in self.emu.ecsm.registers.mrsr.vsGetFields():
+                msg = '%s (%s)' % (field, test_field)
+                if field == test_field:
+                    self.assertEqual(value, 1, msg=msg)
+                else:
+                    self.assertEqual(value, 0, msg=msg)
+
+            # Writing 1 to all fields should not change anything
+            self.emu.writeMemory(addr, b'\xFF' * size)
+
+            for field, value in self.emu.ecsm.registers.mrsr.vsGetFields():
+                msg = '%s (%s)' % (field, test_field)
+                if field == test_field:
+                    self.assertEqual(value, 1, msg=msg)
+                else:
+                    self.assertEqual(value, 0, msg=msg)
+
     def test_ecsm_fr11b_error(self):
         # The EEGR register can be used to force RAM write errors, 1-bit errors
         # should result in the REAR, RESR, REMR, REAT, REDRH, and REDRL

@@ -1580,7 +1580,7 @@ class BitFieldSPR(PeriphRegister):
     def init(self, emu):
         """
         Emulator initializer function, all registered module init() functions
-        are called when the emulator's init_core() function is called.
+        are called when the emulator processor core's init() function is called.
         """
         emu.addSprReadHandler(self._reg, self.read)
         emu.addSprWriteHandler(self._reg, self.write)

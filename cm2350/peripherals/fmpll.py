@@ -93,6 +93,13 @@ class FMPLL(MMIOPeripheral):
         self.registers.vsAddParseCallback('esyncr1', self.esyncr1Update)
         self.registers.vsAddParseCallback('esyncr2', self.esyncr2Update)
 
+    def init(self, emu):
+        super().init(emu)
+
+        # Register the system clocks
+        emu.registerClock('pll',   self.f_pll)
+        emu.registerClock('extal', self.f_extal)
+
     def reset(self, emu):
         """
         Return the FMPLL peripheral to a reset state

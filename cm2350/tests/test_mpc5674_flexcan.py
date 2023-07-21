@@ -1,4 +1,3 @@
-import gc
 import os
 import time
 import random
@@ -9,10 +8,11 @@ from .. import intc_exc
 from ..peripherals import flexcan
 from ..ppc_peripherals import ExternalIOClient
 
-from .helpers import MPC5674_Test
+from .helpers import MPC5674_Test, initLogging
 
 import logging
 logger = logging.getLogger(__name__)
+#initLogging(logger)
 
 
 FLEXCAN_DEVICES = (
@@ -207,11 +207,13 @@ def read_mb_data(emu, dev, mb):
 
 
 class MPC5674_FlexCAN_Test(MPC5674_Test):
+    accurate_timing = True
+
     def set_sysclk_240mhz(self):
         # Default PLL clock based on the PCB params selected for these tests is
         # 60 MHz
         self.assertEqual(self.emu.vw.config.project.MPC5674.FMPLL.extal, 40000000)
-        self.assertEqual(self.emu.fmpll.f_pll(), 60000000.0)
+        self.assertEqual(self.emu.getClock('pll'), 60000000.0)
 
         # The max clock for the real hardware is 764 MHz:
         #  (40 MHz * (50+16)) / ((4+1) * (1+1))
@@ -225,7 +227,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
         self.emu.writeMemValue(0xC3F80008, 0xF0070050, 4)
         # ESYNCR2[ERFD] = 1
         self.emu.writeMemValue(0xC3F8000C, 0x00000001, 4)
-        self.assertEqual(self.emu.fmpll.f_pll(), 240000000.0)
+        self.assertEqual(self.emu.getClock('pll'), 240000000.0)
 
         # Now set the SIU peripheral configuration to allow the CPU frequency to
         # be double the peripheral speed (otherwise the maximum bus/peripheral
@@ -234,7 +236,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
         # SYSDIV[IPCLKDIV] = 0
         # SYSDIV[BYPASS] = 1
         self.emu.writeMemValue(0xC3F909A0, 0x00000010, 4)
-        self.assertEqual(self.emu.siu.f_periph(), 120000000.0)
+        self.assertEqual(self.emu.getClock('periph'), 120000000.0)
 
     def set_baudrates(self):
         # Configure FMPLL to an appropriately reasonable example valid baud rate
@@ -350,7 +352,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
 
         # CAN A
         self.emu.can[0]._timer.start()
-        time.sleep(0.1)
+        self.emu.sleep(0.1)
         self.assertNotEqual(self.emu.readMemory(test_addrs[0], 4), b'\x00\x00\x00\x00')
         self.assertNotEqual(self.emu.readMemValue(test_addrs[0], 4), 0x00000000)
 
@@ -367,7 +369,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
 
         # CAN B
         self.emu.can[1]._timer.start()
-        time.sleep(0.1)
+        self.emu.sleep(0.1)
         self.assertNotEqual(self.emu.readMemory(test_addrs[1], 4), b'\x00\x00\x00\x00')
         self.assertNotEqual(self.emu.readMemValue(test_addrs[1], 4), 0x00000000)
 
@@ -384,7 +386,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
 
         # CAN C
         self.emu.can[2]._timer.start()
-        time.sleep(0.1)
+        self.emu.sleep(0.1)
         self.assertNotEqual(self.emu.readMemory(test_addrs[2], 4), b'\x00\x00\x00\x00')
         self.assertNotEqual(self.emu.readMemValue(test_addrs[2], 4), 0x00000000)
 
@@ -401,7 +403,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
 
         # CAN D
         self.emu.can[3]._timer.start()
-        time.sleep(0.1)
+        self.emu.sleep(0.1)
         self.assertNotEqual(self.emu.readMemory(test_addrs[3], 4), b'\x00\x00\x00\x00')
         self.assertNotEqual(self.emu.readMemValue(test_addrs[3], 4), 0x00000000)
 
@@ -797,11 +799,6 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             self.assertEqual(self.emu.can[idx].registers.ctrl.propseg, 4)
 
     def test_flexcan_timer(self):
-        # Because this test attempts to test the accuracy of emulated timers
-        # force the system time scaling factor to be 0.01 (100 real milliseconds
-        # to 1 emulated millisecond).
-        self.emu._systime_scaling = 0.1
-
         # Set standard bus speeds
         self.set_baudrates()
 
@@ -814,20 +811,18 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             mcr_addr = baseaddr + FLEXCAN_MCR_OFFSET
             timer_addr = baseaddr + FLEXCAN_TIMER_OFFSET
 
-            # Expected ticks:
-            expected_val = self.emu.can[idx].speed * 0.5 * self.emu._systime_scaling
+            # Expected ticks (limit to 16 bits):
+            expected_val = int(self.emu.can[idx].speed * 0.5) & 0xFFFF
 
-            # Margin of error is approximately 0.001 (so speed * 0.001 * 0.1)
-            # Because this is Dependant on the execution speed of the machine in
-            # question increase to 0.005
-            margin = self.emu.can[idx].speed * 0.005 * self.emu._systime_scaling
+            # Margin of error is approximately 0.005 (so speed * 0.005)
+            margin = self.emu.can[idx].speed * 0.005
 
             self.emu.writeMemValue(mcr_addr, 0, 4)
 
-            time.sleep(0.5)
+            self.emu.sleep(0.5)
             val = self.emu.readMemValue(timer_addr, 4)
 
-            self.assertAlmostEqual(val, expected_val, delta=margin, msg=devname)
+            self.assert_timer_within_range(val, expected_val, margin, maxval=0xFFFF, msg=devname)
 
             self.assertEqual(self.emu.can[idx].mode, flexcan.FLEXCAN_MODE.NORMAL, devname)
             self.emu.writeMemValue(mcr_addr, FLEXCAN_MCR_MDIS_MASK, 4)
@@ -835,11 +830,6 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             self.assertEqual(self.emu.readMemValue(timer_addr, 4), 0, devname)
 
     def test_flexcan_tx(self):
-        # Because this test attempts to test the accuracy of emulated timers
-        # force the system time scaling factor to be 0.01 (100 real milliseconds
-        # to 1 emulated millisecond).
-        self.emu._systime_scaling = 0.1
-
         # Set standard bus speeds
         self.set_baudrates()
 
@@ -866,7 +856,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             # Change mode to NORMAL, the timer now starts moving, but disable
             # self-reception of messages to make this test simpler
             self.emu.writeMemValue(mcr_addr, FLEXCAN_MCR_SRX_DIS_MASK, 4)
-            start_time = time.time()
+            start_time = self.emu.systime()
 
             # Place messages into each mailbox and mark the mailbox as inactive
             for mb in range(FLEXCAN_NUM_MBs):
@@ -888,7 +878,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             self.assertEqual(self._getPendingExceptions(), [], msg=devname)
 
             # Wait some short time to let the timer run for a bit
-            time.sleep(0.5)
+            self.emu.sleep(0.5)
 
             # For each CAN device only transmit from some of them:
             #   CAN A: tx in all mailboxes
@@ -897,20 +887,18 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             #   CAN D: tx in every fourth mailbox
             tx_mbs = list(range(0, FLEXCAN_NUM_MBs, dev+1))
 
-            # temporarily disable the garbage collector
-            gc.disable()
-
             # Randomize the tx mailbox order now
             random.shuffle(tx_mbs)
             tx_times = {}
+
+            # Zero out the timer register.
+            self.emu.writeMemValue(timer_addr, 0, 4)
+
             for mb in tx_mbs:
                 # Save the timestamp that the message was sent
                 addr = baseaddr + FLEXCAN_MB_OFFSET + (mb * FLEXCAN_MBx_SIZE)
                 self.emu.writeMemValue(addr, flexcan.FLEXCAN_CODE_TX_ACTIVE, 1)
-                tx_times[mb] = time.time()
-
-            # it can be re-enabled now
-            gc.enable()
+                tx_times[mb] = self.emu.systime()
 
             # Now read all queued transmit messages
             txd_msgs = self.emu.can[dev].getTransmittedObjs()
@@ -958,10 +946,10 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
                 else:
                     self.assertNotIn(mb, tx_mbs, msg=testmsg)
 
-            # It is expected that the calculated timestamp will be slightly
-            # larger than the actual timestamp because it is saved right
-            # after the memory write occurs that causes the transmit
-            margin = self.emu.can[dev].speed * 0.0100 * self.emu._systime_scaling
+            # Unfortunately the IO thread has a pretty wide variation on when 
+            # things are received and processed so the margin has to be larger 
+            # for this test.
+            margin = self.emu.can[dev].speed * 0.0300
 
             # Confirm that the order of the generated interrupts matches both
             # the order of the transmitted messages and the interrupt source for
@@ -973,8 +961,8 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
 
             # Iterate through the mailboxes based on the order messages were
             # transmitted
-            for mb in tx_mbs:
-                testmsg = '%s[%d]' % (devname, mb)
+            for i, mb in enumerate(tx_mbs):
+                testmsg = '%s[%d] (%d of %d)' % (devname, mb, i, len(tx_mbs))
 
                 # Confirm that the message contents are correct
                 txd_msg = next(txd_msgs_iter)
@@ -982,12 +970,12 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
 
                 # Confirm that the timestamp is accurate
                 tx_delay = tx_times[mb] - start_time
-                expected_ticks = int(self.emu.can[dev].speed * tx_delay * self.emu._systime_scaling) & 0xFFFF
+                expected_ticks = int(self.emu.can[dev].speed * tx_delay) & 0xFFFF
 
                 ts_offset = (mb * FLEXCAN_MBx_SIZE) + 2
                 timestamp = struct.unpack_from('>H', self.emu.can[dev].registers.mb.value, ts_offset)[0]
 
-                self.assertAlmostEqual(timestamp, expected_ticks, delta=margin, msg=testmsg)
+                self.assert_timer_within_range(timestamp, expected_ticks, margin, maxval=0xFFFF, msg=testmsg)
 
                 # Lastly, a mailbox should only have a corresponding interrupt
                 # if the interrupt mask is set
@@ -1017,11 +1005,6 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
                     self.assertEqual(self.emu.readMemValue(ts_addr, 2), 0, msg=testmsg)
 
     def test_flexcan_rx(self):
-        # Because this test attempts to test the accuracy of emulated timers
-        # force the system time scaling factor to be 0.01 (100 real milliseconds
-        # to 1 emulated millisecond).
-        self.emu._systime_scaling = 0.1
-
         # Set standard bus speeds
         self.set_baudrates()
 
@@ -1036,6 +1019,8 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             devname, baseaddr = FLEXCAN_DEVICES[dev]
             mcr_addr = baseaddr + FLEXCAN_MCR_OFFSET
             timer_addr = baseaddr + FLEXCAN_TIMER_OFFSET
+
+            logger.info('Starting RX test for %s', devname)
 
             # For each CAN device only enable some mailboxes to receive:
             #   CAN A: rx in all mailboxes
@@ -1066,7 +1051,6 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             # any of the valid receive mailboxes, these messages should all just
             # be discarded.
             for mb, msg in zip(rx_mbs, msgs):
-                addr = baseaddr + FLEXCAN_MB_OFFSET + (mb * FLEXCAN_MBx_SIZE)
                 self.emu.can[dev].processReceivedData(msg)
 
             # Loop through the mailboxes and ensure they are all still empty.
@@ -1094,7 +1078,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
 
             # Now move back to normal mode
             self.emu.writeMemValue(mcr_addr, 0, 4)
-            start_time = time.time()
+            start_time = self.emu.systime()
 
             last_mb = None
             last_timestamp = None
@@ -1102,16 +1086,16 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             # It is expected that the calculated timestamp will be slightly
             # larger than the actual timestamp because it is saved right
             # after the memory write occurs that causes the transmit
-            margin = self.emu.can[dev].speed * 0.0050 * self.emu._systime_scaling
+            margin = self.emu.can[dev].speed * 0.0050
 
-            # temporarily disable the garbage collector
-            gc.disable()
+            # Zero out the timer register.
+            self.emu.writeMemValue(timer_addr, 0, 4)
 
             # Call the processReceivedData function to mimic what the emulator
             # calls when a message is received during normal execution.  Because
             # no filtering or masking is set up the messages should be placed
             # into the first empty mailbox
-            for mb, msg in zip(rx_mbs, msgs):
+            for i, (mb, msg) in enumerate(zip(rx_mbs, msgs)):
                 testmsg = '%s[%d]' % (devname, mb)
                 addr = baseaddr + FLEXCAN_MB_OFFSET + (mb * FLEXCAN_MBx_SIZE)
 
@@ -1119,12 +1103,13 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
 
                 # Confirm that the timestamp is accurate. The timer has probably
                 # wrapped by now so ensure it is limited to 16 bits
-                rx_delay = time.time() - start_time
-                expected_ticks = int(self.emu.can[dev].speed * rx_delay * self.emu._systime_scaling) & 0xFFFF
+                rx_delay = self.emu.systime() - start_time
+                expected_ticks = int(self.emu.can[dev].speed * rx_delay) & 0xFFFF
 
                 ts_offset = (mb * FLEXCAN_MBx_SIZE) + 2
                 timestamp = struct.unpack_from('>H', self.emu.can[dev].registers.mb.value, ts_offset)[0]
-                self.assertAlmostEqual(timestamp, expected_ticks, delta=margin, msg=testmsg)
+                logger.info('msg %d: timestamp = 0x%04x, expected = 0x%04x', i, timestamp, expected_ticks)
+                self.assert_timer_within_range(timestamp, expected_ticks, margin, maxval=0xFFFF, msg=testmsg)
 
                 last_mb = mb
                 last_timestamp = timestamp
@@ -1140,9 +1125,6 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
                     self.assertEqual(self._getPendingExceptions(), [get_int(dev, mb)], msg=testmsg)
                 else:
                     self.assertEqual(self._getPendingExceptions(), [], msg=testmsg)
-
-            # it can be re-enabled now
-            gc.enable()
 
             # There should be no more interrupts pending
             self.assertEqual(self._getPendingExceptions(), [], msg=testmsg)
@@ -1197,12 +1179,12 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             # And ensure that there are no new interrupts
             self.assertEqual(self._getPendingExceptions(), [], msg=testmsg)
 
-    def test_flexcan_rx_fifo(self):
-        # Because this test attempts to test the accuracy of emulated timers
-        # force the system time scaling factor to be 0.01 (100 real milliseconds
-        # to 1 emulated millisecond).
-        self.emu._systime_scaling = 0.1
+        self.emu.sleep(2)
 
+        # Quick sanity check see that all exceptions have been properly handled
+        self.assertEqual(self._getPendingExceptions(), [], msg=testmsg)
+
+    def test_flexcan_rx_fifo(self):
         # Set standard bus speeds
         self.set_baudrates()
 
@@ -1232,7 +1214,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             self.emu.writeMemValue(mcr_addr, FLEXCAN_MCR_FEN_MASK, 4)
             self.assertEqual(self.emu.can[dev].mode, flexcan.FLEXCAN_MODE.NORMAL, devname)
             self.assertEqual(self.emu.can[dev].registers.mcr.fen, 1, devname)
-            start_time = time.time()
+            start_time = self.emu.systime()
 
             # Generate 6 messages to send
             msgs = [generate_msg() for i in range(6)]
@@ -1240,10 +1222,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             # It is expected that the calculated timestamp will be slightly
             # larger than the actual timestamp because it is saved right
             # after the memory write occurs that causes the transmit
-            margin = self.emu.can[dev].speed * 0.0050 * self.emu._systime_scaling
-
-            # temporarily disable the garbage collector
-            gc.disable()
+            margin = self.emu.can[dev].speed * 0.0050
 
             # The RxFIFO can hold 6 messages, each received message should
             # generate a RxFIFO Msg Available interrupt (MB5), when the last
@@ -1253,8 +1232,8 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             for i in range(len(msgs)):
                 testmsg = '%s RxFIFO[%d]' % (devname, i)
                 self.emu.can[dev].processReceivedData(msgs[i])
-                rx_times.append(time.time())
-                time.sleep(0.1)
+                rx_times.append(self.emu.systime())
+                self.emu.sleep(0.1)
 
                 # There should be one RxFIFO Msg Available interrupt (MB5) when
                 # the first message is sent, then an RxFIFO Warning interrupt
@@ -1313,7 +1292,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             # Send another message and ensure the RxFIFO Warning is set again
             msgs.append(generate_msg())
             self.emu.can[dev].processReceivedData(msgs[-1])
-            rx_times.append(time.time())
+            rx_times.append(self.emu.systime())
 
             self.assertEqual(self._getPendingExceptions(), [get_int(dev, 6)], msg=testmsg)
             iflag1_val = self.emu.readMemValue(baseaddr + FLEXCAN_IFLAG1_OFFSET, 4)
@@ -1341,18 +1320,15 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             self.assertEqual(len(rx_msgs), len(msgs), msg=devname)
             self.assertEqual(len(rx_msgs), len(rx_times), msg=devname)
 
-            # it can be re-enabled now
-            gc.enable()
-
             # Go through the received messages and timestamps and ensure that
             # messages were received correctly.
             for i in range(len(msgs)):
                 testmsg = '%s RxFIFO[%d]' % (devname, i)
                 rx_delay = rx_times[i] - start_time
-                expected_ticks = int(self.emu.can[dev].speed * rx_delay * self.emu._systime_scaling) & 0xFFFF
+                expected_ticks = int(self.emu.can[dev].speed * rx_delay) & 0xFFFF
 
                 timestamp = struct.unpack_from('>H', rx_msgs[i], 2)[0]
-                self.assertAlmostEqual(timestamp, expected_ticks, delta=margin, msg=testmsg)
+                self.assert_timer_within_range(timestamp, expected_ticks, margin, maxval=0xFFFF, msg=testmsg)
 
                 # Now that the timestamp has been confirmed to be within the
                 # expected range, ensure that the received message in the
@@ -1378,6 +1354,8 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
 
 
 class MPC5674_FlexCAN_RealIO(MPC5674_Test):
+    accurate_timing = True
+
     args = [
         '-c',
         '-O', 'project.MPC5674.FlexCAN_A.port=10001',
@@ -1390,7 +1368,7 @@ class MPC5674_FlexCAN_RealIO(MPC5674_Test):
         # Default PLL clock based on the PCB params selected for these tests is
         # 60 MHz
         self.assertEqual(self.emu.vw.config.project.MPC5674.FMPLL.extal, 40000000)
-        self.assertEqual(self.emu.fmpll.f_pll(), 60000000.0)
+        self.assertEqual(self.emu.getClock('pll'), 60000000.0)
 
         # The max clock for the real hardware is 764 MHz:
         #  (40 MHz * (50+16)) / ((4+1) * (1+1))
@@ -1404,7 +1382,7 @@ class MPC5674_FlexCAN_RealIO(MPC5674_Test):
         self.emu.writeMemValue(0xC3F80008, 0xF0070050, 4)
         # ESYNCR2[ERFD] = 1
         self.emu.writeMemValue(0xC3F8000C, 0x00000001, 4)
-        self.assertEqual(self.emu.fmpll.f_pll(), 240000000.0)
+        self.assertEqual(self.emu.getClock('pll'), 240000000.0)
 
         # Now set the SIU peripheral configuration to allow the CPU frequency to
         # be double the peripheral speed (otherwise the maximum bus/peripheral
@@ -1413,7 +1391,7 @@ class MPC5674_FlexCAN_RealIO(MPC5674_Test):
         # SYSDIV[IPCLKDIV] = 0
         # SYSDIV[BYPASS] = 1
         self.emu.writeMemValue(0xC3F909A0, 0x00000010, 4)
-        self.assertEqual(self.emu.siu.f_periph(), 120000000.0)
+        self.assertEqual(self.emu.getClock('periph'), 120000000.0)
 
     def set_baudrates(self):
         # Configure FMPLL to an appropriately reasonable example valid baud rate
@@ -1675,9 +1653,6 @@ class MPC5674_FlexCAN_RealIO(MPC5674_Test):
 
                 # The message has not yet been processed by the CAN peripheral
                 # which means that the exception count is still 0
-                # TODO: this may be 0 or 1 depending on if the exception is
-                # queued yet
-                #self.assertEqual(len(self.emu.mcu_intc.pending), 0, devname)
                 self.assertEqual(self.emu.intc._cur_exc, None, devname)
 
                 # one more instruction

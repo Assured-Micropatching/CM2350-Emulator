@@ -206,7 +206,7 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
         if addr in self._bpdata:
             raise Exception('Cannot add breakpoint that already exists @ 0x%x' % addr)
 
-        logger.debug('Adding new breakpoint: -1x%x', addr)
+        logger.debug('Adding new breakpoint: 0x%x', addr)
         origbytes = self._bpdata.get(addr)
         if origbytes:
             # Error, this breakpoint is already set

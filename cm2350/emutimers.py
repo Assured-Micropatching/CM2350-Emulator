@@ -611,6 +611,9 @@ class ScaledEmuTimeCore(EmuTimeCore):
         else:
             return None
 
+    def tick(self):
+        self._ticks += 1
+
     def _tb_run(self):
         '''
         Timer management thread.

@@ -389,6 +389,10 @@ class DSPI(SPIBus):
         # Update the state of the peripheral based on MCR writes
         self.registers.vsAddParseCallback('mcr', self.mcrUpdate)
 
+        # If TFFF is cleared in SR and the Tx queue is not full yet the TFFF 
+        # event should be set again
+        self.registers.vsAddParseCallback('sr', self.srUpdate)
+
     def reset(self, emu):
         """
         Handle standard core reset and initialization, after the normal reset
@@ -569,6 +573,12 @@ class DSPI(SPIBus):
                 self.registers.sr.vsOverrideValue('txnxtptr', max(fifo_size-1, 0))
                 self.event('tfff', fifo_size != max_fifo_size)
 
+    def isTxFifoFull(self):
+        if self.registers.mcr.dis_txf == 0:
+            return self.registers.sr.txctr >= DSPI_FIFO_SIZE
+        else:
+            return self.registers.sr.txctr >= 1
+
     def popRx(self):
         """
         Return 4 bytes of data from the Rx FIFO, and remove 1 item from the Rx
@@ -688,6 +698,12 @@ class DSPI(SPIBus):
             self.registers.mcr.clr_rxf = 0
 
         self.updateMode()
+
+    def srUpdate(self, thing):
+        # If the TFFF flag was cleared and there is still space in the transmit 
+        # queue, re-set TFFF.
+        if self.registers.sr.tfff == 0 and not self.isTxFifoFull():
+            self.event('tfff', 1)
 
     def updateMode(self):
         """

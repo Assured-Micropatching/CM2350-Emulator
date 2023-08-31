@@ -8,7 +8,7 @@ import envi.archs.ppc.emu as eape
 from .mpc5674 import MPC5674_Emulator
 from . import project
 from . import ppc_peripherals
-from .peripherals.dspi import SPI_CS
+from .peripherals.dspi import PlaceholderSPIDevice
 
 import logging
 logger = logging.getLogger(__name__)
@@ -30,8 +30,8 @@ class ASIC_SPI_CMD(enum.IntEnum):
 
 
 class ASIC(ppc_peripherals.BusPeripheral):
-    def __init__(self, emu):
-        ppc_peripherals.BusPeripheral.__init__(self, emu, 'ASIC', 'DSPI_A', SPI_CS.CS0)
+    def __init__(self, emu, bus, cs):
+        ppc_peripherals.BusPeripheral.__init__(self, emu, 'ASIC', bus, cs)
 
         # The watchdog timer has a resolution of 1 tick == 512 microseconds
         # which equals a frequency of 1953.125 Hz
@@ -46,8 +46,8 @@ class ASIC(ppc_peripherals.BusPeripheral):
             0x00: 0x303F,
 
             # register 2 is the watchdog timer
-            0x02: 0xFF,
-            0x03: 0x00,
+            0x02: 0x00FF,
+            0x03: 0x0000,
         }
 
         # Start the watchdog now
@@ -62,7 +62,7 @@ class ASIC(ppc_peripherals.BusPeripheral):
         self.emu.queueException(intc_exc.ResetException(intc_exc.ResetSource.EXTERNAL))
 
     def read(self, addr):
-        return self.registers.get(addr)
+        return self.registers.get(addr, 0x00)
 
     def write(self, cmd, addr, value):
         # special case, the external watchdog is reset by writing an alternating 
@@ -101,7 +101,7 @@ class ASIC(ppc_peripherals.BusPeripheral):
         if self.addr is not None:
             self.write(ASIC_SPI_CMD.WRITE_SEQ, self.addr, data)
             self.addr = None
-            return None
+            return 0x0000
 
         # first two bits indicate read/write upper/lower byte
         # next six bits are the address
@@ -117,15 +117,12 @@ class ASIC(ppc_peripherals.BusPeripheral):
 
         elif cmd in (ASIC_SPI_CMD.WRITE_LOWER, ASIC_SPI_CMD.WRITE_UPPER):
             self.write(cmd, addr, data & 0x00FF)
-            return None
+            return 0x0000
 
         elif cmd == ASIC_SPI_CMD.WRITE_SEQ:
             # no data to write yet, just save the address
             self.addr = addr
-            return None
-
-    def transmit(self, value):
-        self.emu.putIO(self.bus.devname, value)
+            return 0x0000
 
 
 class CM2350:
@@ -176,8 +173,43 @@ class CM2350:
         self.emu.gpio(91, self.emu.vw.config.project.CM2350.p91)
         self.emu.gpio(92, self.emu.vw.config.project.CM2350.p92)
 
-        # Register the ASIC as a SPI peripheral
-        self.asic = ASIC(self.emu)
+        # Register the ASIC as a SPI peripheral and fill the rest of the SPI 
+        # buses and chip select optikons with placeholder devices, not all of 
+        # these may be used but this ensures that any attempt to read data from 
+        # a SPI device will always return a value.
+        self.spi_devices = [
+            # SPI A
+            ASIC(self.emu, 'DSPI_A', 0),
+            PlaceholderSPIDevice(self.emu, 'DeviceA1', 'DSPI_A', 1, 0x4141),
+            PlaceholderSPIDevice(self.emu, 'DeviceA2', 'DSPI_A', 2, 0x4141),
+            PlaceholderSPIDevice(self.emu, 'DeviceA3', 'DSPI_A', 3, 0x4141),
+            PlaceholderSPIDevice(self.emu, 'DeviceA4', 'DSPI_A', 4, 0x4141),
+            PlaceholderSPIDevice(self.emu, 'DeviceA5', 'DSPI_A', 5, 0x4141),
+
+            # SPI B
+            PlaceholderSPIDevice(self.emu, 'DeviceB0', 'DSPI_B', 0, 0x4141),
+            PlaceholderSPIDevice(self.emu, 'DeviceB1', 'DSPI_B', 1, 0x4141),
+            PlaceholderSPIDevice(self.emu, 'DeviceB2', 'DSPI_B', 2, 0x4141),
+            PlaceholderSPIDevice(self.emu, 'DeviceB3', 'DSPI_B', 3, 0x4141),
+            PlaceholderSPIDevice(self.emu, 'DeviceB4', 'DSPI_B', 4, 0x4141),
+            PlaceholderSPIDevice(self.emu, 'DeviceB5', 'DSPI_B', 5, 0x4141),
+
+            # SPI C
+            PlaceholderSPIDevice(self.emu, 'DeviceC0', 'DSPI_C', 0, 0x4141),
+            PlaceholderSPIDevice(self.emu, 'DeviceC1', 'DSPI_C', 1, 0x4141),
+            PlaceholderSPIDevice(self.emu, 'DeviceC2', 'DSPI_C', 2, 0x4141),
+            PlaceholderSPIDevice(self.emu, 'DeviceC3', 'DSPI_C', 3, 0x4141),
+            PlaceholderSPIDevice(self.emu, 'DeviceC4', 'DSPI_C', 4, 0x4141),
+            PlaceholderSPIDevice(self.emu, 'DeviceC5', 'DSPI_C', 5, 0x4141),
+
+            # SPI D
+            PlaceholderSPIDevice(self.emu, 'DeviceD0', 'DSPI_D', 0, 0x4141),
+            PlaceholderSPIDevice(self.emu, 'DeviceD1', 'DSPI_D', 1, 0x4141),
+            PlaceholderSPIDevice(self.emu, 'DeviceD2', 'DSPI_D', 2, 0x4141),
+            PlaceholderSPIDevice(self.emu, 'DeviceD3', 'DSPI_D', 3, 0x4141),
+            PlaceholderSPIDevice(self.emu, 'DeviceD4', 'DSPI_D', 4, 0x4141),
+            PlaceholderSPIDevice(self.emu, 'DeviceD5', 'DSPI_D', 5, 0x4141),
+        ]
 
     def __del__(self):
         self.shutdown()

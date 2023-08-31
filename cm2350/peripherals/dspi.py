@@ -12,9 +12,9 @@ logger = logging.getLogger(__name__)
 
 
 __all__  = [
-    'DSPI',
-    'SPI_CS',
+    'PlaceholderSPIDevice',
     'SPIBus',
+    'DSPI',
 ]
 
 
@@ -78,6 +78,15 @@ PUSHR_EOQ_SHIFT      = 27
 PUSHR_CTCNT_SHIFT    = 26
 PUSHR_PCS_SHIFT      = 16
 PUSHR_DATA_SHIFT     = 0
+
+
+# SR/RSER big masks
+RSER_TCF_MASK       = 0x80000000
+RSER_EOQF_MASK      = 0x10000000
+RSER_TFUF_MASK      = 0x08000000
+RSER_TFFF_MASK      = 0x02000000
+RSER_RFOF_MASK      = 0x00080000
+RSER_RFDF_MASK      = 0x00020000
 
 
 class DSPI_MODE(enum.IntEnum):
@@ -300,13 +309,26 @@ class DSPI_REGISTERS(PeripheralRegisterSet):
         self.dsicr1 = (DSPI_DSICR1_OFFSET, DSPI_x_DSICR1())
 
 
-class SPI_CS(enum.IntEnum):
-    CS0 = 0b000001
-    CS1 = 0b000010
-    CS2 = 0b000100
-    CS3 = 0b001000
-    CS4 = 0b010000
-    CS5 = 0b100000
+class PlaceholderSPIDevice(BusPeripheral):
+    """
+    A placeholder SPI device that always returns the same value no matter what
+    """
+    def __init__(self, emu, name, bus, cs, value, *args, **kwargs):
+        BusPeripheral.__init__(self, emu, name, bus, cs)
+        self.value = value
+
+    def receive(self, data):
+        return self.value
+
+
+SPI_CS2PCS = {
+    0: 0b000001,
+    1: 0b000010,
+    2: 0b000100,
+    3: 0b001000,
+    4: 0b010000,
+    5: 0b100000,
+}
 
 
 class SPIBus(ExternalIOPeripheral):
@@ -330,7 +352,7 @@ class SPIBus(ExternalIOPeripheral):
         self.devices = {}
 
     def registerBusPeripheral(self, device, cs):
-        self.devices[SPI_CS(cs)] = device
+        self.devices[SPI_CS2PCS[cs]] = device
 
     def transmit(self, cs, value):
         device = self.devices.get(cs)
@@ -341,7 +363,7 @@ class SPIBus(ExternalIOPeripheral):
                 logger.log(e_cmn.EMULOG, '%s <- %s: 0x%x', self.devname, device.name, result)
                 device.transmit(result)
         else:
-            logger.info('%s TRANSMIT: 0x%x', self.devname, value)
+            logger.info('%s TRANSMIT PCS%d: 0x%x (NO DEVICE)', self.devname, cs, value)
 
 
 class DSPI(SPIBus):
@@ -461,6 +483,9 @@ class DSPI(SPIBus):
 
             data = (b'\x00' * idx) + bytez + (b'\x00' * (DSPI_MSG_SIZE-size))
             self.pushTx(data)
+
+        elif offset == DSPI_RSER_OFFSET:
+            self.handleWriteRSER(bytez)
 
         else:
             super()._setPeriphReg(offset, bytez)
@@ -704,6 +729,47 @@ class DSPI(SPIBus):
         # queue, re-set TFFF.
         if self.registers.sr.tfff == 0 and not self.isTxFifoFull():
             self.event('tfff', 1)
+
+    def handleWriteRSER(self, data):
+        new_value = e_bits.parsebytes(data, 0, len(data), bigend=self.emu.getEndian())
+        old_value = e_bits.parsebytes(self.registers.rser.vsEmit(), 0, 4, bigend=self.emu.getEndian())
+
+        # Update the current RSER register based on the new value
+        self.registers.rser.vsParse(data)
+
+        logger.debug('updating RSER 0x%08x -> 0x%08x', old_value, new_value)
+
+        # Check if there are any flags now set that used to be clear, 
+        # temporarily clear the status flag and signal the event.
+        if not old_value & RSER_TCF_MASK and new_value & RSER_TCF_MASK and \
+                self.registers.sr.tcf:
+            self.registers.sr.vsOverrideValue('tcf', 0)
+            self.event('tcf', 1)
+
+        if not old_value & RSER_EOQF_MASK and new_value & RSER_EOQF_MASK and \
+                self.registers.sr.eoqf:
+            self.registers.sr.vsOverrideValue('eoqf', 0)
+            self.event('eoqf', 1)
+
+        if not old_value & RSER_TFUF_MASK and new_value & RSER_TFUF_MASK and \
+                self.registers.sr.tfuf:
+            self.registers.sr.vsOverrideValue('tfuf', 0)
+            self.event('tfuf', 1)
+
+        if not old_value & RSER_TFFF_MASK and new_value & RSER_TFFF_MASK and \
+                self.registers.sr.tfff:
+            self.registers.sr.vsOverrideValue('tfff', 0)
+            self.event('tfff', 1)
+
+        if not old_value & RSER_RFOF_MASK and new_value & RSER_RFOF_MASK and \
+                self.registers.sr.rfof:
+            self.registers.sr.vsOverrideValue('rfof', 0)
+            self.event('rfof', 1)
+
+        if not old_value & RSER_RFDF_MASK and new_value & RSER_RFDF_MASK and \
+                self.registers.sr.rfdf:
+            self.registers.sr.vsOverrideValue('rfdf', 0)
+            self.event('rfdf', 1)
 
     def updateMode(self):
         """

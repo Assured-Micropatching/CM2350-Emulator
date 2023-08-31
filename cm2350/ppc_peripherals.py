@@ -1088,10 +1088,9 @@ class BusPeripheral:
         self.bus.registerBusPeripheral(self, *args, **kwargs)
 
     def receive(self, value):
-        logger.info('%s -> %s: 0x%x', self.bus.devname, self.name, value)
+        raise NotImplementedError
 
     def transmit(self, value):
-        logger.info('%s <- %s: 0x%x', self.bus.devname, self.name, value)
         self.emu.putIO(self.bus.devname, value)
 
 

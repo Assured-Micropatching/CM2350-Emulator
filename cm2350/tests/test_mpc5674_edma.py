@@ -1053,9 +1053,8 @@ class MPC5674_eDMA_Test(MPC5674_Test):
         # Set up the DSPI A receive event (eDMA A, channel 33)
         # Configure the TCD to do a circular queue of 4 2-byte entries @
         # 0x40000000
-        tcd = TCD(self.emu, start=0, saddr=dspi_a_popr_addr, ssize=2, slast=0,
-                  daddr=0x40000000, dsize=2, dmod=3, nbytes=2, biter=1, citer=1,
-                  dlast_sga=2)
+        tcd = TCD(self.emu, start=0, saddr=dspi_a_popr_addr, ssize=2, soff=2, slast=-2,
+                  daddr=0x40000000, dsize=2, doff=0, dmod=3, nbytes=2, biter=1, citer=1, dlast_sga=2)
         tcd_addr = EDMA_DEVICES[0][1] + EDMA_TCDx_OFFSET + (32 * 33)
         tcd.write(self.emu, tcd_addr)
 

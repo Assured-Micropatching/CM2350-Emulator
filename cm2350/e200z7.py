@@ -684,7 +684,6 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
             self.stepi()
 
     def queueException(self, exception):
-        logger.debug('queuing expcetion %s', exception)
         self.mcu_intc.queueException(exception)
 
     def isExceptionActive(self, exctype):

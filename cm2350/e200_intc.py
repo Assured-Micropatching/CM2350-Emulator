@@ -118,7 +118,11 @@ class e200INTC:
 
         exception is expected to be a subclass of one of the PriorityExceptions
         '''
-        if not exception.shouldHandle(self.emu):
+        if exception in self.pending:
+            logger.warning('Discarding duplicate exception: %r', exception)
+            return
+
+        elif not exception.shouldHandle(self.emu):
             # skip queuing this exception, we don't handle it
             logger.warning('saving exception: %r', exception)
 

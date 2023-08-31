@@ -718,7 +718,7 @@ class eDMA(MMIOPeripheral):
 
     def handleWriteERQRL(self, value):
         new_bits = value & ~self.registers.erqrl
-        self.registers.erqrh = value
+        self.registers.erqrl = value
 
         # Attempt to start any new transfers
         for channel in gen_set_bits(new_bits):
@@ -1249,23 +1249,26 @@ class eDMA(MMIOPeripheral):
         # Deactivate this channel
         config.tcd.active = 0
 
+        # Adjust the source and destination addresses, this is done at the end 
+        # of each minor loop regardless of if this is the last minor loop or 
+        # not.
+        #
+        #TODO mloff
+        saddr = config.tcd.saddr + config.tcd.soff
+        if config.tcd.smod:
+            config.tcd.saddr = (config.tcd.saddr & ~config.smod_mask) | \
+                    (saddr & config.smod_mask)
+        else:
+            config.tcd.saddr = saddr
+
+        daddr = config.tcd.daddr + config.tcd.doff
+        if config.tcd.dmod:
+            config.tcd.daddr = (config.tcd.daddr & ~config.dmod_mask) | \
+                    (daddr & config.dmod_mask)
+        else:
+            config.tcd.daddr = daddr
+
         if config.citer != 0:
-            # Adjust the source and destination addresses
-            #TODO mloff
-            saddr = config.tcd.saddr + config.tcd.soff
-            if config.tcd.smod:
-                config.tcd.saddr = (config.tcd.saddr & ~config.smod_mask) | \
-                        (saddr & config.smod_mask)
-            else:
-                config.tcd.saddr = saddr
-
-            daddr = config.tcd.daddr + config.tcd.doff
-            if config.tcd.dmod:
-                config.tcd.daddr = (config.tcd.daddr & ~config.dmod_mask) | \
-                        (daddr & config.dmod_mask)
-            else:
-                config.tcd.daddr = daddr
-
             # Check if an interrupt needs to be signaled for half-way
             # completing the transfer
             if config.tcd.int_half and \

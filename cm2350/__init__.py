@@ -21,6 +21,23 @@ __all__ = [
 
 DEFAULT_PROJECT_NAME = 'AMP'
 
+ASIC_FAULT_REG          = 0x00
+ASIC_WDOG_TIMEOUT_REG   = 0x02
+ASIC_WDOG_SERVICE_REG   = 0x03
+
+ASIC_WDOG_TIMEOUT_MASK  = 0x00FF
+ASIC_WDOG_RESET_MASK    = 0x0100
+
+ASIC_WDOG_PAT1          = 0x0055
+ASIC_WDOG_PAT2          = 0x00AA
+
+ASIC_SPI_CMD_MASK   = 0xC000
+ASIC_SPI_CMD_SHIFT  = 14
+ASIC_SPI_ADDR_MASK  = 0x3F00
+ASIC_SPI_ADDR_SHIFT = 8
+ASIC_SPI_DATA_MASK  = 0x3F00
+ASIC_SPI_DATA_SHIFT = 8
+
 
 class ASIC_SPI_CMD(enum.IntEnum):
     READ        = 0b00
@@ -43,19 +60,19 @@ class ASIC(ppc_peripherals.BusPeripheral):
 
         self.registers = {
             # register 0 is the fault register
-            0x00: 0x303F,
+            ASIC_FAULT_REG:         0x303F,
 
             # register 2 is the watchdog timer
-            0x02: 0x00FF,
-            0x03: 0x0000,
+            ASIC_WDOG_TIMEOUT_REG:  0x00FF,
+            ASIC_WATCHDOG_REG:      0x0000,
         }
 
         # Start the watchdog now
-        self.watchdog.start(ticks=self.registers[0x02])
+        self.watchdog.start(ticks=self.registers[ASIC_WDOG_TIMEOUT_REG] & ASIC_WDOG_TIMEOUT_MASK)
 
     def asicWatchdogHandler(self):
         # mark the watchdog reset bit
-        self.registers[0x02] |= 0x0100
+        self.registers[ASIC_WDOG_TIMEOUT_REG] |= ASIC_WDOG_RESET_MASK
 
         print('**************\nEXTERNAL WATCHDOG RESET\n**************')
         logger.info('EXTERNAL WATCHDOG RESET')
@@ -67,10 +84,11 @@ class ASIC(ppc_peripherals.BusPeripheral):
     def write(self, cmd, addr, value):
         # special case, the external watchdog is reset by writing an alternating 
         # pattern of 0x0055/0x00AA. 
-        if addr == 0x03:
-            if self.registers[addr] == 0x55 and value == 0xAA:
+        if addr == ASIC_WDOG_SERVICE_REG:
+            if self.registers[addr] == ASIC_WDOG_PAT1 and \
+                    value == ASIC_WDOG_PAT2:
                 # reset the watchdog, the ticks are in register 2
-                self.watchdog.start(ticks=self.registers[0x02])
+                self.watchdog.start(ticks=self.registers[ASIC_WDOG_TIMEOUT_REG] & ASIC_WDOG_TIMEOUT_MASK)
 
         if cmd == ASIC_SPI_CMD.WRITE_LOWER:
             cur_val = self.registers.get(addr, 0)
@@ -97,17 +115,19 @@ class ASIC(ppc_peripherals.BusPeripheral):
             raise Exception('invalid cmd %s to write %d %x' % (cmd, addr, value))
 
     def receive(self, data):
-        # If sequential write mode, the two
+        # If sequential write mode, and an address has already been written the 
+        # upper and lower byte are both in this message.
         if self.addr is not None:
             self.write(ASIC_SPI_CMD.WRITE_SEQ, self.addr, data)
+            # Clear the saved address
             self.addr = None
             return 0x0000
 
         # first two bits indicate read/write upper/lower byte
         # next six bits are the address
         # lower 8 bits are the value
-        cmd = ASIC_SPI_CMD(data >> 14)
-        addr = (data & 0x3F00) >> 8
+        cmd = ASIC_SPI_CMD((data & ASIC_SPI_CMD_MASK) >> ASIC_SPI_CMD_MASK)
+        addr = (data & ASIC_SPI_ADDR_MASK) >> ASIC_SPI_ADDR_MASK
 
         if cmd == ASIC_SPI_CMD.READ:
             value = self.read(addr)
@@ -115,8 +135,8 @@ class ASIC(ppc_peripherals.BusPeripheral):
                         self.bus.devname, self.name, addr, value)
             return value
 
-        elif cmd in (ASIC_SPI_CMD.WRITE_LOWER, ASIC_SPI_CMD.WRITE_UPPER):
-            self.write(cmd, addr, data & 0x00FF)
+        elif cmd == ASIC_SPI_CMD.WRITE_LOWER, ASIC_SPI_CMD.WRITE_UPPER):
+            self.write(cmd, addr, data & ASIC_SPI_DATA_MASK)
             return 0x0000
 
         elif cmd == ASIC_SPI_CMD.WRITE_SEQ:

@@ -848,6 +848,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             msgs = [generate_msg() for i in range(FLEXCAN_NUM_MBs)]
 
             # Only enable some of the mailbox interrupts: 0-7, 24-31, 32-47
+            int_enabled_mbs = list(range(0, 8)) + list(range(24, 48))
             imask1_val = 0xFF0000FF
             imask2_val = 0x0000FFFF
             self.emu.writeMemValue(baseaddr + FLEXCAN_IMASK1_OFFSET, imask1_val, 4)
@@ -889,11 +890,27 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
 
             # Randomize the tx mailbox order now
             random.shuffle(tx_mbs)
+
+            # Duplicate exception events are not triggered even if the mailbox 
+            # is different, the software will use one exception handler to check 
+            # and service all mailboxes that are covered by a particular 
+            # interrupt source.
+            tx_int_srcs = []
+            for mb in tx_mbs:
+                # Only add interrupt sources if the interrupts are enabled for 
+                # this mailbox
+                if mb in int_enabled_mbs:
+                    exc = get_int(dev, mb)
+                    # Don't build duplicate interrupt sources into the list
+                    if exc not in tx_int_srcs:
+                        tx_int_srcs.append(exc)
+
             tx_times = {}
 
             # Zero out the timer register.
             self.emu.writeMemValue(timer_addr, 0, 4)
 
+            # Send the messages
             for mb in tx_mbs:
                 # Save the timestamp that the message was sent
                 addr = baseaddr + FLEXCAN_MB_OFFSET + (mb * FLEXCAN_MBx_SIZE)
@@ -951,12 +968,16 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
             # for this test.
             margin = self.emu.can[dev].speed * 0.0300
 
+            time.sleep(1)
+
             # Confirm that the order of the generated interrupts matches both
             # the order of the transmitted messages and the interrupt source for
             # the Tx mailbox
             excs = self._getPendingExceptions()
-            self.assertEqual(len(excs), len(tx_int_mbs), msg=devname)
-            exc_iter = iter(excs)
+
+            self.assertEqual(len(excs), len(tx_int_srcs), msg=devname)
+            self.assertEqual(excs, tx_int_srcs, msg=devname)
+
             txd_msgs_iter = iter(txd_msgs)
 
             # Iterate through the mailboxes based on the order messages were
@@ -976,11 +997,6 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
                 timestamp = struct.unpack_from('>H', self.emu.can[dev].registers.mb.value, ts_offset)[0]
 
                 self.assert_timer_within_range(timestamp, expected_ticks, margin, maxval=0xFFFF, msg=testmsg)
-
-                # Lastly, a mailbox should only have a corresponding interrupt
-                # if the interrupt mask is set
-                if mb in tx_int_mbs:
-                    self.assertEqual(next(exc_iter), get_int(dev, mb), msg=testmsg)
 
             # Now ensure that all mailboxes that were not in the list are still
             # inactive

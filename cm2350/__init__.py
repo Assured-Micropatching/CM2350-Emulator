@@ -135,7 +135,7 @@ class ASIC(ppc_peripherals.BusPeripheral):
                         self.bus.devname, self.name, addr, value)
             return value
 
-        elif cmd == ASIC_SPI_CMD.WRITE_LOWER, ASIC_SPI_CMD.WRITE_UPPER):
+        elif cmd in (ASIC_SPI_CMD.WRITE_LOWER, ASIC_SPI_CMD.WRITE_UPPER):
             self.write(cmd, addr, data & ASIC_SPI_DATA_MASK)
             return 0x0000
 

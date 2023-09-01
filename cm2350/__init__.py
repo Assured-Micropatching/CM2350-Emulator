@@ -35,8 +35,8 @@ ASIC_SPI_CMD_MASK   = 0xC000
 ASIC_SPI_CMD_SHIFT  = 14
 ASIC_SPI_ADDR_MASK  = 0x3F00
 ASIC_SPI_ADDR_SHIFT = 8
-ASIC_SPI_DATA_MASK  = 0x3F00
-ASIC_SPI_DATA_SHIFT = 8
+ASIC_SPI_DATA_MASK  = 0x00FF
+ASIC_SPI_DATA_SHIFT = 0
 
 
 class ASIC_SPI_CMD(enum.IntEnum):
@@ -126,7 +126,7 @@ class ASIC(ppc_peripherals.BusPeripheral):
         # first two bits indicate read/write upper/lower byte
         # next six bits are the address
         # lower 8 bits are the value
-        cmd = ASIC_SPI_CMD((data & ASIC_SPI_CMD_MASK) >> ASIC_SPI_CMD_MASK)
+        cmd = ASIC_SPI_CMD((data & ASIC_SPI_CMD_MASK) >> ASIC_SPI_CMD_SHIFT)
         addr = (data & ASIC_SPI_ADDR_MASK) >> ASIC_SPI_ADDR_MASK
 
         if cmd == ASIC_SPI_CMD.READ:

@@ -450,9 +450,9 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
                 value = self._getPeriphReg(idx, read_size)
             except (MceDataReadBusError, AlignmentException) as exc:
                 # See if any data was able to be read
-                try:
+                if 'data' in exc.kwargs and exc.kwargs['data']:
                     value = exc.kwargs['data']
-                except AttributeError:
+                else:
                     value = PPC_INVALID_READ_VAL
 
             idx += len(value)
@@ -473,7 +473,7 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
         try:
             value = self._getPeriphReg(offset, size)
             logger.log(EMULOG, "0x%x:  %s: read  [%x:%r] (%r)",
-                       self.emu._cur_instr[2], self.devname, va, size, value)
+                       self.emu._cur_instr[1], self.devname, va, size, value)
             return value
 
         except VStructUnimplementedError as exc:
@@ -526,7 +526,7 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
             return self._slow_mmio_write(va, offset, data)
 
         logger.log(EMULOG, "0x%x:  %s: write [%x] = %r",
-                   self.emu._cur_instr[2], self.devname, va, data)
+                   self.emu._cur_instr[1], self.devname, va, data)
         try:
             self._setPeriphReg(offset, data)
 

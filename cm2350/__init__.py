@@ -63,12 +63,13 @@ class ASIC(ppc_peripherals.BusPeripheral):
             ASIC_FAULT_REG:         0x303F,
 
             # register 2 is the watchdog timer
-            ASIC_WDOG_TIMEOUT_REG:  0x00FF,
+            ASIC_WDOG_TIMEOUT_REG:  0x0000,
             ASIC_WDOG_SERVICE_REG:  0x0000,
         }
 
-        # Start the watchdog now
-        self.watchdog.start(ticks=self.registers[ASIC_WDOG_TIMEOUT_REG] & ASIC_WDOG_TIMEOUT_MASK)
+        # Start the watchdog, the ticks are (256 - RS2)
+        ticks = 256 - (self.registers[ASIC_WDOG_TIMEOUT_REG] & ASIC_WDOG_TIMEOUT_MASK)
+        self.watchdog.start(ticks=ticks)
 
     def asicWatchdogHandler(self):
         # mark the watchdog reset bit
@@ -85,14 +86,14 @@ class ASIC(ppc_peripherals.BusPeripheral):
         # special case, the external watchdog is reset by writing an alternating 
         # pattern of 0x0055/0x00AA. 
         if addr == ASIC_WDOG_SERVICE_REG:
-            if self.registers[addr] == ASIC_WDOG_PAT1 and \
-                    value == ASIC_WDOG_PAT2:
-                # reset the watchdog, the ticks are in register 2
-                self.watchdog.start(ticks=self.registers[ASIC_WDOG_TIMEOUT_REG] & ASIC_WDOG_TIMEOUT_MASK)
+            if self.registers[addr] == ASIC_WDOG_PAT1 and value == ASIC_WDOG_PAT2:
+                # reset the watchdog, the ticks are (256 - RS2)
+                ticks = 256 - (self.registers[ASIC_WDOG_TIMEOUT_REG] & ASIC_WDOG_TIMEOUT_MASK)
+                self.watchdog.start(ticks=ticks)
 
         if cmd == ASIC_SPI_CMD.WRITE_LOWER:
             cur_val = self.registers.get(addr, 0)
-            self.registers[addr] = (value << 8) | (cur_val & 0x00FF)
+            self.registers[addr] = (cur_val & 0xFF00) | value
 
             logger.info('%s -> %s: WRITE     RS%-3d XX%02x -> %04x',
                         self.bus.devname, self.name, addr, value,
@@ -100,9 +101,9 @@ class ASIC(ppc_peripherals.BusPeripheral):
 
         elif cmd == ASIC_SPI_CMD.WRITE_UPPER:
             cur_val = self.registers.get(addr, 0)
-            self.registers[addr] = (cur_val & 0xFF00) | value
+            self.registers[addr] = (value << 8) | (cur_val & 0x00FF)
 
-            logger.info('%s -> %s: WRITE     RS%-3d XX%02x -> %04x',
+            logger.info('%s -> %s: WRITE     RS%-3d %02xXX -> %04x',
                         self.bus.devname, self.name, addr, value,
                         self.registers[addr])
 
@@ -121,13 +122,13 @@ class ASIC(ppc_peripherals.BusPeripheral):
             self.write(ASIC_SPI_CMD.WRITE_SEQ, self.addr, data)
             # Clear the saved address
             self.addr = None
-            return 0x0000
+            return 0xFFFF
 
         # first two bits indicate read/write upper/lower byte
         # next six bits are the address
         # lower 8 bits are the value
         cmd = ASIC_SPI_CMD((data & ASIC_SPI_CMD_MASK) >> ASIC_SPI_CMD_SHIFT)
-        addr = (data & ASIC_SPI_ADDR_MASK) >> ASIC_SPI_ADDR_MASK
+        addr = (data & ASIC_SPI_ADDR_MASK) >> ASIC_SPI_ADDR_SHIFT
 
         if cmd == ASIC_SPI_CMD.READ:
             value = self.read(addr)
@@ -137,12 +138,12 @@ class ASIC(ppc_peripherals.BusPeripheral):
 
         elif cmd in (ASIC_SPI_CMD.WRITE_LOWER, ASIC_SPI_CMD.WRITE_UPPER):
             self.write(cmd, addr, data & ASIC_SPI_DATA_MASK)
-            return 0x0000
+            return 0xFFFF
 
         elif cmd == ASIC_SPI_CMD.WRITE_SEQ:
             # no data to write yet, just save the address
             self.addr = addr
-            return 0x0000
+            return 0xFFFF
 
 
 class CM2350:

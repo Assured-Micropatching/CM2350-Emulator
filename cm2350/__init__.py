@@ -64,7 +64,7 @@ class ASIC(ppc_peripherals.BusPeripheral):
 
             # register 2 is the watchdog timer
             ASIC_WDOG_TIMEOUT_REG:  0x00FF,
-            ASIC_WATCHDOG_REG:      0x0000,
+            ASIC_WDOG_SERVICE_REG:  0x0000,
         }
 
         # Start the watchdog now

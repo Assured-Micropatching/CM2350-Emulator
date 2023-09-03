@@ -181,6 +181,10 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         # standard) exceptions/interrupts
         self.mcu_intc = e200_intc.e200INTC(emu=self, ivors=True)
 
+        # MSR callback handler. We don't need a full BitFieldSPR object but we 
+        # do need to re-evaluate pending interrupts when the MSR changes
+        self.addSprWriteHandler(REG_MSR, self.mcu_intc.msrUpdated)
+
         # Create GDBSTUB Server
         #self.gdbstub = e200_gdb.e200GDB(self)
         self._run = threading.Event()
@@ -680,7 +684,6 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
             self.stepi()
 
     def queueException(self, exception):
-        logger.debug('queuing expcetion %s', exception)
         self.mcu_intc.queueException(exception)
 
     def isExceptionActive(self, exctype):

@@ -144,9 +144,7 @@ import envi.archs.ppc.const as ppc_const
 import vivisect.const as viv_const
 import vivisect.impemu.monitor as viv_imp_monitor
 
-from . import project
-from . import e200z7
-from .intc_exc import *
+from . import project, e200z7, intc_exc
 
 # Peripherals
 from .peripherals.bam import BAM
@@ -254,19 +252,19 @@ class MPC5674_monitor(viv_imp_monitor.AnalysisMonitor):
                 count = self.funccalls.get(op.va, 0) + 1
                 self.funccalls[op.va] = count
 
-                if isinstance(emu.mcu_intc.stack[0], MachineCheckException):
+                if isinstance(emu.mcu_intc.stack[0], intc_exc.MachineCheckException):
                     xrr0 = emu.getRegister(ppc_regs.REG_MCSRR0)
                     xrr1 = emu.getRegister(ppc_regs.REG_MCSRR1)
                     xrr0_name = 'MCSRR0'
                     xrr1_name = 'MCSRR1'
-                elif isinstance(emu.mcu_intc.stack[0], (StandardPrioException, MachineCheckPrioException)):
+                elif isinstance(emu.mcu_intc.stack[0], (intc_exc.StandardPrioException, intc_exc.MachineCheckPrioException)):
                     # standard and non-MCE machine check priority level
                     # exceptions use SRR0/SRR1
                     xrr0 = emu.getRegister(ppc_regs.REG_SRR0)
                     xrr1 = emu.getRegister(ppc_regs.REG_SRR1)
                     xrr0_name = 'SRR0'
                     xrr1_name = 'SRR1'
-                elif isinstance(emu.mcu_intc.stack[0], CriticalPrioException):
+                elif isinstance(emu.mcu_intc.stack[0], intc_exc.CriticalPrioException):
                     xrr0 = emu.getRegister(ppc_regs.REG_CSRR0)
                     xrr1 = emu.getRegister(ppc_regs.REG_CSRR1)
                     xrr0_name = 'CSRR0'
@@ -359,7 +357,7 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
                 },
                 'SRAM': {
                     # SRAM size depends on the specific MPC5674 part in use
-                    'size': 0,
+                    'size': 0x00040000,
                     'addr': 0x40000000,
                     # Indicates how much of the ram is preserved during resets
                     'standby_size': 0x8000,
@@ -377,22 +375,6 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
                     'port': None,
                 },
                 'FlexCAN_D': {
-                    'host': None,
-                    'port': None,
-                },
-                'DSPI_A': {
-                    'host': None,
-                    'port': None,
-                },
-                'DSPI_B': {
-                    'host': None,
-                    'port': None,
-                },
-                'DSPI_C': {
-                    'host': None,
-                    'port': None,
-                },
-                'DSPI_D': {
                     'host': None,
                     'port': None,
                 },
@@ -446,32 +428,16 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
                     'port': 'Host TCP port for FlexCAN_C IO server'
                 },
                 'FlexCAN_D': {
-                    'host': 'Host IP address for DSPI_D IO server',
-                    'port': 'Host TCP port for DSPI_D IO server',
-                },
-                'DSPI_A': {
-                    'host': 'Host IP address for DSPI_A IO server',
-                    'port': 'Host TCP port for DSPI_A IO server',
-                },
-                'DSPI_B': {
-                    'host': 'Host IP address for DSPI_B IO server',
-                    'port': 'Host TCP port for DSPI_B IO server',
-                },
-                'DSPI_C': {
-                    'host': 'Host IP address for DSPI_C IO server',
-                    'port': 'Host TCP port for DSPI_C IO server'
-                },
-                'DSPI_D': {
-                    'host': 'Host IP address for DSPI_D IO server',
-                    'port': 'Host TCP port for DSPI_D IO server',
+                    'host': 'Host IP address for FlexCAN_D IO server',
+                    'port': 'Host TCP port for FlexCAN_D IO server',
                 },
                 'eQADC_A': {
-                    'host': 'Host IP address for DSPI_D IO server',
-                    'port': 'Host TCP port for DSPI_D IO server',
+                    'host': 'Host IP address for eQADC_D IO server',
+                    'port': 'Host TCP port for eQADC_D IO server',
                 },
                 'eQADC_B': {
-                    'host': 'Host IP address for DSPI_D IO server',
-                    'port': 'Host TCP port for DSPI_D IO server',
+                    'host': 'Host IP address for eQADC_D IO server',
+                    'port': 'Host TCP port for eQADC_D IO server',
                 },
             }
         }
@@ -609,74 +575,6 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         # Complete initialization of the e200z7 core
         self.init()
 
-        # If the --gdb-port flag is provided 
-
-        return
-
-        # TODO: Initialize stack memory base address, taints, etc.
-
-        if hasattr(self, 'vw') and self.vw is not None:
-            # This attaches the same MMIO class functions and objects to the
-            # vivisect workspace (I think this should work?)
-            self.vw._map_defs = self._map_defs
-            for mva, mmaxva, _, _ in self._map_defs:
-                msize = mmaxva - mva
-                self.vw.locmap.initMapLookup(mva, msize)
-                self.vw.blockmap.initMapLookup(mva, msize)
-
-            import types
-            emuself = self
-
-            # Replace the standard vivisect functions with emulator-specific
-            # ones
-            def _parseOpcode(self, va, arch=envi.ARCH_PPC_E32, skipcache=False):
-                return emuself.parseOpcode(va, skipcache=skipcache)
-            self.vw.parseOpcode = types.MethodType(_parseOpcode, self.vw)
-
-            def _getEmulator(self, **kwargs):
-                return emuself
-            self.vw.getEmulator = types.MethodType(_getEmulator, self.vw)
-
-            # To use the MPC5674_Emulator class as a workspace emulator for
-            # analysis we need to set up the expected stack analysis attributes
-            # used by the WorkspaceEmulator class assume that the stack is near
-            # the end of SRAM from 0x40030000 to 0x40040000
-            self.stack_map_mask = 0xFFFF0000
-            self.stack_map_base = 0x40030000
-            self.stack_map_top  = 0x40040000
-            self.stack_pointer  = 0x4003FFFC
-
-            def _getFileByVa(self, va):
-                segtup = self.getSegment(va)
-                if segtup is None:
-                    return 'CM2350'
-                return segtup[viv_const.SEG_FNAME]
-            self.vw.getFileByVa = types.MethodType(_getFileByVa, self.vw)
-
-            # Redirect the normal Vivisect Workspace's MemoryObject functions to
-            # this class instance's functions, except translate the PPC
-            # exceptions into exceptions that vivisect understands better
-            def _writeMemory(self, va, bytez):
-                try:
-                    return emuself.writeMemory(va, bytez)
-                except (MceWriteBusError, MceDataReadBusError, AlignmentException) as exc:
-                    raise envi.SegmentationViolation('Bad Memory Access: 0x%x', va) from exc
-            self.vw.writeMemory = types.MethodType(_writeMemory, self.vw)
-
-            def _readMemory(self, va, size):
-                try:
-                    return emuself.readMemory(va, size)
-                except (MceWriteBusError, MceDataReadBusError, AlignmentException) as exc:
-                    raise envi.SegmentationViolation('Bad Memory Access: 0x%x', va) from exc
-            self.vw.readMemory = types.MethodType(_readMemory, self.vw)
-
-            def _getByteDef(self, va):
-                try:
-                    return emuself.getByteDef(va)
-                except (MceWriteBusError, MceDataReadBusError, AlignmentException) as exc:
-                    raise envi.SegmentationViolation('Bad Memory Access: 0x%x', va) from exc
-            self.vw.getByteDef = types.MethodType(_getByteDef, self.vw)
-
     def _process_args(self, args):
         """
         Indicate that the supplied file can be used as an initial flash image if
@@ -775,23 +673,6 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
             # an error
             cfg['backup'] = ''
 
-    def reset(self):
-        logger.info("RESET")
-
-        # Clear or initialize SRAM and external RAM
-        size = self.vw.config.project.MPC5674.SRAM.size
-        addr = self.vw.config.project.MPC5674.SRAM.addr
-        standby_size = self.vw.config.project.MPC5674.SRAM.standby_size
-
-        start = addr + standby_size
-        end = addr + size
-        logger.debug("reset: clearing SRAM 0x%08x - 0x%08x",
-                addr + standby_size, addr + size)
-        self.writeMemory(start, b'\x00' * (end - start))
-
-        # Reset the core
-        super().reset()
-
     def loadInitialFirmware(self):
         '''
         load firmware into the emulator
@@ -846,6 +727,16 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         else:
             self.flash.load_complete()
 
+    def gpio(self, pinid, val=None):
+        if val is not None:
+            self.siu.connectGPIO(pinid, val)
+        return self.siu.getGPIO(pinid)
+
+    def externalResetHandler(self):
+        print('**************\nEXTERNAL RESET\n**************')
+        logger.info('EXTERNAL RESET')
+        self.queueException(intc_exc.ResetException(intc_exc.ResetSource.EXTERNAL))
+
     def init(self):
         logger.info('INIT')
 
@@ -861,6 +752,23 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         # Init the core
         super().init()
 
+    def reset(self):
+        logger.info("RESET")
+
+        # Clear or initialize SRAM and external RAM
+        size = self.vw.config.project.MPC5674.SRAM.size
+        addr = self.vw.config.project.MPC5674.SRAM.addr
+        standby_size = self.vw.config.project.MPC5674.SRAM.standby_size
+
+        start = addr + standby_size
+        end = addr + size
+        logger.debug("reset: clearing SRAM 0x%08x - 0x%08x",
+                addr + standby_size, addr + size)
+        self.writeMemory(start, b'\x00' * (end - start))
+
+        # Reset the core
+        super().reset()
+
     def run(self):
         try:
             logger.info('Starting execution @ 0x%x', self._cur_instr[2])
@@ -874,6 +782,7 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         except KeyboardInterrupt:
             print()
             logger.info('Execution stopped @ 0x%x', self._cur_instr[2])
+
 
 ### special register hardware interfacing
 # hook particular registers such that they don't store data, but rather interface to a virtual device

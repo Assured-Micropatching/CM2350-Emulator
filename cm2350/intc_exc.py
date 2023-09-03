@@ -100,11 +100,12 @@ class INTCException(Exception):
             return True
 
         msr = emu.getRegister(REG_MSR)
+        logger.debug('handle %r?: 0x%08x & 0x%08x', self, self.__msrflag__, msr)
         if msr & self.__msrflag__:
             return True
-
-        logger.debug('Handling %r not enabled: 0x%08x & 0x%08x', self, self.__msrflag__, msr)
-        return False
+        else:
+            # If this is an 
+            return False
 
     def setupContext(self, emu):
         '''

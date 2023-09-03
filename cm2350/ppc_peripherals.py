@@ -25,6 +25,7 @@ __all__ = [
     'Peripheral',
     'MMIOPeripheral',
     'ExternalIOPeripheral',
+    'BusPeripheral',
     'TimerRegister',
 ]
 
@@ -449,9 +450,9 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
                 value = self._getPeriphReg(idx, read_size)
             except (MceDataReadBusError, AlignmentException) as exc:
                 # See if any data was able to be read
-                try:
-                    value = exc.kwargs.data
-                except AttributeError:
+                if 'data' in exc.kwargs and exc.kwargs['data']:
+                    value = exc.kwargs['data']
+                else:
                     value = PPC_INVALID_READ_VAL
 
             idx += len(value)
@@ -472,7 +473,7 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
         try:
             value = self._getPeriphReg(offset, size)
             logger.log(EMULOG, "0x%x:  %s: read  [%x:%r] (%r)",
-                       self.emu._cur_instr[2], self.devname, va, size, value)
+                       self.emu._cur_instr[1], self.devname, va, size, value)
             return value
 
         except VStructUnimplementedError as exc:
@@ -509,7 +510,7 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
             except (MceWriteBusError, AlignmentException) as exc:
                 # See if any data was written
                 try:
-                    idx += len(exc.kwargs.data)
+                    idx += len(exc.kwargs['data'])
                 except AttributeError:
                     # Just move to the next byte and try again
                     idx += 1
@@ -525,7 +526,7 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
             return self._slow_mmio_write(va, offset, data)
 
         logger.log(EMULOG, "0x%x:  %s: write [%x] = %r",
-                   self.emu._cur_instr[2], self.devname, va, data)
+                   self.emu._cur_instr[1], self.devname, va, data)
         try:
             self._setPeriphReg(offset, data)
 
@@ -603,7 +604,7 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
         there is a dma event associated with the supplied field then a DMA event
         will also be initiated.
         """
-        logger.debug('[%s] event %d = %s', self.devname, channel, value)
+        logger.debug('[%s] event [%d].%s = %s', self.devname, channel, field, value)
 
         field_value = self.isrstatus[channel].vsGetField(field)
         if value and field_value == 0:
@@ -678,7 +679,7 @@ def _recvData(sock):
     data = sock.recv(4)
     if len(data) < 4:
         # If no data is received, assume this is an error and exit
-        logger.debug('Incomplete data received %d bytes: %r', len(data), data)
+        logger.log(EMULOG, 'Incomplete data received %d bytes: %r', len(data), data)
         raise OSError(errno.EAGAIN)
     size = struct.unpack('>I', data)[0]
 
@@ -1046,9 +1047,9 @@ class ExternalIOPeripheral(MMIOPeripheral):
                         if len(exc.args) >= 1 and exc.args[0] == errno.EAGAIN:
                             # If this indicates a connection lost (EAGAIN), 
                             # don't print the exception information.
-                            logger.warning('Lost connection to main thread, exiting')
+                            logger.log(EMULOG, 'Lost connection to main thread, exiting')
                         else:
-                            logger.warning('Lost connection to main thread, exiting', exc_info=1)
+                            logger.log(EMULOG, 'Lost connection to main thread, exiting', exc_info=1)
                         return
 
                 elif sock == self._server:
@@ -1075,6 +1076,22 @@ class ExternalIOPeripheral(MMIOPeripheral):
                             logger.debug('client sock %r disconnected', sock, exc_info=1)
                         self._clients.remove(sock)
                         inputs.remove(sock)
+
+
+class BusPeripheral:
+    def __init__(self, emu, name, bus, *args, **kwargs):
+        self.name = name
+
+        self.emu = emu
+
+        self.bus = emu.modules[bus]
+        self.bus.registerBusPeripheral(self, *args, **kwargs)
+
+    def receive(self, value):
+        raise NotImplementedError
+
+    def transmit(self, value):
+        self.emu.putIO(self.bus.devname, value)
 
 
 class TimerRegister:

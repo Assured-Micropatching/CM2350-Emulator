@@ -230,6 +230,12 @@ class VivProject(metaclass=VivProjectMeta):
     }
 
     def open_project_config(self, defconfig=None, docconfig=None, args=None, parser=None):
+        if defconfig is None:
+            defconfig = {}
+
+        if docconfig is None:
+            docconfig = {}
+
         # Merge the defaults and docs provided with the class config
         defconfig = merge_dict(self.defconfig, defconfig)
         docconfig = merge_dict(self.docconfig, docconfig)

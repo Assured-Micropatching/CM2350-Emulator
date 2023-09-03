@@ -1371,8 +1371,9 @@ class FLASH(mmio.MMIO_DEVICE):
 
     def _flash_read(self, va, offset, size):
         value = self.data[offset:offset+size]
-        logger.log(EMULOG, "0x%x:  FLASH read  [%x:%r] (%r)",
-                   self.emu._cur_instr[2], offset, size, value)
+        # Flash read happens often enough that it's not worth logging
+        #logger.log(EMULOG, "0x%x:  FLASH read  [%x:%r] (%r)",
+        #           self.emu._cur_instr[2], offset, size, value)
         return value
 
     def _flash_write(self, va, offset, bytez):

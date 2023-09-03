@@ -56,6 +56,9 @@ class e200INTC:
         self.pending = []
         self.hasInterrupt = False
 
+        # Exceptions that may be activated after the MSR state changes
+        self.saved = []
+
     def registerExtINTC(self, extintc):
         '''
         Register interrupt controller for External Interrupts
@@ -82,12 +85,31 @@ class e200INTC:
             self.stack = []
             self.pending = []
 
+        self.saved = []
+
         # use instance variable to keep the run loop tight.  this must be only
         # used in one thread.
         self.hasInterrupt = False
 
         # Default priority level
         self.curlvl = INTC_LEVEL_NONE
+
+    def msrUpdated(self, emu, op):
+        updated = False
+
+        # Re-evaluate any saved exceptions to see if they can be processed now
+        for exception in self.saved[:]:
+            if exception.shouldHandle(self.emu):
+                logger.warning('queuing old exception: %r', exception)
+                self.saved.remove(exception)
+                self.pending.append(exception)
+                updated = True
+
+        if updated:
+            self.pending.sort(key=operator.attrgetter('prio'))
+            self.hasInterrupt = self.curlvl > self.pending[0].prio
+
+        return None
 
     def queueException(self, exception):
         '''
@@ -96,9 +118,16 @@ class e200INTC:
 
         exception is expected to be a subclass of one of the PriorityExceptions
         '''
-        if not exception.shouldHandle(self.emu):
+        if exception in self.pending:
+            logger.warning('Discarding duplicate exception: %r', exception)
+            return
+
+        elif not exception.shouldHandle(self.emu):
             # skip queuing this exception, we don't handle it
-            logger.warning('not handling exception: %r', exception)
+            logger.warning('saving exception: %r', exception)
+
+            # Save this exception to be evaluated later when the MSR changes
+            self.saved.append(exception)
             return
 
         with self.lock:

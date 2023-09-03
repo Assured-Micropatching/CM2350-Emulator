@@ -10,7 +10,7 @@ import envi.archs.ppc.spr as eaps
 import envi.archs.ppc.regs as eapr
 import envi.archs.ppc.const as eapc
 
-from .. import CM2350, intc_exc, ppc_vstructs
+from .. import MPC5674_Emulator, intc_exc, ppc_vstructs
 
 import logging
 logger = logging.getLogger(__name__)
@@ -58,9 +58,21 @@ class MPC5674_Test(unittest.TestCase):
         if self._disable_gc is None:
             self._disable_gc = True if self.accurate_timing else False
 
-        logger.debug('Creating CM2350 with args: %r', self.args)
-        self.ECU = CM2350(self.args)
-        self.emu = self.ECU.emu
+        logger.debug('Creating MPC5674 with args: %r', self.args)
+
+        # Minimal required configuration
+        config = {
+            'project': {
+                'arch': 'ppc32-embedded',
+            },
+            'MPC5674': {
+                'FMPLL': {
+                    'extal': 40000000,
+                },
+            },
+        }
+
+        self.emu = MPC5674_Emulator(defconfig=config, args=self.args)
 
         # Check if the garbage collector should be disabled for these tests
         if self._disable_gc:
@@ -115,9 +127,8 @@ class MPC5674_Test(unittest.TestCase):
             self.assertEqual(pending_excs, [])
 
         # Clean up the resources
-        self.ECU.shutdown()
+        self.emu.shutdown()
         del self.emu
-        del self.ECU
 
         # Re-enable the garbage collector if it was disabled and force memory
         # cleanup now

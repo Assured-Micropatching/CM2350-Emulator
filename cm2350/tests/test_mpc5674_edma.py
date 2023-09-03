@@ -1035,10 +1035,12 @@ class MPC5674_eDMA_Test(MPC5674_Test):
         dspi_a_sr_addr      = 0XFFF9002C
         dspi_a_rser_addr    = 0XFFF90030
         dspi_a_popr_addr    = 0XFFF90038
+        hrsh_addr           = EDMA_DEVICES[0][1] + EDMA_HRSH_OFFSET
 
         SR_RFDF_MASK        = 0x00020000
         RSER_RFDF_RE_MASK   = 0x00020000
         RSER_RFDF_DIRS_MASK = 0x00010000
+        HRS33_MASK          = 0x00000002
 
         # Enable DSPI A
         self.emu.writeMemValue(dspi_a_mcr_addr, 0, 4)
@@ -1051,9 +1053,8 @@ class MPC5674_eDMA_Test(MPC5674_Test):
         # Set up the DSPI A receive event (eDMA A, channel 33)
         # Configure the TCD to do a circular queue of 4 2-byte entries @
         # 0x40000000
-        tcd = TCD(self.emu, start=0, saddr=dspi_a_popr_addr, ssize=2, slast=0,
-                  daddr=0x40000000, dsize=2, dmod=3, nbytes=2, biter=1, citer=1,
-                  dlast_sga=2)
+        tcd = TCD(self.emu, start=0, saddr=dspi_a_popr_addr, ssize=2, soff=2, slast=-2,
+                  daddr=0x40000000, dsize=2, doff=0, dmod=3, nbytes=2, biter=1, citer=1, dlast_sga=2)
         tcd_addr = EDMA_DEVICES[0][1] + EDMA_TCDx_OFFSET + (32 * 33)
         tcd.write(self.emu, tcd_addr)
 
@@ -1065,6 +1066,7 @@ class MPC5674_eDMA_Test(MPC5674_Test):
         # DSPI A
         ########################
 
+        logger.debug('ERQ33 unset and RFDF_DIRS unset')
         self.emu.dspi[0].processReceivedData(0xAAAA)
         self.assertEqual(self.emu.dma[0]._pending, {})
         self.emu.dma[0].processActiveTransfers()
@@ -1089,6 +1091,7 @@ class MPC5674_eDMA_Test(MPC5674_Test):
         # normal interrupt still happens.
         ########################
 
+        logger.debug('ERQ33 set and RFDF_DIRS unset')
         erqrh_addr = EDMA_DEVICES[0][1] + EDMA_ERQRH_OFFSET
         self.emu.writeMemValue(erqrh_addr, 0x00000002, 4)
 
@@ -1117,6 +1120,7 @@ class MPC5674_eDMA_Test(MPC5674_Test):
         # transfer does not happen.
         ########################
 
+        logger.debug('ERQ33 unset and RFDF_DIRS set')
         value = self.emu.readMemValue(dspi_a_rser_addr, 4)
         self.emu.writeMemValue(dspi_a_rser_addr, value | RSER_RFDF_DIRS_MASK, 4)
 
@@ -1139,6 +1143,12 @@ class MPC5674_eDMA_Test(MPC5674_Test):
         self.assertEqual(self.emu.readMemValue(dspi_a_sr_addr, 4) & SR_RFDF_MASK, 0)
         self.assertEqual(self._getPendingExceptions(), [])
 
+        # The HRS flag should have been set because the hardware DMA request was 
+        # enabled.
+        self.assertEqual(self.emu.readMemValue(hrsh_addr, 4), HRS33_MASK)
+        self.emu.dma[0].clearHRS(33)
+        self.assertEqual(self.emu.readMemValue(hrsh_addr, 4), 0)
+
         ########################
         # set ERQRH[ERQ33] and set the RSER[RFDF_DIRS] bit for DSPI A and ensure
         # that the RFDF interrupt is not set but rather the data is copied
@@ -1146,6 +1156,7 @@ class MPC5674_eDMA_Test(MPC5674_Test):
         # circular queue feature.
         ########################
 
+        logger.debug('ERQ33 set and RFDF_DIRS set (DMA requested)')
         erqrh_addr = EDMA_DEVICES[0][1] + EDMA_ERQRH_OFFSET
         self.emu.writeMemValue(erqrh_addr, 0x00000002, 4)
 
@@ -1167,6 +1178,11 @@ class MPC5674_eDMA_Test(MPC5674_Test):
 
             # Send the message and force the transfer to complete
             self.emu.dspi[0].processReceivedData(msg)
+
+            # The HRS flag should have been set because the hardware DMA request 
+            # was enabled.
+            self.assertEqual(self.emu.readMemValue(hrsh_addr, 4), HRS33_MASK)
+
             self.assertTrue(33 in self.emu.dma[0]._pending)
             self.emu.dma[0].processActiveTransfers()
             self.assertEqual(self.emu.dma[0]._pending, {})
@@ -1182,6 +1198,9 @@ class MPC5674_eDMA_Test(MPC5674_Test):
             # queued.
             self.assertEqual(self.emu.readMemValue(dspi_a_sr_addr, 4) & SR_RFDF_MASK, 0)
             self.assertEqual(self._getPendingExceptions(), [])
+
+            # The HRS flag should have been cleared
+            self.assertEqual(self.emu.readMemValue(hrsh_addr, 4), 0)
 
     @unittest.skip('implement')
     def test_edma_channel_linking(self):

@@ -2,7 +2,7 @@ import random
 import struct
 import unittest
 
-from cm2350 import intc_exc
+from cm2350 import intc_exc, ppc_peripherals
 from cm2350.peripherals import dspi
 
 from .helpers import MPC5674_Test
@@ -58,6 +58,7 @@ DSPI_CTAR_FMSZ_SHIFT     = 27
 
 DSPI_PUSHR_EOQ_MASK      = 0x08000000
 DSPI_PUSHR_CTCNT_MASK    = 0x04000000
+DSPI_PUSHR_CS0_MASK      = 0x00010000
 
 DSPI_PUSHR_CTAS_SHIFT    = 28
 DSPI_PUSHR_EOQ_SHIFT     = 27
@@ -125,6 +126,20 @@ def get_int(dev, event):
         interrupt source value (int)
     """
     return intc_exc.ExternalException(intc_exc.INTC_SRC(get_int_src(dev, event)))
+
+
+class TestPeriph(ppc_peripherals.BusPeripheral):
+    def __init__(self, emu, bus):
+        ppc_peripherals.BusPeripheral.__init__(self, emu, 'TestPeriph_' + bus, bus, 0)
+        self.msgs = []
+
+    def receive(self, data):
+        self.msgs.append(data)
+
+    def getMsgs(self):
+        msgs = self.msgs
+        self.msgs = []
+        return msgs
 
 
 class MPC5674_DSPI_Test(MPC5674_Test):
@@ -558,6 +573,9 @@ class MPC5674_DSPI_Test(MPC5674_Test):
                 val |= DSPI_PUSHR_EOQ_MASK
             if i == 7:
                 val |= DSPI_PUSHR_CTCNT_MASK
+
+            # The test peripheral uses CS0
+            val |= DSPI_PUSHR_CS0_MASK
             pushr_values.append(val)
 
         # Value to enable all interrupts
@@ -572,6 +590,14 @@ class MPC5674_DSPI_Test(MPC5674_Test):
             (1, dspi.DSPI_MODE.SPI_CNTRLR),
             (0, dspi.DSPI_MODE.SPI_PERIPH),
         )
+
+        # Register a peripheral for each bus
+        periphs = [
+            TestPeriph(self.emu, 'DSPI_A'),
+            TestPeriph(self.emu, 'DSPI_B'),
+            TestPeriph(self.emu, 'DSPI_C'),
+            TestPeriph(self.emu, 'DSPI_D'),
+        ]
 
         for dev in range(len(DSPI_DEVICES)):
             devname, baseaddr = DSPI_DEVICES[dev]
@@ -611,11 +637,15 @@ class MPC5674_DSPI_Test(MPC5674_Test):
                     ctar_addr = baseaddr + ctar_offset
                     self.emu.writeMemValue(ctar_addr, val, 4)
 
+                # By default no interrupt sources should be enabled
+                self.assertEqual(self.emu.readMemValue(rser_addr, 4), 0, msg=testmsg)
+
                 # Enable all interrupt sources
                 self.emu.writeMemValue(rser_addr, rser_val, 4)
 
-                # Verify the initial state of the peripheral
-                self.assertEqual(self.emu.dspi[dev].registers.sr.tfff, 0, msg=testmsg)
+                # Verify the initial state of the peripheral (TFFF should have 
+                # been re-set)
+                self.assertEqual(self.emu.dspi[dev].registers.sr.tfff, 1, msg=testmsg)
                 self.assertEqual(self.emu.dspi[dev].registers.sr.txctr, 0, msg=testmsg)
                 self.assertEqual(self.emu.dspi[dev].registers.sr.txnxtptr, 0, msg=testmsg)
 
@@ -643,14 +673,16 @@ class MPC5674_DSPI_Test(MPC5674_Test):
                 self.assertEqual(self.emu.dspi[dev].registers.sr.txctr, 3, msg=testmsg)
                 self.assertEqual(self.emu.dspi[dev].registers.sr.txnxtptr, 2, msg=testmsg)
 
-                # The TFFF flag won't get be zero after adding the next message
-                # unless it is cleared first
+                # The TFFF flag won't get be zero after adding the next message, 
+                # even if it is cleared it defaults back to set because the TX 
+                # FIFO is empty.
                 self.emu.writeMemValue(sr_addr, DSPI_SR_TFFF_MASK, 4)
+
                 # There will be no TFFF exception queued here because this test
                 # started with TFFF being set
 
                 self.emu.writeMemValue(pushr_addr, pushr_values[3], 4)
-                self.assertEqual(self.emu.dspi[dev].registers.sr.tfff, 0, msg=testmsg)
+                self.assertEqual(self.emu.dspi[dev].registers.sr.tfff, 1, msg=testmsg)
                 self.assertEqual(self.emu.dspi[dev].registers.sr.txctr, 4, msg=testmsg)
                 self.assertEqual(self.emu.dspi[dev].registers.sr.txnxtptr, 3, msg=testmsg)
 
@@ -667,7 +699,7 @@ class MPC5674_DSPI_Test(MPC5674_Test):
 
                 # Attempt to write to PUSHR again, and confirm nothing has changed
                 self.emu.writeMemValue(pushr_addr, pushr_values[4], 4)
-                self.assertEqual(self.emu.dspi[dev].registers.sr.tfff, 0, msg=testmsg)
+                self.assertEqual(self.emu.dspi[dev].registers.sr.tfff, 1, msg=testmsg)
                 self.assertEqual(self.emu.dspi[dev].registers.sr.txctr, 4, msg=testmsg)
                 self.assertEqual(self.emu.dspi[dev].registers.sr.txnxtptr, 3, msg=testmsg)
                 for i, txf_offset in zip(reversed(range(4)), DSPI_TXFR_RANGE):
@@ -712,9 +744,10 @@ class MPC5674_DSPI_Test(MPC5674_Test):
                 ]
                 self.assertEqual(self._getPendingExceptions(), expected_excs, msg=testmsg)
 
-                # Clear the TCF, EOQ, and TFFF interrupt flags
+                # Clear the TCF, EOQ, and TFFF interrupt flags (TFFF will be 
+                # re-set)
                 self.emu.writeMemValue(sr_addr, expected, 4)
-                expected = 1 << DSPI_SR_TXCTR_SHIFT
+                expected = DSPI_SR_TFFF_MASK | 1 << DSPI_SR_TXCTR_SHIFT
                 self.assertEqual(self.emu.readMemValue(sr_addr, 4), expected, msg=testmsg)
 
                 # Verify that only three frames were sent and there is still 1 msg
@@ -735,8 +768,7 @@ class MPC5674_DSPI_Test(MPC5674_Test):
 
                 # Verify the message values in the transmit queue match the expected
                 # value for msgs 0, 1, and 2.
-                txd_msgs = self.emu.dspi[dev].getTransmittedObjs()
-                self.assertEqual(txd_msgs, expected_msgs[:3], msg=testmsg)
+                self.assertEqual(periphs[dev].getMsgs(), expected_msgs[:3], msg=testmsg)
 
                 # Manually change the transmit count to the 0xFFFF so after sending
                 # 2 more messages the TCNT will have wrapped around to 1
@@ -759,8 +791,7 @@ class MPC5674_DSPI_Test(MPC5674_Test):
                 self.assertEqual(self.emu.dspi[dev].registers.sr.txctr, 3, msg=testmsg)
                 self.assertEqual(self.emu.dspi[dev].registers.sr.txnxtptr, 2, msg=testmsg)
 
-                # The TFFF flag won't get be zero after adding the next message
-                # unless it is cleared first
+                # The TFFF flag won't get be zero after clearing the flag
                 self.emu.writeMemValue(sr_addr, DSPI_SR_TFFF_MASK, 4)
                 # Confirm the exception is queued also
                 expected_excs = [
@@ -769,7 +800,7 @@ class MPC5674_DSPI_Test(MPC5674_Test):
                 self.assertEqual(self._getPendingExceptions(), expected_excs, msg=testmsg)
 
                 self.emu.writeMemValue(pushr_addr, pushr_values[7], 4)
-                self.assertEqual(self.emu.dspi[dev].registers.sr.tfff, 0, msg=testmsg)
+                self.assertEqual(self.emu.dspi[dev].registers.sr.tfff, 1, msg=testmsg)
                 self.assertEqual(self.emu.dspi[dev].registers.sr.txctr, 4, msg=testmsg)
                 self.assertEqual(self.emu.dspi[dev].registers.sr.txnxtptr, 3, msg=testmsg)
 
@@ -800,7 +831,6 @@ class MPC5674_DSPI_Test(MPC5674_Test):
                         (2 << DSPI_SR_TXCTR_SHIFT) | (1 << DSPI_SR_TXNXTPTR_SHIFT)
                 self.assertEqual(self.emu.readMemValue(sr_addr, 4), expected, msg=testmsg)
                 expected_excs = [
-                    get_int(dev, 'tfff'),
                     get_int(dev, 'tcf'),
                     get_int(dev, 'eoqf'),
                 ]
@@ -808,7 +838,7 @@ class MPC5674_DSPI_Test(MPC5674_Test):
 
                 # Clear the TCF, EOQ, and TFFF interrupt flags
                 self.emu.writeMemValue(sr_addr, expected, 4)
-                expected = (2 << DSPI_SR_TXCTR_SHIFT) | (1 << DSPI_SR_TXNXTPTR_SHIFT)
+                expected = DSPI_SR_TFFF_MASK | (2 << DSPI_SR_TXCTR_SHIFT) | (1 << DSPI_SR_TXNXTPTR_SHIFT)
                 self.assertEqual(self.emu.readMemValue(sr_addr, 4), expected, msg=testmsg)
 
                 # Verify that three frames were sent and there is 2 frames left in
@@ -823,7 +853,7 @@ class MPC5674_DSPI_Test(MPC5674_Test):
                 # Verify the message values in the transmit queue match the expected
                 # value for msgs 4 and 5
                 txd_msgs = self.emu.dspi[dev].getTransmittedObjs()
-                self.assertEqual(txd_msgs, expected_msgs[4:6], msg=testmsg)
+                self.assertEqual(periphs[dev].getMsgs(), expected_msgs[4:6], msg=testmsg)
 
                 # Enable Tx/Rx to transmit the last message
                 self.assertEqual(self.emu.dspi[dev].registers.sr.eoqf, 0, msg=testmsg)
@@ -849,8 +879,14 @@ class MPC5674_DSPI_Test(MPC5674_Test):
 
                 # Clear the interrupt flags
                 self.emu.writeMemValue(sr_addr, expected, 4)
-                expected = DSPI_SR_TXRXS_MASK
+                expected = DSPI_SR_TXRXS_MASK | DSPI_SR_TFFF_MASK
                 self.assertEqual(self.emu.readMemValue(sr_addr, 4), expected, msg=testmsg)
+
+                # The TFFF exception should have been queued again
+                expected_excs = [
+                    get_int(dev, 'tfff'),
+                ]
+                self.assertEqual(self._getPendingExceptions(), expected_excs, msg=testmsg)
 
                 # Verify that there are no more frames remaining in the Tx FIFO
                 self.assertEqual(self.emu.dspi[dev].registers.sr.txctr, 0, msg=testmsg)
@@ -864,8 +900,11 @@ class MPC5674_DSPI_Test(MPC5674_Test):
 
                 # Verify there is are two remaining messages that has been
                 # transmitted, msgs 6 and 7
-                txd_msgs = self.emu.dspi[dev].getTransmittedObjs()
-                self.assertEqual(txd_msgs, expected_msgs[6:], msg=testmsg)
+                self.assertEqual(periphs[dev].getMsgs(), expected_msgs[6:], msg=testmsg)
+
+                # Disable all interrupt sources so the peripheral test starts 
+                # from the same initial state.
+                self.emu.writeMemValue(rser_addr, 0, 4)
 
     def test_dspi_controller_rx(self):
         # The transmit behavior should be the same for both controller and
@@ -892,11 +931,17 @@ class MPC5674_DSPI_Test(MPC5674_Test):
             rser_addr = baseaddr + DSPI_RSER_OFFSET
 
             # Before the first pass of this test the default state of the
-            # SR[TFFF] flag is 1, after that no messages will be transmitted so
-            # clear the TFFF flag now.
+            # SR[TFFF] flag is 1 by default. After being cleared.
             self.assertEqual(self.emu.readMemValue(sr_addr, 4), DSPI_SR_TFFF_MASK, msg=devname)
             self.assertEqual(self.emu.dspi[dev].registers.sr.tfff, 1, msg=devname)
             self.emu.writeMemValue(sr_addr, DSPI_SR_TFFF_MASK, 4)
+
+            # The TFFF flag should be re-set again and the interrupt should be 
+            # re-queued again.
+            self.assertEqual(self.emu.readMemValue(sr_addr, 4), DSPI_SR_TFFF_MASK)
+
+            # There won't be a queued interrupt until the RSER flag is set
+            self.assertEqual(self._getPendingExceptions(), [])
 
             # For both controller and peripheral mode
             for mstr_flag, expected_mode in device_modes:
@@ -915,8 +960,18 @@ class MPC5674_DSPI_Test(MPC5674_Test):
                 self.assertEqual(self.emu.dspi[dev].registers.mcr.halt, 1, msg=testmsg)
                 self.assertEqual(self.emu.dspi[dev].registers.sr.txrxs, 0, msg=testmsg)
 
+                # By default no interrupt sources should be enabled
+                self.assertEqual(self.emu.readMemValue(rser_addr, 4), 0, msg=testmsg)
+
                 # Enable all interrupt sources
                 self.emu.writeMemValue(rser_addr, rser_val, 4)
+
+                # The TFFF interrupt should have been queued because the TX FIFO 
+                # interrupt is always set until the FIFO has been filled.
+                expected_excs = [
+                    get_int(dev, 'tfff'),
+                ]
+                self.assertEqual(self._getPendingExceptions(), expected_excs, msg=testmsg)
 
                 # No messages in Rx FIFO
                 self.assertEqual(self.emu.dspi[dev].registers.sr.rxctr, 0)
@@ -941,7 +996,9 @@ class MPC5674_DSPI_Test(MPC5674_Test):
                 # receive 1 msg, make sure the RFDF event has occurred
                 self.emu.dspi[dev].processReceivedData(msgs[1])
 
-                expected = DSPI_SR_TXRXS_MASK | DSPI_SR_RFDF_MASK | \
+                # The TFFF flag should always be set because the transmit fifo 
+                # is not full
+                expected = DSPI_SR_TXRXS_MASK | DSPI_SR_TFFF_MASK | DSPI_SR_RFDF_MASK | \
                         (1 << DSPI_SR_RXCTR_SHIFT)
                 self.assertEqual(self.emu.readMemValue(sr_addr, 4), expected, msg=testmsg)
                 expected_excs = [
@@ -950,8 +1007,8 @@ class MPC5674_DSPI_Test(MPC5674_Test):
                 self.assertEqual(self._getPendingExceptions(), expected_excs, msg=testmsg)
 
                 # Clear the RFDF interrupt flag
-                self.emu.writeMemValue(sr_addr, expected, 4)
-                expected = DSPI_SR_TXRXS_MASK | (1 << DSPI_SR_RXCTR_SHIFT)
+                self.emu.writeMemValue(sr_addr, DSPI_SR_RFDF_MASK, 4)
+                expected = DSPI_SR_TXRXS_MASK | DSPI_SR_TFFF_MASK | (1 << DSPI_SR_RXCTR_SHIFT)
                 self.assertEqual(self.emu.readMemValue(sr_addr, 4), expected, msg=testmsg)
                 self.assertEqual(self.emu.dspi[dev].registers.sr.rxctr, 1)
 
@@ -961,7 +1018,7 @@ class MPC5674_DSPI_Test(MPC5674_Test):
                 self.emu.dspi[dev].processReceivedData(msgs[3])
                 self.emu.dspi[dev].processReceivedData(msgs[4])
 
-                expected = DSPI_SR_TXRXS_MASK | DSPI_SR_RFDF_MASK | \
+                expected = DSPI_SR_TXRXS_MASK | DSPI_SR_TFFF_MASK | DSPI_SR_RFDF_MASK | \
                         (4 << DSPI_SR_RXCTR_SHIFT)
                 self.assertEqual(self.emu.readMemValue(sr_addr, 4), expected, msg=testmsg)
                 expected_excs = [
@@ -970,8 +1027,8 @@ class MPC5674_DSPI_Test(MPC5674_Test):
                 self.assertEqual(self._getPendingExceptions(), expected_excs, msg=testmsg)
 
                 # Clear the RFDF interrupt flag
-                self.emu.writeMemValue(sr_addr, expected, 4)
-                expected = DSPI_SR_TXRXS_MASK | (4 << DSPI_SR_RXCTR_SHIFT)
+                self.emu.writeMemValue(sr_addr, DSPI_SR_RFDF_MASK, 4)
+                expected = DSPI_SR_TXRXS_MASK | DSPI_SR_TFFF_MASK | (4 << DSPI_SR_RXCTR_SHIFT)
                 self.assertEqual(self.emu.readMemValue(sr_addr, 4), expected, msg=testmsg)
                 self.assertEqual(self.emu.dspi[dev].registers.sr.rxctr, 4)
 
@@ -980,7 +1037,7 @@ class MPC5674_DSPI_Test(MPC5674_Test):
                 # "shift register") has the 5 messages just received.
                 self.emu.dspi[dev].processReceivedData(msgs[5])
 
-                expected = DSPI_SR_TXRXS_MASK | DSPI_SR_RFDF_MASK | \
+                expected = DSPI_SR_TXRXS_MASK | DSPI_SR_TFFF_MASK | DSPI_SR_RFDF_MASK | \
                         (4 << DSPI_SR_RXCTR_SHIFT)
                 self.assertEqual(self.emu.readMemValue(sr_addr, 4), expected, msg=testmsg)
                 expected_excs = [
@@ -989,8 +1046,8 @@ class MPC5674_DSPI_Test(MPC5674_Test):
                 self.assertEqual(self._getPendingExceptions(), expected_excs, msg=testmsg)
 
                 # Clear the RFDF interrupt flag
-                self.emu.writeMemValue(sr_addr, expected, 4)
-                expected = DSPI_SR_TXRXS_MASK | (4 << DSPI_SR_RXCTR_SHIFT)
+                self.emu.writeMemValue(sr_addr, DSPI_SR_RFDF_MASK, 4)
+                expected = DSPI_SR_TXRXS_MASK | DSPI_SR_TFFF_MASK | (4 << DSPI_SR_RXCTR_SHIFT)
                 self.assertEqual(self.emu.readMemValue(sr_addr, 4), expected, msg=testmsg)
                 self.assertEqual(self.emu.dspi[dev].registers.sr.rxctr, 4)
 
@@ -1010,7 +1067,7 @@ class MPC5674_DSPI_Test(MPC5674_Test):
                 # overwritten, but the RFOF interrupt has been set
                 self.emu.dspi[dev].processReceivedData(msgs[6])
 
-                expected = DSPI_SR_TXRXS_MASK | DSPI_SR_RFOF_MASK | \
+                expected = DSPI_SR_TXRXS_MASK | DSPI_SR_TFFF_MASK | DSPI_SR_RFOF_MASK | \
                         (4 << DSPI_SR_RXCTR_SHIFT)
                 self.assertEqual(self.emu.readMemValue(sr_addr, 4), expected, msg=testmsg)
                 expected_excs = [
@@ -1021,8 +1078,8 @@ class MPC5674_DSPI_Test(MPC5674_Test):
                 self.assertEqual(self.emu.dspi[dev]._rx_fifo, rx_fifo_data, msg=testmsg)
 
                 # Clear the RFOF interrupt flag
-                self.emu.writeMemValue(sr_addr, expected, 4)
-                expected = DSPI_SR_TXRXS_MASK | (4 << DSPI_SR_RXCTR_SHIFT)
+                self.emu.writeMemValue(sr_addr, DSPI_SR_RFOF_MASK, 4)
+                expected = DSPI_SR_TXRXS_MASK | DSPI_SR_TFFF_MASK | (4 << DSPI_SR_RXCTR_SHIFT)
                 self.assertEqual(self.emu.readMemValue(sr_addr, 4), expected, msg=testmsg)
 
                 # set MCR[ROOE] and receive 1 more message, ensure new message
@@ -1037,7 +1094,7 @@ class MPC5674_DSPI_Test(MPC5674_Test):
 
                 self.emu.dspi[dev].processReceivedData(msgs[7])
 
-                expected = DSPI_SR_TXRXS_MASK | DSPI_SR_RFOF_MASK | \
+                expected = DSPI_SR_TXRXS_MASK | DSPI_SR_TFFF_MASK | DSPI_SR_RFOF_MASK | \
                         (4 << DSPI_SR_RXCTR_SHIFT)
                 self.assertEqual(self.emu.readMemValue(sr_addr, 4), expected, msg=testmsg)
                 expected_excs = [
@@ -1048,8 +1105,8 @@ class MPC5674_DSPI_Test(MPC5674_Test):
                 self.assertEqual(self.emu.dspi[dev].registers.sr.rxctr, 4)
 
                 # Clear the RFOF interrupt flag
-                self.emu.writeMemValue(sr_addr, expected, 4)
-                expected = DSPI_SR_TXRXS_MASK | (4 << DSPI_SR_RXCTR_SHIFT)
+                self.emu.writeMemValue(sr_addr, DSPI_SR_RFOF_MASK, 4)
+                expected = DSPI_SR_TXRXS_MASK | DSPI_SR_TFFF_MASK | (4 << DSPI_SR_RXCTR_SHIFT)
                 self.assertEqual(self.emu.readMemValue(sr_addr, 4), expected, msg=testmsg)
 
                 # Verify that the data in the Rx FIFO hasn't changed
@@ -1080,18 +1137,24 @@ class MPC5674_DSPI_Test(MPC5674_Test):
                     # Every time a value is read from POPR the RFDF event is
                     # re-evaluated
                     if rxctr_val:
-                        expected = DSPI_SR_TXRXS_MASK | DSPI_SR_RFDF_MASK | \
+                        expected = DSPI_SR_TXRXS_MASK | DSPI_SR_TFFF_MASK | DSPI_SR_RFDF_MASK | \
                                 (rxctr_val << DSPI_SR_RXCTR_SHIFT)
                         self.assertEqual(self.emu.readMemValue(sr_addr, 4), expected, msg=msg)
                         expected_excs = [
                             get_int(dev, 'rfdf'),
                         ]
+                        # Clear the RFDF flag
                         self.assertEqual(self._getPendingExceptions(), expected_excs, msg=msg)
-                        self.emu.writeMemValue(sr_addr, expected, 4)
+                        self.emu.writeMemValue(sr_addr, DSPI_SR_RFDF_MASK, 4)
 
-                    expected = DSPI_SR_TXRXS_MASK | (rxctr_val << DSPI_SR_RXCTR_SHIFT)
+                    expected = DSPI_SR_TXRXS_MASK | DSPI_SR_TFFF_MASK | (rxctr_val << DSPI_SR_RXCTR_SHIFT)
                     self.assertEqual(self.emu.readMemValue(sr_addr, 4), expected, msg=msg)
                     self.assertEqual(self.emu.dspi[dev].registers.sr.rxctr, rxctr_val, msg=msg)
+
+                # Disable all interrupt sources so the peripheral test starts 
+                # from the same initial state.
+                self.emu.writeMemValue(rser_addr, 0, 4)
+
 
     @unittest.skip('Implement test after DSPI DSI mode is supported')
     def test_dspi_peripheral_dsi(self):

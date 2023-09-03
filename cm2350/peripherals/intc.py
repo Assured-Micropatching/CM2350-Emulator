@@ -284,6 +284,10 @@ class INTC(MMIOPeripheral):
     def shouldHandle(self, exception):
         # This function can be called from timer threads, so wrap the PSR and
         # CPR accesses in a lock
+        #
+        # TODO: should re-check the original ISR status/flag bits because this 
+        # may have been queued for a while before External Exceptions were 
+        # enabled
         with self._lock:
             exc_pri = self._getExcPrio(exception)
             ret = exc_pri >= self.registers.cpr.pri

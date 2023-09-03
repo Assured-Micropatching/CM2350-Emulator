@@ -242,6 +242,12 @@ class PpcTLBEntry:
         self.esel = esel
         self.config(valid, iprot, tid, ts, tsiz, epn, flags, rpn, user, perm)
 
+    def __str__(self):
+        return '[%d]:\t%d|%d|%d|%d  0x%08x -> 0x%08x (%s %s %s)' % \
+                (self.esel, self.valid, self.iprot, self.tid, self.ts, \
+                self.rpn, self.epn, self.size(), 'VLE' if self.vle else 'BookE', \
+                self.perm.name)
+
     def config(self, valid=0, iprot=0, tid=0, ts=0, tsiz=0, epn=0, flags=0, rpn=0, user=0, perm=0):
         self.valid = valid
         self.iprot = iprot
@@ -613,3 +619,10 @@ class PpcMMU:
         pid = self.emu.getRegister(REG_PID)
         entry = self.tlbFindEntry(va, ts=ts, tid=pid)
         return ts, pid, entry
+
+    def print(self):
+        '''
+        Helper/debug function to print the current TLB configuration
+        '''
+        for entry in self._tlb:
+            print(entry)

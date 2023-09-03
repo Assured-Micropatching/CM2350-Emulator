@@ -1355,16 +1355,6 @@ class MPC5674_SIU_Test(MPC5674_Test):
     def test_siu_connected_defaults(self):
         # Confirm the default connected GPIO values
         connected_gpio = {
-            # CM2350-specific GPIOs
-            #   GPIO89: 1
-            #   GPIO90: 0
-            #   GPIO91: 1
-            #   GPIO92: 0
-            89: True,
-            90: False,
-            91: True,
-            92: False,
-
             # PLLCFG
             #   GPIO208/PLLCFG0: 1
             #   GPIO209/PLLCFG1: 0

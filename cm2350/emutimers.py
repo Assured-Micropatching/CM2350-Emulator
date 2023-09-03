@@ -21,7 +21,7 @@ class EmuTimer:
 
     EmuTimer objects are created from the EmulationTime.registerTimer() function.
     '''
-    def __init__(self, emutime, name, callback, freq=None, ticks=None, duration=None):
+    def __init__(self, emutime, name, callback, freq=None, ticks=None, duration=None, clock=None):
         '''
         Saves timer configuration information and leaves the timer disabled.
 
@@ -39,6 +39,8 @@ class EmuTimer:
             duration    (optional) Instead of freq/ticks a time based duration
                         can be used to set the timer ticks based on an emulated
                         amount of elapsed time.
+            clock       (optional) Instead of a specific frequency a clock can
+                        be used as the frequency source of this timer.
 
         If the freq and ticks parameters are not provided during timer
         creation then they should be provided when the start() function is
@@ -50,10 +52,15 @@ class EmuTimer:
 
         # Frequency and ticks can either be set when the timer is created if
         # those are fixed, or later when the timer is started.
-        self.freq = freq
+        self._freq = freq
         self._timerfreq_to_sysfreq = None
         self._ticks = ticks
         self._duration = duration
+        self._clock = clock
+
+        # If a clock was not specified just use the specified frequency value
+        if self._clock is None:
+            self.freq = freq
 
         # When a timer is not running the target is None
         self.target = None
@@ -88,7 +95,13 @@ class EmuTimer:
         # default values may be
         if freq is not None:
             self.freq = freq
-        elif self.freq is None:
+
+        elif self._clock:
+            # If the frequency was not specified, and there is a clock set, use 
+            # that clock right now as the frequency
+            self.freq = self.emutime.getClock(self._clock)
+
+        elif self._freq is None:
             # If no frequency was provided when the timer was created or in this
             # start function, use the current timebase frequency
             self.freq = sysfreq
@@ -288,14 +301,14 @@ class EmuTimeCore:
         else:
             return self._systemFreq
 
-    def registerTimer(self, name, callback, freq=None, ticks=None, duration=None):
+    def registerTimer(self, name, callback, freq=None, ticks=None, duration=None, clock=None):
         '''
         Used by emulated peripherals and other components to create a timer
         that will be tracked and can be configured, started or stopped by
         those components.
         '''
         new_timer = EmuTimer(self, name, callback, freq=freq, ticks=ticks,
-                             duration=duration)
+                             duration=duration, clock=clock)
         logger.debug('Registering timer %s', name)
         self._timers.append(new_timer)
         return new_timer
@@ -597,6 +610,9 @@ class ScaledEmuTimeCore(EmuTimeCore):
             return self._timers[0]
         else:
             return None
+
+    def tick(self):
+        self._ticks += 1
 
     def _tb_run(self):
         '''

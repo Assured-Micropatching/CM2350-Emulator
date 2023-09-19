@@ -153,7 +153,6 @@ class CM2350:
             'platform': 'CM2350',
             'arch': 'ppc32-embedded',
             'bigend': True,
-            'format': 'blob',
             'CM2350': {
                 'p89': 1,
                 'p90': 0,
@@ -163,10 +162,6 @@ class CM2350:
             'MPC5674': {
                 'FMPLL': {
                     'extal': 40000000,
-                },
-                'SRAM': {
-                    # MPC5674F RAM size and address:
-                    'size': 256 * 1024,
                 },
             }
         },

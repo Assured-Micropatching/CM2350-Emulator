@@ -436,8 +436,8 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
                     'port': 'Host TCP port for eQADC_D IO server',
                 },
                 'eQADC_B': {
-                    'host': 'Host IP address for eQADC_D IO server',
-                    'port': 'Host TCP port for eQADC_D IO server',
+                    'host': 'Host IP address for eQADC_B IO server',
+                    'port': 'Host TCP port for eQADC_B IO server',
                 },
             }
         }
@@ -462,25 +462,16 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
                             help='Binary flash image to load in the emulator')
 
         # Open up the workspace and read the project configuration
-        project.VivProject.__init__(self)
-        vw, args = self.open_project_config(defconfig, docconfig, args, parser)
-
+        project.VivProject.__init__(self, defconfig=defconfig, docconfig=docconfig, args=args, parser=parser)
         del parser
 
         # the self.vw attribute will get created when the e200z7 class calls the
         # workspace emulator initializer.
-        e200z7.PPC_e200z7.__init__(self, vw)
+        e200z7.PPC_e200z7.__init__(self)
 
         # Now that the standard options have been parsed process anything
         # leftover
-        self._process_args(args)
-
-        # Set the proper port to use for the GDB server.
-        if args.gdb_port:
-            self.gdbstub.setPort(args.gdb_port)
-            self._wait_for_gdb_client = True
-        else:
-            self._wait_for_gdb_client = False
+        self._process_args(self.args)
 
         # The backup file is assumed to be located in the "project directory"
         self.flash = FLASH(self)

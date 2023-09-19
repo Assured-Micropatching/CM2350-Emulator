@@ -117,7 +117,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
                  eape.Ppc32EmbeddedEmulator, ppc_time.PpcEmuTime,
                  #emutimers.ScaledEmuTimeCore, clocks.EmuClocks):
                  emutimers.EmuTimeCore, clocks.EmuClocks):
-    def __init__(self, vw):
+    def __init__(self):
         # module registry
         self.modules = {}
 
@@ -141,7 +141,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         # emulator can be removed in the future to improve performance (at the
         # cost of analysis/inspection/live debug capabilities).
 
-        vimp_emu.WorkspaceEmulator.__init__(self, vw, nostack=True, funconly=False)
+        vimp_emu.WorkspaceEmulator.__init__(self, self.vw, nostack=True, funconly=False)
 
         ppc_time.PpcEmuTime.__init__(self)
         #emutimers.ScaledEmuTimeCore.__init__(self, 0.1)

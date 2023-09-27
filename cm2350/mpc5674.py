@@ -144,7 +144,7 @@ import envi.archs.ppc.const as ppc_const
 import vivisect.const as viv_const
 import vivisect.impemu.monitor as viv_imp_monitor
 
-from . import project, e200z7, intc_exc
+from . import project, e200z7, intc_exc, mmio
 
 # Peripherals
 from .peripherals.bam import BAM
@@ -720,15 +720,18 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         # Check if there are any memory maps loaded through the standard 
         # vivisect loading methods that we can copy into the emulator memory 
         # space.
+        #
+        # Use the MMIO methods and not the e200z7 core methods, we don't want to 
         for mva, msize, mperms, mname in self.vw.getMemoryMaps():
-            mbytes = self.vw.getByteDef(mva)
+            offset, mbytes = self.vw.getByteDef(mva)
+            chunk = mbytes[offset:offset+msize]
             if self.getMemoryMap(mva):
                 filename = self.vw.getFileByVa(mva)
                 logger.info('Updating %08x - %08x memory map from loaded file %s', mva, msize, filename)
-                self.writeMemory(mva, mbytes)
+                mmio.ComplexMemoryMap.writeMemory(self, mva, chunk)
             else:
                 logger.info('Adding %08x - %08x memory map from loaded file %s', mva, msize, filename)
-                self.addMemoryMap(mva, mperms, mname, mbytes)
+                mmio.ComplexMemoryMap.addMemoryMap(self, mva, mperms, mname, chunk)
 
         # Indicate that initial loading of flash memory from files is complete
         self.flash.load_complete(self.get_project_path(cfg['backup']))

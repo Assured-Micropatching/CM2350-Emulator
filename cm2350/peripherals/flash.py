@@ -1198,6 +1198,13 @@ class FLASH(ppc_peripherals.Module, mmio.MMIO_DEVICE):
 
         return flash_hash.digest()
 
+    def delete_backup(self, backup_filename=None):
+        if backup_filename is not None:
+            filename = backup_filename + '.' + self.get_hash().hex()
+            if os.path.exists(filename):
+                logger.debug('Deleting flash backup file %s', filename)
+                os.unlink(filename)
+
     def load_complete(self, backup_filename=None):
         """
         This function indicates to the flash peripheral that all initial

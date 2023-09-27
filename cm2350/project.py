@@ -1,17 +1,23 @@
 import sys
+import time
 import logging
 import os.path
 import weakref
 import argparse
 
+# Import any custom file parsers, this will cause any parsers to get patched 
+# into the vivisect.parsers package
+import cm2350.parsers
+
 import envi.cli as e_cli
+import envi.exc as e_exc
 import envi.common as e_common
 import envi.config as e_config
-import envi.exc as e_exc
+
 import vivisect
-import vivisect.base as viv_base
 import vivisect.cli as viv_cli
-import vivisect.parsers as viv_parsers
+import vivisect.base as viv_base
+import vivisect.const as viv_const
 
 
 __all__ = [
@@ -127,14 +133,16 @@ class VivProject(metaclass=VivProjectMeta):
 
         #parser.add_argument('-m', '--mode', default='emu', choices=['emu', 'interactive', 'analysis', 'test'],
         parser.add_argument('-m', '--mode', default='interactive', choices=['interactive', 'test'],
-                                help='Emulator mode')
+                            help='Emulator mode')
         parser.add_argument('-v', '--verbose', dest='verbose', default=1, action='count',
-                                help='Enable verbose mode (multiples matter: -vvvv)')
+                            help='Enable verbose mode (multiples matter: -vvvv)')
         parser.add_argument('-c', '--config-dir', nargs='?', const=False,
-                                help='Path to a directory to use for emulator configuration information')
+                            help='Path to a directory to use for emulator configuration information')
         parser.add_argument('-O', '--option', default=None, action='append',
-                                help='<secname>.<optname>=<optval> (optval must be json syntax)')
-        #parsed_args = prj_parser.parse_args(args)
+                            help='<secname>.<optname>=<optval> (optval must be json syntax)')
+        parser.add_argument('-p', '--parser', dest='parsemod', default=None, action='store',
+                            help='Manually specify the parser module (pe/elf/blob/...)')
+        parser.add_argument('file', nargs='*')
         parsed_args = parser.parse_args(args)
 
         # If this project has non-standard default configuration settings set them #
@@ -225,6 +233,18 @@ class VivProject(metaclass=VivProjectMeta):
                     logger.critical(e)
                     sys.exit(-1)
 
+        for fname in parsed_args.file:
+            start = time.time()
+            # If the file provided is a .xcal or an ihex file force vivisect 
+            # to use the xcal parser utility.
+            if (parsed_args.parsemod is None and fname.lower().endswith('.xcal')) or \
+                    parsed_args.parsemod == 'ihex':
+                parsed_args.parsemod = 'xcal'
+
+            vw.loadFromFile(fname, fmtname=parsed_args.parsemod)
+
+            end = time.time()
+            logger.info('Loaded (%.4f sec) %s', (end - start), fname)
 
         # If a workspace was not specified we need to manually set all of the
         # various Meta options based on project configuration options.
@@ -233,11 +253,16 @@ class VivProject(metaclass=VivProjectMeta):
                 raise Exception('architecture must be defined')
 
             vw.setMeta('Architecture', vw.config.project.arch)
-            vw.setMeta('DefaultCall', vivisect.const.archcalls.get(vw.config.project.arch, 'unknown'))
 
-        if vw.getMeta('Platform') is None:
+        defaultcall = vw.getMeta('Platform')
+        if defaultcall is None or defaultcall.lower() == 'unknown':
+            vw.setMeta('DefaultCall', viv_const.archcalls.get(vw.config.project.arch, 'unknown'))
+
+        platform = vw.getMeta('Platform')
+        if platform is None or platform.lower() == 'unknown':
             vw.setMeta('Platform', vw.config.project.platform)
 
+        # Always force it to use the project endianness
         vw.setMeta('bigend', vw.config.project.bigend)
 
         # Save the workspace and parsed args
@@ -253,9 +278,9 @@ class VivProject(metaclass=VivProjectMeta):
         Project files would be in this directory by default:
             ~/.PROJECT/WORKSPACE/filename
         """
-        if os.path.isabs(filename):
-            return filename
-        elif self.vw.vivhome is None:
+        if filename is None or self.vw.vivhome is None:
             return None
+        elif os.path.isabs(filename):
+            return filename
         else:
             return os.path.normpath(os.path.join(self.vw.vivhome, filename))

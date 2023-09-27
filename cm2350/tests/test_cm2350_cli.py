@@ -505,6 +505,8 @@ class CM2350_CLI(unittest.TestCase):
                 self.assertEqual(os.stat(bfile).st_size, 0x408000, msg=bfile)
             self.assertEqual(backup_file_glob, [backup_file])
 
+            # If the backup was reinitialized 
+
             # Lastly confirm that the hash of the backup file matches the
             # expected hash_value (because the contents of flash should not have
             # changed since it was initialized)

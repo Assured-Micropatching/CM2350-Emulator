@@ -2,8 +2,9 @@
 
 import enum
 
+import envi.bits as e_bits
+import envi.archs.ppc.regs as ppc_regs
 import vivisect.cli as v_cli
-import envi.archs.ppc.emu as eape
 
 from .mpc5674 import MPC5674_Emulator
 from . import project
@@ -181,6 +182,14 @@ class CM2350:
     def __init__(self, args=None):
         # Create the MPC5674 emulator with the default configuration values
         self.emu = MPC5674_Emulator(defconfig=self.defconfig, docconfig=self.docconfig, args=args)
+
+        if self.emu.custom_entrypoint:
+            # If a custom entry point was set, there are a few emulator settings 
+            # that need to be updated to ensure that the application can operate 
+            # correctly., the MSR must be updated to enable machine check 
+            # exceptions, and the PPC timebase should be enabled.
+            self.emu.setRegister(ppc_regs.REG_MSR, 0x1000)
+            self.emu.setRegister(ppc_regs.REG_HID0, 0x4000)
 
         # start off with the external pins
         self.emu.gpio(89, self.emu.vw.config.project.CM2350.p89)

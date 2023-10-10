@@ -802,12 +802,12 @@ class ExternalIOPeripheral(MMIOPeripheral):
             # Check if the IO thread should be created or not
             if emu.vw.getTransMeta('ProjectMode') == 'test':
                 self._server_args = None
-                logger.debug('Test mode enabled, not creating IO thread for IO module %s',
-                        self.devname)
+                logger.log(EMULOG, 'Test mode enabled, not creating IO thread for IO module %s',
+                           self.devname)
             elif self._config['port'] is None:
                 self._server_args = None
-                logger.debug('No port configured, not creating IO thread for IO module %s',
-                        self.devname)
+                logger.log(EMULOG, 'No port configured, not creating IO thread for IO module %s',
+                           self.devname)
             else:
                 # If the host IP address is empty default to localhost
                 if self._config['host'] is None:

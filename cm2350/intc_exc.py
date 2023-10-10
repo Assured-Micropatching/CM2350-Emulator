@@ -564,7 +564,6 @@ class DebugException(DebugPrioException):
         # registers and the exception handler is returned from with RFI
 
         # Set CSRR0 (next instruction) and CSRR1 (Current MSR)
-        #emu.setRegister(REG_CSRR0, emu._cur_instr[2])
         emu.setRegister(REG_CSRR0, emu.getProgramCounter())
         emu.setRegister(REG_CSRR1, emu.getRegister(REG_MSR))
 

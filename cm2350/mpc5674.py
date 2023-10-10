@@ -554,7 +554,25 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         )
         #self.flexray = FLEXRAY(self, 0xFFFE0000)
         self.sim = SIM(self, 0xFFFEC000)
-        self.bam = BAM(self, 0xFFFFC000)
+
+        # The BAM object is configurable, supply the valid boot addresses for 
+        # the MPC5674F.
+        #
+        # Possible locations of the RCHW value from
+        #   "Table 3-4. RCHW Location" (MPC5674FRM.pdf page 147)
+        #
+        #   Boot Mode |   Address
+        #   ----------+-------------
+        #    External | 0x0000_0000
+        #   ----------+-------------
+        #    Internal | 0x0000_0000
+        #             | 0x0000_4000
+        #             | 0x0001_0000
+        #             | 0x0001_C000
+        #             | 0x0002_0000
+        #             | 0x0003_0000
+        self.bam = BAM(self, 0xFFFFC000,
+                       (0x0000, 0x4000, 0x10000, 0x1C000, 0x20000, 0x30000))
 
         ########################################
 
@@ -565,6 +583,31 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
 
         # Complete initialization of the e200z7 core
         self.init()
+
+    def overrideEntryPoint(self):
+        # If one valid entrypoint defined, move the PC there now and set the 
+        # stack pointer (r1) to the end of RAM - 16 bytes (standard PowerPC 
+        # stack frame is 16 bytes)
+        #   RAM = 0x40000000 - 0x40040000
+        #   SP  = 0x4003fff0
+        entrypoints = self.vw.getEntryPoints()
+        self.custom_entrypoint = False
+        if len(entrypoints) == 1:
+            self.custom_entrypoint = True
+
+            # Set the program counter to the entry point, and then prepare the 
+            # processor to run as if the bootloader has been run.
+            logger.info('Overriding entry point 0x%x with 0x%x',
+                        self.getProgramCounter(), entrypoints[0])
+            self.setProgramCounter(entrypoints[0])
+
+            # Update the stack pointer
+            sram_end = self.vw.config.project.MPC5674.SRAM.addr + \
+                    self.vw.config.project.MPC5674.SRAM.size
+
+            # Get the calling convention stack alignment
+            align = max(c.align for _, c in self.getCallingConventions())
+            self.setRegister(ppc_regs.REG_R1, sram_end - align)
 
     def _process_args(self):
         """
@@ -582,6 +625,16 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         4. --reset-backup: re-initializes the backup file using the original
                            firmware file specified in the configuration.
         """
+
+        # First set the proper port to use for the GDB server if one was 
+        # specified.
+        if self.args.gdb_port:
+            self.gdbstub.setPort(args.gdb_port)
+            self._wait_for_gdb_client = True
+        else:
+            self._wait_for_gdb_client = False
+
+
         # Track if this is a new configuration directory or not (needed by
         # init_flash)
         if self.vw.vivhome and not os.path.isdir(self.vw.vivhome):
@@ -661,10 +714,6 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
             # an error
             cfg['backup'] = ''
 
-        elif self.args.reset_backup:
-            # Delete the backup file.
-            self.flash.delete_backup(self.get_project_path(cfg['backup']))
-
         # If no firmware file is identified print an error now as long as we 
         # aren't in test mode.
         if not cfg['fwFilename'] and mode != 'test':
@@ -676,8 +725,6 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         '''
         # Get the FLASH configuration info as a dict
         cfg = self.vw.config.project.MPC5674.FLASH
-
-        # Assume that the filenames are files in the project directory
 
         if cfg['fwFilename']:
             # First check if the file can be found without adding the project
@@ -721,17 +768,31 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         # vivisect loading methods that we can copy into the emulator memory 
         # space.
         #
-        # Use the MMIO methods and not the e200z7 core methods, we don't want to 
+        # Use the MMIO methods and not the e200z7 core methods, we can't use the 
+        # normal read/write functions yet because the MMU and other peripherals 
+        # have not yet been initialized
+        self.custom_overlay = False
         for mva, msize, mperms, mname in self.vw.getMemoryMaps():
+            self.custom_overlay = True
             offset, mbytes = self.vw.getByteDef(mva)
             chunk = mbytes[offset:offset+msize]
             if self.getMemoryMap(mva):
                 filename = self.vw.getFileByVa(mva)
                 logger.info('Updating %08x - %08x memory map from loaded file %s', mva, msize, filename)
-                mmio.ComplexMemoryMap.writeMemory(self, mva, chunk)
+
+                # Enable supervisor mode so the actual contents of flash are 
+                # modified if this is a flash memory segment.
+                with mmio.supervisorMode(self):
+                    mmio.ComplexMemoryMap.writeMemory(self, mva, chunk)
+
             else:
                 logger.info('Adding %08x - %08x memory map from loaded file %s', mva, msize, filename)
                 mmio.ComplexMemoryMap.addMemoryMap(self, mva, mperms, mname, chunk)
+
+        # Now that the initial state of flash has been loaded, if the command 
+        # line arguments indicate, delete the backup file
+        if self.args.reset_backup:
+            self.flash.delete_backup(self.get_project_path(cfg['backup']))
 
         # Indicate that initial loading of flash memory from files is complete
         self.flash.load_complete(self.get_project_path(cfg['backup']))
@@ -761,6 +822,10 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         # Init the core
         super().init()
 
+        # After BAM has initialized, if a valid entrypoint override exists, 
+        # modify the initial state of the emulator.
+        self.overrideEntryPoint()
+
         # If the --gdb-port flag was provided then we should wait for a GDB 
         # client to connect before continuing
         if self._wait_for_gdb_client:
@@ -784,13 +849,24 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         # Reset the core
         super().reset()
 
+        # After the emulator has been reset, BAM will have restored the initial 
+        # entry point, but if a valid custom entry point has been defined, 
+        # override the state of the emulator to start at the application.
+        self.overrideEntryPoint()
+
     def run(self):
         try:
-            logger.info('Starting execution @ 0x%x', self._cur_instr[2])
+            logger.info('Starting execution @ 0x%x', self._cur_instr[1])
+
+            # If the --gdb-port flag was provided then we should wait for a GDB 
+            # client to connect before continuing
+            if self._wait_for_gdb_client:
+                print('Waiting for GDB client to connect on port %d' % self.gdbstub._gdb_port)
+                self.gdbstub.waitForClient()
             e200z7.PPC_e200z7.run(self)
         except KeyboardInterrupt:
             print()
-            logger.info('Execution stopped @ 0x%x', self._cur_instr[2])
+            logger.info('Execution stopped @ 0x%x', self._cur_instr[1])
 
 
 ### special register hardware interfacing

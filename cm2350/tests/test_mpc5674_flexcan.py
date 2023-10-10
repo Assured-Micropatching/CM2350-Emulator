@@ -4,7 +4,7 @@ import random
 import struct
 import unittest
 
-from .. import intc_exc
+from .. import intc_exc, mmio
 from ..peripherals import flexcan
 from ..ppc_peripherals import ExternalIOClient
 
@@ -1472,7 +1472,8 @@ class MPC5674_FlexCAN_RealIO(MPC5674_Test):
         # current PC (0x00000000)
         pc = self.emu.getProgramCounter()
         instrs = b'\x60\x00\x00\x00' * 0x100
-        self.emu.flash.data[pc:pc+len(instrs)] = instrs
+        with mmio.supervisorMode(self.emu):
+            self.emu.writeMemory(pc, instrs)
 
         # Fill all of the possible target addresses for HW vectored CAN
         # interrupt handlers with one NOP and one RFI (0x4c000064) instruction
@@ -1484,9 +1485,8 @@ class MPC5674_FlexCAN_RealIO(MPC5674_Test):
             # The target address calculation is
             #   IPVR (0) | source << 4
             addr = src << 4
-            # Change flash directly because otherwise we have to do a whole
-            # thing to emulate proper flash erase/write procedures
-            self.emu.flash.data[addr:addr+8] = b'\x60\x00\x00\x00\x4c\x00\x00\x64'
+            with mmio.supervisorMode(self.emu):
+                self.emu.writeMemory(addr, b'\x60\x00\x00\x00\x4c\x00\x00\x64')
 
         for dev in range(4):
             devname, baseaddr = FLEXCAN_DEVICES[dev]

@@ -1,6 +1,17 @@
 ### memory mapped io
+
+from contextlib import ContextDecorator
+
 import envi
 import envi.memory as e_mem
+
+
+__all__ = [
+    'ComplexMemoryMap',
+    'supervisorMode',
+    'MMIO_DEVICE',
+]
+
 
 PERM_MMIO = 0x80000000
 MMIO_READ_HANDLER = 0
@@ -118,6 +129,19 @@ class ComplexMemoryMap(e_mem.MemoryObject):
 
     def setMemorySnap(self, snap):
         raise NotImplementedError('Implement this method to support memory snapshots')
+
+
+class supervisorMode(ContextDecorator):
+    def __init__(self, mmiodev):
+        super().__init__()
+        self.mmiodev = mmiodev
+
+    def __enter__(self):
+        self.old_supervisor_state = self.mmiodev._supervisor
+        self.mmiodev._supervisor = True
+
+    def __exit__(self, *exc):
+        self.mmiodev._supervisor = self.old_supervisor_state
 
 
 class MMIO_DEVICE:

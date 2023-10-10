@@ -83,10 +83,11 @@ def parse(data):
         if code == CODE.DATA:
             if cur_block is not None and \
                     cur_offset + len(cur_block) != offset + addr:
-                logger.log(e_common.MIRE, 'saving block 0x%x: 0x%x bytes', offset + addr, len(cur_block))
+                logger.log(e_common.MIRE, 'saving block 0x%x: 0x%x bytes', cur_offset, len(cur_block))
                 blocks[cur_offset] = cur_block
                 cur_block = bytearray()
                 cur_offset = offset + addr
+
             elif cur_block is None:
                 cur_block = bytearray()
                 cur_offset = offset + addr
@@ -122,7 +123,7 @@ def parse(data):
 
     # Save the last block
     if cur_block is not None:
-        logger.log(e_common.MIRE, 'saving block 0x%x: 0x%x bytes', offset + addr, len(cur_block))
+        logger.log(e_common.MIRE, 'saving block 0x%x: 0x%x bytes', cur_offset, len(cur_block))
         blocks[cur_offset] = cur_block
 
     return (blocks, entrypoints)
@@ -176,8 +177,7 @@ def parseFile(vw, filename, baseaddr=None):
 
     for eva in entrypoints:
         if eva is not None:
-            vw.addExport(eva, viv_const.EXP_FUNCTION, '__entry', fname, makeuniq=True)
-            logger.info('adding function from IHEX metadata: 0x%x (_entry)', eva)
+            logger.info('adding function from IHEX metadata: 0x%x', eva)
             vw.addEntryPoint(eva)
 
 

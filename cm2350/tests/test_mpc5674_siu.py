@@ -4,7 +4,7 @@ import itertools
 
 import envi.bits as e_bits
 
-from cm2350 import intc_exc
+from cm2350 import intc_exc, mmio
 
 from .helpers import MPC5674_Test
 
@@ -645,7 +645,8 @@ class MPC5674_SIU_Test(MPC5674_Test):
         pc = self.emu.getProgramCounter()
         self.assertEqual(pc, 0)
         instrs = b'\x60\x00\x00\x00' * 0x100
-        self.emu.flash.data[pc:pc+len(instrs)] = instrs
+        with mmio.supervisorMode(self.emu):
+            self.emu.writeMemory(pc, instrs)
 
         rsr_addr, size = SIU_RSR
 

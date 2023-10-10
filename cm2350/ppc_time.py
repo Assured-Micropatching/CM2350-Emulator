@@ -19,6 +19,9 @@ class PpcEmuTime:
     time class
     '''
     def __init__(self):
+        # TODO: The PPC timebase count should not reset during a software reset 
+        # or when the timebase is disabled.
+        #
         # The time base can be written to which is supposed to reset the point
         # that the system time is counting from.  We don't want to change the
         # EmulationTime._sysoffset offset because that may impact the tracking
@@ -92,7 +95,7 @@ class PpcEmuTime:
 
     def timebaseRunning(self):
         '''
-        Useful for testing to indicate check the timebase is running or not
+        Useful for testing to indicate if the timebase is running or not
         '''
         return self._tb_offset is not None
 

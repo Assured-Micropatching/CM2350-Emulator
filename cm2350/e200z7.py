@@ -27,8 +27,7 @@ import envi.bits as e_bits
 import envi.memory as e_mem
 
 # PPC registers
-from envi.archs.ppc.regs import REG_MCSR, REG_MSR, REG_TSR, REG_TCR, REG_DEC, \
-        REG_DECAR, REG_HID0, REG_HID1, REG_TBU, REG_TB, REG_TBU_WO, REG_TBL_WO
+import envi.archs.ppc.regs as eapr
 from .ppc_vstructs import BitFieldSPR, v_const, v_w1c, v_bits
 
 # PPC Specific packages
@@ -46,7 +45,7 @@ __all__ = [
 
 class HID0(BitFieldSPR):
     def __init__(self, emu):
-        super().__init__(REG_HID0, emu)
+        super().__init__(eapr.REG_HID0, emu)
         self.emcp = v_bits(1)
         self._pad0 = v_const(7)
         self.doze = v_bits(1)
@@ -69,7 +68,7 @@ class HID0(BitFieldSPR):
 
 class HID1(BitFieldSPR):
     def __init__(self, emu):
-        super().__init__(REG_HID1, emu)
+        super().__init__(eapr.REG_HID1, emu)
         self._pad0 = v_bits(16)
         self.sysctl = v_bits(8)
         self.ats = v_bits(1)
@@ -78,7 +77,7 @@ class HID1(BitFieldSPR):
 
 class TSR(BitFieldSPR):
     def __init__(self, emu):
-        super().__init__(REG_TSR, emu)
+        super().__init__(eapr.REG_TSR, emu)
         self.enw = v_w1c(1)
         self.wis = v_w1c(1)
         self.wrs = v_w1c(2)
@@ -89,7 +88,7 @@ class TSR(BitFieldSPR):
 
 class TCR(BitFieldSPR):
     def __init__(self, emu):
-        super().__init__(REG_TCR, emu)
+        super().__init__(eapr.REG_TCR, emu)
         self.wp = v_bits(2)
         self.wrc = v_bits(2)
         self.wie = v_bits(1)
@@ -105,7 +104,7 @@ class TCR(BitFieldSPR):
 
 class MCSR(BitFieldSPR):
     def __init__(self, emu):
-        super().__init__(REG_MCSR, emu)
+        super().__init__(eapr.REG_MCSR, emu)
         self.flags = v_w1c(32)
 
 
@@ -140,8 +139,13 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         # class the PPC_e200z7 is designed so that the core vivisect workspace
         # emulator can be removed in the future to improve performance (at the
         # cost of analysis/inspection/live debug capabilities).
-
         vimp_emu.WorkspaceEmulator.__init__(self, self.vw, nostack=True, funconly=False)
+
+        # The workspace emulator initializer copies the memory maps from the 
+        # vivisect workspace, but the standalone emulator memory maps should be 
+        # independent from the vivisect workspace.
+        for mva, _, _, _ in self.vw.getMemoryMaps():
+            self.delMemoryMap(mva)
 
         ppc_time.PpcEmuTime.__init__(self)
         #emutimers.ScaledEmuTimeCore.__init__(self, 0.1)
@@ -165,8 +169,8 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
 
         self.tsr = TSR(self)
 
-        self.addSprReadHandler(REG_DEC, self._readDec)
-        self.addSprWriteHandler(REG_DEC, self._writeDec)
+        self.addSprReadHandler(eapr.REG_DEC, self._readDec)
+        self.addSprWriteHandler(eapr.REG_DEC, self._writeDec)
 
         # Attach a callback to HID0[TBEN] that can start/stop timebase
         self.hid0 = HID0(self)
@@ -186,7 +190,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
 
         # MSR callback handler. We don't need a full BitFieldSPR object but we 
         # do need to re-evaluate pending interrupts when the MSR changes
-        self.addSprWriteHandler(REG_MSR, self.mcu_intc.msrUpdated)
+        self.addSprWriteHandler(eapr.REG_MSR, self.mcu_intc.msrUpdated)
 
         # Create GDBSTUB Server
         self.gdbstub = e200_gdb.e200GDB(self)
@@ -289,9 +293,9 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
 
         # If automatic reload is enabled (TCR[ARE]), load DEC from DECAR
         if self.tcr.are:
-            value = self.getRegister(REG_DECAR)
+            value = self.getRegister(eapr.REG_DECAR)
             logger.debug('Reloading DEC from DECAR: 0x%08x', value)
-            self.setRegister(REG_DEC, value)
+            self.setRegister(eapr.REG_DEC, value)
 
     def _startMCUWDT(self):
         # The watchdog period is determined by the TCR[WP] and TCR[WPEXT] values
@@ -324,7 +328,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
             exc.setCleanup(self._startMCUDEC)
         else:
             # There is no active decrementer exception, so start the timer
-            self.mcu_dec.start(ticks=self.getRegister(REG_DEC))
+            self.mcu_dec.start(ticks=self.getRegister(eapr.REG_DEC))
 
     def _tcrWIEUpdate(self, tcr):
         if self.tcr.wie and self.systimeRunning():
@@ -406,6 +410,8 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         '''
         self.disableTimebase()
 
+        self.resetRegisters()
+
         # Reset the cached "current instruction" data
         self._cur_instr = (None, 0, 0, False)
 
@@ -421,6 +427,133 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
 
         # Start the core emulator time now
         self.resume_time()
+
+    def resetRegisters(self):
+        '''
+        From "Table 17. Reset settings for Zen resources" (page 59 of e200z759RM.pdf):
+
+        NOTES:
+            1 Undefined on m_por assertion, unchanged on p_reset_b assertion
+            2 Reset by processor reset p_reset_b if DBCR0[EDM]=0, as well as unconditionally by m_por.
+            3 Read-only registers
+
+            -------------------------------------------------
+            Resource            |   System reset setting
+            -------------------------------------------------
+            Program Counter     |   p_rstbase[0:29] || 2’b00
+            GPRs                |   Unaffected (1)
+            CR                  |   Unaffected (1)
+            BUCSR               |   0x0000_0000
+            CSRR0               |   Unaffected (1)
+            CSRR1               |   Unaffected (1)
+            CTR                 |   Unaffected (1)
+            DAC1                |   0x0000_0000 (2)
+            DAC2                |   0x0000_0000 (2)
+            DBCNT               |   Unaffected (1)
+            DBCR0               |   0x0000_0000 (2)
+            DBCR1               |   0x0000_0000 (2)
+            DBCR2               |   0x0000_0000 (2)
+            DBCR3               |   0x0000_0000 (2)
+            DBCR4               |   0x0000_0000 (2)
+            DBCR5               |   0x0000_0000 (2)
+            DBCR6               |   0x0000_0000 (2)
+            DBSR                |   0x1000_0000 (2)
+            DDAM                |   0x0000_0000 (2)
+            DEAR                |   Unaffected (1)
+            DEC                 |   Unaffected (1)
+            DECAR               |   Unaffected (1)
+            DEVENT              |   0x0000_0000 (2)
+            DSRR0               |   Unaffected (1)
+            DSRR1               |   Unaffected (1)
+            DVC1                |   Unaffected (1)
+            DVC2                |   Unaffected (1)
+            ESR                 |   0x0000_0000
+            HID0                |   0x0000_0000
+            HID1                |   0x0000_0000
+            IAC1                |   0x0000_0000 (2)
+            IAC2                |   0x0000_0000 (2)
+            IAC3                |   0x0000_0000 (2)
+            IAC4                |   0x0000_0000 (2)
+            IAC5                |   0x0000_0000 (2)
+            IAC6                |   0x0000_0000 (2)
+            IAC7                |   0x0000_0000 (2)
+            IAC8                |   0x0000_0000 (2)
+            IVORxx              |   Unaffected (1)
+            IVPR                |   Unaffected (1)
+            LR                  |   Unaffected (1)
+            L1CFG0, L1CFG1 (3)  |   —
+            L1CSR0, L1CSR1      |   0x0000_0000
+            L1FINV0, L1FINV1    |   0x0000_0000
+            MAS0                |   Unaffected (1)
+            MAS1                |   Unaffected (1)
+            MAS2                |   Unaffected (1)
+            MAS3                |   Unaffected (1)
+            MAS4                |   Unaffected (1)
+            MAS6                |   Unaffected (1)
+            MCAR                |   Unaffected (1)
+            MCSR                |   0x0000_0000
+            MCSRR0              |   Unaffected (1)
+            MCSRR1              |   Unaffected (1)
+            MMUCFG (3)          |   —
+            MSR                 |   0x0000_0000
+            PID0                |   0x0000_0000
+            PIR                 |   0x0000_00 || p_cpuid[0:7]
+            PVR (3)             |   —
+            SPEFSCR             |   0x0000_0000
+            SPRG0               |   Unaffected (1)
+            SPRG1               |   Unaffected (1)
+            SPRG2               |   Unaffected (1)
+            SPRG3               |   Unaffected (1)
+            SPRG4               |   Unaffected (1)
+            SPRG5               |   Unaffected (1)
+            SPRG6               |   Unaffected (1)
+            SPRG7               |   Unaffected (1)
+            SPRG8               |   Unaffected (1)
+            SPRG9               |   Unaffected (1)
+            SRR0                |   Unaffected (1)
+            SRR1                |   Unaffected (1)
+            SVR3                |   —
+            TBL                 |   Unaffected (1)
+            TBU                 |   Unaffected (1)
+            TCR                 |   0x0000_0000
+            TSR                 |   0x0000_0000
+            TLB0CFG (3)         |   —
+            TLB1CFG (3)         |   —
+            USPRG0              |   Unaffected (1)
+            XER                 |   0x0000_0000
+        '''
+        # The following registers are defined as BitFieldSPRs and will be 
+        # automatically upset through the BitFieldSPR.reset() function:
+        #   MCSR, HID0, HID1, TCR, TSR
+        reset_regs = (
+            eapr.REG_BUCSR,
+            eapr.REG_DAC1, eapr.REG_DAC2,
+            eapr.REG_DBCR0, eapr.REG_DBCR1, eapr.REG_DBCR2, eapr.REG_DBCR3,
+            eapr.REG_DBCR4, eapr.REG_DBCR5, eapr.REG_DBCR6,
+            eapr.REG_DDAM,
+            eapr.REG_DEVENT,
+            eapr.REG_ESR,
+            #eapr.REG_HID0, eapr.REG_HID1,
+            eapr.REG_IAC1, eapr.REG_IAC2, eapr.REG_IAC3, eapr.REG_IAC4,
+            eapr.REG_IAC5, eapr.REG_IAC6, eapr.REG_IAC7, eapr.REG_IAC8,
+            eapr.REG_L1CSR0, eapr.REG_L1CSR1,
+            eapr.REG_L1FINV0, eapr.REG_L1FINV1,
+            #eapr.REG_MCSR,
+            eapr.REG_MSR,
+            eapr.REG_PID,  # PID0
+            eapr.REG_SPEFSCR,
+            #eapr.REG_TCR,
+            #eapr.REG_TSR,
+            eapr.REG_XER,
+        )
+
+        # Reset registers that should be reset to 0 by a software reset (power 
+        # on reset will automatically start each system register from 0
+        for reg in reset_regs:
+            self.setRegister(reg, 0x00000000)
+
+        # Additional register resets
+        self.setRegister(eapr.REG_DBSR, 0x10000000)
 
     def halt_exec(self):
         '''
@@ -781,20 +914,22 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         breakpoint may not work properly. Instead there is a special function to
         support modifying instructions.
 
+        Supervisor mode is enabled during this write to ensure that the new
+        opcode is written to actual flash instead of just to the flash shadow
+        block.
+
         This function clears the cache of any instructions written.
         '''
         ea, vle = self.mmu.translateInstrAddr(va)
         try:
-            mmio.ComplexMemoryMap.writeMemory(self, ea, bytez)
+            with mmio.supervisorMode(self):
+                mmio.ComplexMemoryMap.writeMemory(self, ea, bytez)
         except envi.SegmentationViolation:
             raise intc_exc.MceWriteBusError(pc=self.getProgramCounter(),
                                                data=b'', va=va)
 
-        # If this is an executable section, we may need to clear any instruction 
-        # cache
-        _, _, perm, _ = mmio.ComplexMemoryMap.getMemoryMap(self, ea)
-        if perm & e_mem.MM_READ_WRITE:
-            self.clearOpcache(ea, len(bytez))
+        # Attempt to clear any instruction cache
+        self.clearOpcache(ea, len(bytez))
 
     def parseOpcode(self, va, arch=envi.ARCH_PPC_E32, skipcache=False, skipcallbacks=False):
         '''

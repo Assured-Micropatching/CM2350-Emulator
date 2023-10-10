@@ -1,5 +1,6 @@
 import unittest
 
+from .. import mmio
 from ..ppc_mmu import PpcTlbPageSize, PpcTlbFlags, PpcTlbPerm
 
 from .helpers import MPC5674_Test
@@ -44,7 +45,8 @@ class MPC5674_Flash_BAM(MPC5674_Test):
         self.assertEqual(self.emu.bam.analyze(), False)
 
     def test_bam_find_rchw(self):
-        self.emu.flash.data[0:8] = b'\x00\x5a\x00\x00\xaa\xaa\xaa\xaa'
+        with mmio.supervisorMode(self.emu):
+            self.emu.writeMemory(0, b'\x00\x5a\x00\x00\xaa\xaa\xaa\xaa')
 
         # reset to cause standard BAM processing
         self.emu.reset()
@@ -54,10 +56,12 @@ class MPC5674_Flash_BAM(MPC5674_Test):
         self.assertEqual(self.emu.getProgramCounter(), 0xAAAAAAAA)
 
         # Modify the value @ 0x00000000 and ensure it is no longer found
-        self.emu.flash.data[0x0000] = 0xFF
+        with mmio.supervisorMode(self.emu):
+            self.emu.writeMemory(0, b'\xff')
 
         # Modify the value after offset 0x10004 so the entry_point value changes
-        self.emu.flash.data[0x4000:0x4008] = b'\x00\x5a\x00\x00\x20\x00\x00\x00'
+        with mmio.supervisorMode(self.emu):
+            self.emu.writeMemory(0x4000, b'\x00\x5a\x00\x00\x20\x00\x00\x00')
 
         self.emu.reset()
 
@@ -66,10 +70,12 @@ class MPC5674_Flash_BAM(MPC5674_Test):
         self.assertEqual(self.emu.getProgramCounter(), 0x20000000)
 
         # Modify the value @ 0x00004000 and ensure it is no longer found
-        self.emu.flash.data[0x4000] = 0xFF
+        with mmio.supervisorMode(self.emu):
+            self.emu.writeMemory(0x4000, b'\xff')
 
         # Modify the value after offset 0x10004 so the entry_point value changes
-        self.emu.flash.data[0x10000:0x10008] = b'\x00\x5a\x00\x00\x40\x00\x00\x00'
+        with mmio.supervisorMode(self.emu):
+            self.emu.writeMemory(0x10000, b'\x00\x5a\x00\x00\x40\x00\x00\x00')
 
         self.emu.reset()
 
@@ -78,10 +84,12 @@ class MPC5674_Flash_BAM(MPC5674_Test):
         self.assertEqual(self.emu.getProgramCounter(), 0x40000000)
 
         # Modify the value @ 0x00010000 and ensure it is no longer found
-        self.emu.flash.data[0x10000] = 0xFF
+        with mmio.supervisorMode(self.emu):
+            self.emu.writeMemory(0x10000, b'\xff')
 
         # Modify the value after offset 0x1C004 so the entry_point value changes
-        self.emu.flash.data[0x1C000:0x1C008] = b'\x00\x5a\x00\x00\x00\x12\x34\x56'
+        with mmio.supervisorMode(self.emu):
+            self.emu.writeMemory(0x1c000, b'\x00\x5a\x00\x00\x00\x12\x34\x56')
 
         self.emu.reset()
 
@@ -90,10 +98,12 @@ class MPC5674_Flash_BAM(MPC5674_Test):
         self.assertEqual(self.emu.getProgramCounter(), 0x00123456)
 
         # Modify the value @ 0x0001C000 and ensure it is no longer found
-        self.emu.flash.data[0x1C000] = 0xFF
+        with mmio.supervisorMode(self.emu):
+            self.emu.writeMemory(0x1c000, b'\xff')
 
         # Modify the value after offset 0x20004 so the entry_point value changes
-        self.emu.flash.data[0x20000:0x20008] = b'\x00\x5a\x00\x00\x00\x00\x00\x00'
+        with mmio.supervisorMode(self.emu):
+            self.emu.writeMemory(0x20000, b'\x00\x5a\x00\x00\x00\x00\x00\x00')
 
         self.emu.reset()
 
@@ -102,10 +112,12 @@ class MPC5674_Flash_BAM(MPC5674_Test):
         self.assertEqual(self.emu.getProgramCounter(), 0x00000000)
 
         # Modify the value @ 0x00020000 and ensure it is no longer found
-        self.emu.flash.data[0x20000] = 0xFF
+        with mmio.supervisorMode(self.emu):
+            self.emu.writeMemory(0x20000, b'\xff')
 
         # Modify the value after offset 0x30004 so the entry_point value changes
-        self.emu.flash.data[0x30000:0x30008] = b'\x00\x5a\x00\x00\x00\x00\x00\x10'
+        with mmio.supervisorMode(self.emu):
+            self.emu.writeMemory(0x30000, b'\x00\x5a\x00\x00\x00\x00\x00\x10')
 
         self.emu.reset()
 
@@ -115,7 +127,8 @@ class MPC5674_Flash_BAM(MPC5674_Test):
 
         # Modify the value @ 0x00030000 and ensure no valid RCHW entries are
         # found
-        self.emu.flash.data[0x30000] = 0xFF
+        with mmio.supervisorMode(self.emu):
+            self.emu.writeMemory(0x30000, b'\xff')
 
         self.emu.reset()
 
@@ -124,7 +137,8 @@ class MPC5674_Flash_BAM(MPC5674_Test):
         self.assertEqual(self.emu.getProgramCounter(), 0)
 
     def test_bam_rchw_booke(self):
-        self.emu.flash.data[0x4000:0x4008] = b'\x00\x5A\x00\x00\x40\x00\x00\x00'
+        with mmio.supervisorMode(self.emu):
+            self.emu.writeMemory(0x4000, b'\x00\x5A\x00\x00\x40\x00\x00\x00')
 
         # reset to cause standard BAM processing
         self.emu.reset()
@@ -152,7 +166,8 @@ class MPC5674_Flash_BAM(MPC5674_Test):
                 self.assertEqual(getattr(self.emu.mmu._tlb[esel], attr), val, msg)
 
     def test_bam_rchw_vle(self):
-        self.emu.flash.data[0x4000:0x4008] = b'\x01\x5A\x00\x00\x40\x00\x00\x00'
+        with mmio.supervisorMode(self.emu):
+            self.emu.writeMemory(0x4000, b'\x01\x5A\x00\x00\x40\x00\x00\x00')
 
         # reset to cause standard BAM processing
         self.emu.reset()
@@ -185,7 +200,8 @@ class MPC5674_Flash_BAM(MPC5674_Test):
                 self.assertEqual(getattr(self.emu.mmu._tlb[esel], attr), val, msg)
 
     def test_bam_rchw_swt(self):
-        self.emu.flash.data[0x4000:0x4008] = b'\x08\x5A\x00\x00\x40\x00\x00\x00'
+        with mmio.supervisorMode(self.emu):
+            self.emu.writeMemory(0x4000, b'\x08\x5A\x00\x00\x40\x00\x00\x00')
 
         # reset to cause standard BAM processing
         self.emu.reset()
@@ -213,7 +229,8 @@ class MPC5674_Flash_BAM(MPC5674_Test):
 
     @unittest.skip('fix implementation of MCU WDT so it runs correctly')
     def test_bam_rchw_mcu_wdt(self):
-        self.emu.flash.data[0x4000:0x4008] = b'\x04\x5A\x00\x00\x40\x00\x00\x00'
+        with mmio.supervisorMode(self.emu):
+            self.emu.writeMemory(0x4000, b'\x04\x5A\x00\x00\x40\x00\x00\x00')
 
         # reset to cause standard BAM processing
         self.emu.reset()
@@ -241,7 +258,8 @@ class MPC5674_Flash_BAM(MPC5674_Test):
 
     @unittest.skip('fix implementation of MCU WDT so it runs correctly')
     def test_bam_rchw_swt_and_mcu_wdt(self):
-        self.emu.flash.data[0x4000:0x4008] = b'\x0C\x5A\x00\x00\x40\x00\x00\x00'
+        with mmio.supervisorMode(self.emu):
+            self.emu.writeMemory(0x4000, b'\x0C\x5A\x00\x00\x40\x00\x00\x00')
 
         # reset to cause standard BAM processing
         self.emu.reset()

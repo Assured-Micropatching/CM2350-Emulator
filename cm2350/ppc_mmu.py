@@ -4,6 +4,7 @@ import envi
 from envi.archs.ppc.regs import *
 from envi.archs.ppc.const import *
 
+from .ppc_peripherals import Peripheral
 from .ppc_vstructs import BitFieldSPR, v_const
 from .ppc_peripherals import Module
 from .intc_exc import DataTlbException, InstructionTlbException
@@ -332,7 +333,6 @@ class PpcMMU(Module):
         # emulate having two TLBs.
         self._tlb = tuple(PpcTLBEntry(i) for i in range(32))
 
-    def init(self, emu):
         # The TLB entries can be invalidated selectively with the tlbivax
         # instruction, or all TLB entries can be invalidated by writing 1 to the
         # MMUCSR0[TLB1_FI] bit.
@@ -341,6 +341,11 @@ class PpcMMU(Module):
         # Handle writes to the cache status and control SPRs
         emu.addSprWriteHandler(REG_L1CSR0, self._l1csr0WriteHandler)
         emu.addSprWriteHandler(REG_L1CSR1, self._l1csr1WriteHandler)
+
+    def reset(self, emu):
+        # Return the TLB entries to the initial configuration.
+        for entry in self._tlb:
+            entry.config(valid=0, iprot=0, tid=0, ts=0, tsiz=0, epn=0, flags=0, rpn=0, user=0, perm=0)
 
         # Set TLB1 entry 0 to the correct default values.
         #   (from "10.6.7 TLB load on reset" e200z759CRM.pdf page 570)

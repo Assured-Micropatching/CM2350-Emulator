@@ -142,6 +142,8 @@ class VivProject(metaclass=VivProjectMeta):
                             help='<secname>.<optname>=<optval> (optval must be json syntax)')
         parser.add_argument('-p', '--parser', dest='parsemod', default=None, action='store',
                             help='Manually specify the parser module (pe/elf/blob/...)')
+        parser.add_argument('-E', '--entrypoint',
+                            help='Specify Entry Point where the emulator should start execution')
         parser.add_argument('file', nargs='*')
         parsed_args = parser.parse_args(args)
 
@@ -245,6 +247,11 @@ class VivProject(metaclass=VivProjectMeta):
 
             end = time.time()
             logger.info('Loaded (%.4f sec) %s', (end - start), fname)
+
+        # If an entry point was specified save it now.
+        if parsed_args.entrypoint is not None:
+            logger.info('Adding entrypoint %s', parsed_args.entrypoint)
+            vw.addEntryPoint(int(parsed_args.entrypoint, 0))
 
         # If a workspace was not specified we need to manually set all of the
         # various Meta options based on project configuration options.

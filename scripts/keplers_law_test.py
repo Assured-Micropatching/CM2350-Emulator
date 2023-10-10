@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
 
+# need to import the cm2350 module from the higher level directory, but I'm too 
+# lazy to create an installer for this emulator yet.
+import sys
+import os.path
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+
 import time
 import queue
 import struct

@@ -129,19 +129,12 @@ class TestEmulator:
 
     def XW(self, address, length = 32, dwperline = 8, snapshot=0):
         output = []
-        mm = self.emu.getMemoryMap(address)
-        if mm is None:
-            return ''
 
-        mmva, mmsz, mmperm, mmname = mm
-        if mmva+mmsz < address + (length*4):
-            goodbcnt = (mmva+mmsz-address)
-            diff = (length*4) - goodbcnt
-            bs = self.emu.readMemory(address, goodbcnt)
-            bs += b'A' * diff
-
-        else:
+        try:
             bs = self.emu.readMemory(address, length*4)
+        except:
+            bs = b''
+            length = 0
 
         for i in range(length):
             addr = address + (i * 4)

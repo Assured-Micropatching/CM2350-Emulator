@@ -978,7 +978,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         '''
         # Call the handlers outside of looping through the callbacks because a
         # callback may uninstall itself when called
-        call_list = [(s, e, h) for s, e, h in self._write_callbacks.values() if \
+        call_list = [(s, e, h) for s, e, h in self._read_callbacks.values() if \
                 s <= addr and addr < e]
         for start, end, handler in call_list:
             # If data is None, read the "bad" data now

@@ -594,9 +594,9 @@ class TestEmulator:
                     # print the updated latest stuff....
                     if showafter:
                         try:
-                            extra = self.getNameRefs(op)
-                            if len(extra):
-                                print("after:\t%s\t%s"%(mcanv.strval, extra))
+                            #extra = self.getNameRefs(op)
+                            #if len(extra):
+                            #    print("after:\t%s\t%s"%(mcanv.strval, extra))
 
                             self.printMemStatus(op, use_cached=True)
                         except Exception as e:
@@ -685,6 +685,18 @@ class TestEmulator:
     def dump(self, addr, size=64):
         for i in range(0, size, 32):
             print('0x%08x:  %s' % (addr+i, self.emu.readMemory(addr+i, 32).hex(' ', 4)))
+
+    def watch(self, start, end):
+        self.emu.installReadCallback(start, end, self.watchReadCallback)
+        self.emu.installWriteCallback(start, end, self.watchWriteCallback)
+
+    def watchReadCallback(self, src, addr, data, instr):
+        op, va, _, _ = self.emu._cur_instr
+        print('%08x:  %15s   READ 0x%x = %s' % (va, op, addr, data.hex()))
+
+    def watchWriteCallback(self, src, addr, data, instr):
+        op, va, _, _ = self.emu._cur_instr
+        print('%08x:  %15s  WRITE 0x%x = %s' % (va, op, addr, data.hex()))
 
 
 if __name__ == "__main__":

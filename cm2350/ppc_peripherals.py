@@ -1085,9 +1085,9 @@ class ExternalIOPeripheral(MMIOPeripheral):
                         if len(exc.args) >= 1 and exc.args[0] == errno.EAGAIN:
                             # If this indicates a connection lost (EAGAIN), 
                             # don't print the exception information.
-                            logger.debug('client sock %r disconnected', sock)
+                            logger.log(EMULOG, 'client sock %r disconnected', sock)
                         else:
-                            logger.debug('client sock %r disconnected', sock, exc_info=1)
+                            logger.log(EMULOG, 'client sock %r disconnected', sock, exc_info=1)
                         self._clients.remove(sock)
                         inputs.remove(sock)
 

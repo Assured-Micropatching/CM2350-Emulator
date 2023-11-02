@@ -591,15 +591,14 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         #   RAM = 0x40000000 - 0x40040000
         #   SP  = 0x4003fff0
         entrypoints = self.vw.getEntryPoints()
-        self.custom_entrypoint = False
+        self.custom_entrypoint = None
         if len(entrypoints) == 1:
-            self.custom_entrypoint = True
-
             # Set the program counter to the entry point, and then prepare the 
             # processor to run as if the bootloader has been run.
+            self.custom_entrypoint = entrypoints[0]
             logger.info('Overriding entry point 0x%x with 0x%x',
-                        self.getProgramCounter(), entrypoints[0])
-            self.setProgramCounter(entrypoints[0])
+                        self.getProgramCounter(), self.custom_entrypoint)
+            self.setProgramCounter(self.custom_entrypoint)
 
             # Update the stack pointer
             sram_end = self.vw.config.project.MPC5674.SRAM.addr + \

@@ -183,7 +183,7 @@ class CM2350:
         # Create the MPC5674 emulator with the default configuration values
         self.emu = MPC5674_Emulator(defconfig=self.defconfig, docconfig=self.docconfig, args=args)
 
-        if self.emu.custom_entrypoint:
+        if self.emu.custom_entrypoint is not None:
             # If a custom entry point was set, there are a few emulator settings 
             # that need to be updated to ensure that the application can operate 
             # correctly., the MSR must be updated to enable machine check 

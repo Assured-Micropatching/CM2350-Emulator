@@ -330,8 +330,6 @@ class MPC5674_monitor(viv_imp_monitor.AnalysisMonitor):
 
 ################################# END EmuMon
 
-DEFAULT_FLASH_FILENAME = 'cm2350.flash'
-
 
 class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
     # MPC5674-specific project configuration values
@@ -646,15 +644,14 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         # Use the EnviConfig.cfginfo attribute directly so we can overwrite the
         # running configuration values for a specific run of the emulator if the 
         # "no backup" 
-        cfg = self.vw.config.project.MPC5674.FLASH.cfginfo
-        cfg_flash_file = self.get_project_path(DEFAULT_FLASH_FILENAME)
+        flash_cfg = self.vw.config.project.MPC5674.FLASH.cfginfo
 
         mode = self.vw.getTransMeta("ProjectMode")
 
         # Get any custom file name and offsets to use for this run of the 
         # emulator based on the init_flash and no_backup flags.
         if self.args.init_flash:
-            updated_config = getFlashOffsets(self.args.flash_image)
+            updated_config = getFlashOffsets(self.args.init_flash)
         elif self.args.no_backup:
             updated_config = getFlashOffsets(self.args.no_backup)
         else:
@@ -664,30 +661,38 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         # Initialize the configuration flash file using the specified firmware 
         # file.
         if self.args.init_flash:
+            # If the filename specified in the command line arguments was not 
+            # valid, raise an exception
+            if updated_config['fwFilename'] is None:
+                raise ValueError('ERROR: --init-flash option requires valid initial firmware image')
+
+            # Figure out what configuration firmware filename is from the 
+            # existing config or from the new file.
+            flash_cfg['fwFilename'] = updated_config['fwFilename']
+            cfg_flash_file = self.get_project_path(updated_config['fwFilename'])
+
             if not new_config and os.path.exists(cfg_flash_file):
                 # If the flash image is valid, and this is NOT a new
                 # configuration print a message indicating that the existing
                 # flash image is being overwritten
-                logger.critical('Overwriting flash image in existing config directory %s with %s', cfg_flash_file, self.args.flash_image)
+                logger.critical('Overwriting flash image in existing config directory %s with %s', cfg_flash_file, self.args.init_flash)
             else:
-                logger.warning('Copying flash image (%s) into config (%s)', self.args.flash_image, cfg_flash_file)
+                logger.warning('Copying flash image (%s) into config (%s)', self.args.init_flash, cfg_flash_file)
 
-            # Copy the specified file to the project directory
-            shutil.copyfile(cfg['fwFilename'], cfg_flash_file)
-
-            # Update the configuration with the name of the saved flash
-            # image file
-            cfg['fwFilename'] = cfg_flash_file
+            # If the source and destination files are not the same, copy the 
+            # specified file to the destination flash file.
+            if self.args.init_flash != cfg_flash_file:
+                shutil.copyfile(self.args.init_flash, cfg_flash_file)
 
             # If the init flash file was large enough to contain the shadow 
             # flash regions, also specify those as being in the flash file
             if updated_config['shadowAFilename'] is not None:
-                cfg['shadowAFilename'] = cfg_flash_file
-                cfg['shadowAOffset'] = updated_config['shadowAOffset']
+                flash_cfg['shadowAFilename'] = updated_config['shadowAFilename']
+                flash_cfg['shadowAOffset'] = updated_config['shadowAOffset']
 
             if updated_config['shadowBFilename'] is not None:
-                cfg['shadowBFilename'] = cfg_flash_file
-                cfg['shadowBOffset'] = updated_config['shadowBOffset']
+                flash_cfg['shadowBFilename'] = updated_config['shadowBFilename']
+                flash_cfg['shadowBOffset'] = updated_config['shadowBOffset']
 
             # If init_flash was specified save the config file now
             logger.critical('Saving configuration file %s', self.vw.config.filename)
@@ -698,23 +703,23 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
             # filename (and offset) config values from the updated config to
             # the running configuration.
             if updated_config['fwFilename'] is not None:
-                cfg['fwFilename'] = updated_config['fwFilename']
-                cfg['baseaddr'] = updated_config['baseaddr']
+                flash_cfg['fwFilename'] = updated_config['fwFilename']
+                flash_cfg['baseaddr'] = updated_config['baseaddr']
             if updated_config['shadowAFilename'] is not None:
-                cfg['shadowAFilename'] = updated_config['shadowAFilename']
-                cfg['shadowAOffset'] = updated_config['shadowAOffset']
+                flash_cfg['shadowAFilename'] = updated_config['shadowAFilename']
+                flash_cfg['shadowAOffset'] = updated_config['shadowAOffset']
             if updated_config['shadowBFilename'] is not None:
-                cfg['shadowBFilename'] = updated_config['shadowBFilename']
-                cfg['shadowBOffset'] = updated_config['shadowBOffset']
+                flash_cfg['shadowBFilename'] = updated_config['shadowBFilename']
+                flash_cfg['shadowBOffset'] = updated_config['shadowBOffset']
 
             # Set to an empty string instead of None because otherwise 
             # retreiving this field through project.MPC5674.FLASH.backup throws 
             # an error
-            cfg['backup'] = ''
+            flash_cfg['backup'] = ''
 
         # If no firmware file is identified print an error now as long as we 
         # aren't in test mode.
-        if not cfg['fwFilename'] and mode != 'test':
+        if not flash_cfg['fwFilename'] and mode != 'test':
             logger.critical('No flash file provided, unable to load flash image')
 
     def loadInitialFirmware(self):
@@ -722,45 +727,45 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         load firmware into the emulator
         '''
         # Get the FLASH configuration info as a dict
-        cfg = self.vw.config.project.MPC5674.FLASH
+        flash_cfg = self.vw.config.project.MPC5674.FLASH
 
-        if cfg['fwFilename']:
+        if flash_cfg['fwFilename']:
             # First check if the file can be found without adding the project
             # path. Otherwise assume it is intended to be a filename path
             # relative to the project path.
-            if os.path.exists(cfg['fwFilename']):
-                path = cfg['fwFilename']
+            if os.path.exists(flash_cfg['fwFilename']):
+                path = flash_cfg['fwFilename']
             else:
-                path = self.get_project_path(cfg['fwFilename'])
+                path = self.get_project_path(flash_cfg['fwFilename'])
             if os.path.exists(path):
-                logger.info("Loading Firmware Blob from %r @ 0x%x", path, cfg['baseaddr'])
-                self.flash.load(FlashDevice.FLASH_MAIN, path, cfg['baseaddr'])
+                logger.info("Loading Firmware Blob from %r @ 0x%x", path, flash_cfg['baseaddr'])
+                self.flash.load(FlashDevice.FLASH_MAIN, path, flash_cfg['baseaddr'])
             else:
                 logger.critical("Starting emulator without valid firmware, please update config: %s", self.vw.vivhome)
 
-        if cfg['shadowAFilename']:
+        if flash_cfg['shadowAFilename']:
             # First check if the file can be found without adding the project
             # path. Otherwise assume it is intended to be a filename path
             # relative to the project path.
-            if os.path.exists(cfg['shadowAFilename']):
-                path = cfg['shadowAFilename']
+            if os.path.exists(flash_cfg['shadowAFilename']):
+                path = flash_cfg['shadowAFilename']
             else:
-                path = self.get_project_path(cfg['shadowAFilename'])
+                path = self.get_project_path(flash_cfg['shadowAFilename'])
             if os.path.exists(path):
-                logger.info("Loading Shadow A Blob from %r @ 0x%x", path, cfg['shadowAOffset'])
-                self.flash.load(FlashDevice.FLASH_A_SHADOW, path, cfg['shadowAOffset'])
+                logger.info("Loading Shadow A Blob from %r @ 0x%x", path, flash_cfg['shadowAOffset'])
+                self.flash.load(FlashDevice.FLASH_A_SHADOW, path, flash_cfg['shadowAOffset'])
 
-        if cfg['shadowBFilename']:
+        if flash_cfg['shadowBFilename']:
             # First check if the file can be found without adding the project
             # path. Otherwise assume it is intended to be a filename path
             # relative to the project path.
-            if os.path.exists(cfg['shadowBFilename']):
-                path = cfg['shadowBFilename']
+            if os.path.exists(flash_cfg['shadowBFilename']):
+                path = flash_cfg['shadowBFilename']
             else:
-                path = self.get_project_path(cfg['shadowBFilename'])
+                path = self.get_project_path(flash_cfg['shadowBFilename'])
             if os.path.exists(path):
-                logger.info("Loading Shadow B Blob from %r @ 0x%x", path, cfg['shadowBOffset'])
-                self.flash.load(FlashDevice.FLASH_B_SHADOW, path, cfg['shadowBOffset'])
+                logger.info("Loading Shadow B Blob from %r @ 0x%x", path, flash_cfg['shadowBOffset'])
+                self.flash.load(FlashDevice.FLASH_B_SHADOW, path, flash_cfg['shadowBOffset'])
 
         # Check if there are any memory maps loaded through the standard 
         # vivisect loading methods that we can copy into the emulator memory 
@@ -790,10 +795,10 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         # Now that the initial state of flash has been loaded, if the command 
         # line arguments indicate, delete the backup file
         if self.args.reset_backup:
-            self.flash.delete_backup(self.get_project_path(cfg['backup']))
+            self.flash.delete_backup(self.get_project_path(flash_cfg['backup']))
 
         # Indicate that initial loading of flash memory from files is complete
-        self.flash.load_complete(self.get_project_path(cfg['backup']))
+        self.flash.load_complete(self.get_project_path(flash_cfg['backup']))
 
     def gpio(self, pinid, val=None):
         if val is not None:

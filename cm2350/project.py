@@ -287,6 +287,8 @@ class VivProject(metaclass=VivProjectMeta):
         """
         if filename is None or self.vw.vivhome is None:
             return None
+        elif filename.startswith(self.vw.vivhome):
+            return os.path.relpath(filename, self.vw.vivhome)
         elif os.path.isabs(filename):
             return filename
         else:

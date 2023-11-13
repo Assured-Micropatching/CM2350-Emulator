@@ -1238,7 +1238,7 @@ class FLASH(ppc_peripherals.Module, mmio.MMIO_DEVICE):
             if backup_filename is not None:
                 filename = backup_filename + '.' + self.get_hash().hex()
                 if os.path.exists(filename):
-                    logger.debug('Opening flash backup file %s', filename)
+                    logger.debug('Restoring state of system from flash backup file %s', filename)
                     # use 'r+b' mode with open to avoid truncating the backup
                     # file
                     self._backup = open(filename, 'r+b')
@@ -1251,11 +1251,17 @@ class FLASH(ppc_peripherals.Module, mmio.MMIO_DEVICE):
                     #
                     # Shadow flash B is first in the backup file
                     flash_data = self._backup.read(flash_size)
-                    logger.debug('Restoring %s from backup file %s @ 0x%x to 0x%x', FlashDevice.FLASH_MAIN, filename, self._backup.tell(), self._backup.tell() + flash_size)
+                    logger.debug('Restoring %s from backup file %s @ 0x%x to 0x%x',
+                                 FlashDevice.FLASH_MAIN, filename, self._backup.tell(),
+                                 self._backup.tell() + flash_size)
                     shadow_b_data = self._backup.read(shadow_B_size)
-                    logger.debug('Restoring %s from backup file %s @ 0x%x to 0x%x', FlashDevice.FLASH_B_SHADOW, filename, self._backup.tell(), self._backup.tell() + shadow_B_size)
+                    logger.debug('Restoring %s from backup file %s @ 0x%x to 0x%x',
+                                 FlashDevice.FLASH_B_SHADOW, filename, self._backup.tell(),
+                                 self._backup.tell() + shadow_B_size)
                     shadow_a_data = self._backup.read(shadow_A_size)
-                    logger.debug('Restoring %s from backup file %s @ 0x%x to 0x%x', FlashDevice.FLASH_A_SHADOW, filename, self._backup.tell(), self._backup.tell() + shadow_A_size)
+                    logger.debug('Restoring %s from backup file %s @ 0x%x to 0x%x',
+                                 FlashDevice.FLASH_A_SHADOW, filename, self._backup.tell(),
+                                 self._backup.tell() + shadow_A_size)
 
                     if len(flash_data) == flash_size and \
                             len(shadow_b_data) == shadow_B_size and \

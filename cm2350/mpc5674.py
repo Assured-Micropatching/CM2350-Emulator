@@ -668,16 +668,11 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
 
             # Figure out what configuration firmware filename is from the 
             # existing config or from the new file.
-            flash_cfg['fwFilename'] = updated_config['fwFilename']
-            cfg_flash_file = self.get_project_path(updated_config['fwFilename'])
+            flash_cfg['fwFilename'] = os.path.basename(updated_config['fwFilename'])
+            cfg_flash_file = self.get_project_path(flash_cfg['fwFilename'])
 
-            if not new_config and os.path.exists(cfg_flash_file):
-                # If the flash image is valid, and this is NOT a new
-                # configuration print a message indicating that the existing
-                # flash image is being overwritten
-                logger.critical('Overwriting flash image in existing config directory %s with %s', cfg_flash_file, self.args.init_flash)
-            else:
-                logger.warning('Copying flash image (%s) into config (%s)', self.args.init_flash, cfg_flash_file)
+            logger.critical('Initializing flash image in config directory %s with %s', 
+                            cfg_flash_file, self.args.init_flash)
 
             # If the source and destination files are not the same, copy the 
             # specified file to the destination flash file.
@@ -687,11 +682,11 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
             # If the init flash file was large enough to contain the shadow 
             # flash regions, also specify those as being in the flash file
             if updated_config['shadowAFilename'] is not None:
-                flash_cfg['shadowAFilename'] = updated_config['shadowAFilename']
+                flash_cfg['shadowAFilename'] = os.path.basename(updated_config['shadowAFilename'])
                 flash_cfg['shadowAOffset'] = updated_config['shadowAOffset']
 
             if updated_config['shadowBFilename'] is not None:
-                flash_cfg['shadowBFilename'] = updated_config['shadowBFilename']
+                flash_cfg['shadowBFilename'] = os.path.basename(updated_config['shadowBFilename'])
                 flash_cfg['shadowBOffset'] = updated_config['shadowBOffset']
 
             # If init_flash was specified save the config file now
@@ -793,7 +788,7 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
                 mmio.ComplexMemoryMap.addMemoryMap(self, mva, mperms, mname, chunk)
 
         # Now that the initial state of flash has been loaded, if the command 
-        # line arguments indicate, delete the backup file
+        # line arguments indicates to reset the backup, delete the backup file
         if self.args.reset_backup:
             self.flash.delete_backup(self.get_project_path(flash_cfg['backup']))
 

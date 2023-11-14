@@ -52,6 +52,9 @@ Some of the most common ways to use these objects are:
         # NOTE: this must be the physical address and not a virtual address
         ecui.watch(<startddr>, <stopaddr>)
 
+        # Simple tool to hexdump memory (must be a physical memory address)
+        ecui.dump(<addr>, [<size>])
+
     emumon:
         emumon.calls        # All called functions and the context the call is
                             # from
@@ -70,6 +73,11 @@ Some of the most common ways to use these objects are:
         emu.getRegisterByName('pc')
         emu.setRegisterByName('pc', 0x23ed0)
         op = emu.parseOpcode(0x23ed0)
+        emu.parseOpcode(0x23ed0)
+        emu.readMemory(<addr>)
+        emu.readMemValue(<addr>, <size>)
+        emu.writeMemory(<addr>, <bytes>)
+        emu.writeMemValue(<addr>, <integer>, <size>)
 '''
 
     import envi.interactive as ei

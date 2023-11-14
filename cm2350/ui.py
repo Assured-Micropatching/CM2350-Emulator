@@ -1,13 +1,15 @@
 #!/usr/bin/env python
 import cmd
 import sys
+import enum
 import time
 import struct
-import struct
+import logging
 import traceback
 
 import envi
 import envi.memory as e_m
+import envi.common as e_common
 import envi.expression as e_expr
 import envi.memcanvas as e_memcanvas
 
@@ -19,6 +21,17 @@ SNAP_NORM = 0
 SNAP_CAP = 1
 SNAP_DIFF = 2
 SNAP_SWAP = 3
+
+
+# enum to clearly define valid logging levels
+class LOG_LEVEL(enum.IntEnum):
+    CRITICAL = logging.CRITICAL
+    ERROR    = logging.ERROR
+    WARN     = logging.WARN
+    INFO     = logging.INFO
+    DEBUG    = logging.DEBUG
+    EMULOG   = e_common.EMULOG
+
 
 def parseExpression(emu, expr, lcls={}):
     '''
@@ -697,6 +710,22 @@ class TestEmulator:
     def watchWriteCallback(self, src, addr, data, instr):
         op, va, _, _ = self.emu._cur_instr
         print('%08x:  %15s  WRITE 0x%x = %s' % (va, op, addr, data.hex()))
+
+    def setLogLevel(self, level):
+        '''
+        Update log level for all cm2350 emulator modules. The LOG_LEVEL enum
+        defined in this module specifies the valid log levels
+        '''
+        for module, logger in logging.Logger.manager.loggerDict.items():
+            if module.startswith('cm2350') and \
+                    not isinstance(logger, logging.PlaceHolder):
+                logger.setLevel(level)
+
+    def getLogLevel(self):
+        # Assume the top level cm2350 module log level is the "current" log 
+        # level
+        import cm2350
+        return LOG_LEVEL(cm2350.logger.getEffectiveLevel())
 
 
 if __name__ == "__main__":

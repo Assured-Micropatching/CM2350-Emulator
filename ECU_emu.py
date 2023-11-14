@@ -2,6 +2,7 @@
 
 # for development purposes.  likely to be removed from final
 from cm2350 import ui
+from cm2350.ui import LOG_LEVEL
 
 # Emulator-specific packages
 import cm2350
@@ -54,6 +55,13 @@ Some of the most common ways to use these objects are:
 
         # Simple tool to hexdump memory (must be a physical memory address)
         ecui.dump(<addr>, [<size>])
+
+        # Change logging level on the fly. Default log level with no "-v" flags
+        # is LOG_LEVEL.ERROR
+        ecui.setLogLevel(LOG_LEVEL.ERROR)
+
+        # Print the current log level
+        ecui.getLogLevel()
 
     emumon:
         emumon.calls        # All called functions and the context the call is

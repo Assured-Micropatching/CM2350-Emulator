@@ -51,7 +51,6 @@ def parse(data):
     """
     Parses ihex files and ignores any invalid data
     """
-    print('data len', len(data))
     blocks = {}
     entrypoints = []
     cur_block = None

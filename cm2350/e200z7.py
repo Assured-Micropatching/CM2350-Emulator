@@ -121,6 +121,9 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         # module registry
         self.modules = {}
 
+        # BitFieldSPR registry
+        self.sprs = {}
+
         # initialize base class and CPU/Modules
         mmio.ComplexMemoryMap.__init__(self)
 
@@ -186,7 +189,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         self.addSprWriteHandler(REG_MSR, self.mcu_intc.msrUpdated)
 
         # Create GDBSTUB Server
-        #self.gdbstub = e200_gdb.e200GDB(self)
+        self.gdbstub = e200_gdb.e200GDB(self)
         self._run = threading.Event()
 
         # By default the debugger _run event flag should be set.
@@ -579,6 +582,38 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
 
     def isValidPointer(self, va):
         return self.mmu.getDataEntry(va)[2] is not None
+
+    def readRegValue(self, reg):
+        """
+        A method to read a register value like getRegister() that automatically
+        determines if a register is a BitFieldSPR and therefore reads the
+        proper object instead of from the register file.
+
+        Because this is less efficient than getRegister() it should not be used
+        unless necessary.
+        """
+        # TODO: figure out how to integrate BitFieldSPR objects more seemlessly?
+        sprobj = self.sprs.get(reg)
+        if sprobj is None:
+            return self.getRegister(reg)
+        else:
+            return sprobj.read(self)
+
+    def writeRegValue(self, reg, value):
+        """
+        A method to read a register value like getRegister() that automatically
+        determines if a register is a BitFieldSPR and therefore reads the
+        proper object instead of from the register file.
+
+        Because this is less efficient than getRegister() it should not be used
+        unless necessary.
+        """
+        # TODO: figure out how to integrate BitFieldSPR objects more seemlessly?
+        sprobj = self.sprs.get(reg)
+        if sprobj is None:
+            return self.setRegister(reg, value)
+        else:
+            return sprobj.write(self, value)
 
     def putIO(self, devname, obj):
         """

@@ -133,8 +133,10 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
 
         logger.info("Client attached: %r", repr(addr))
         logger.info("Halting processor")
-        self._halt_reason = signal.SIGTRAP
-        self.emu.halt_exec()
+
+        # After the client has connected, halt the execution of the emulator
+        self._serverSetHWBreak(self.emu.getProgramCounter())
+        self._putDownBreakpoints()
 
     def _serverBreak(self, sig=signal.SIGTRAP):
         self._halt_reason = sig
@@ -314,7 +316,7 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
 
         except (intc_exc.MceDataReadBusError, intc_exc.DataTlbException):
             # Return garbage filler values
-            return b'00' * size
+            return b'\x00' * size
 
     def _serverWriteMem(self, addr, val):
         """
@@ -329,3 +331,35 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
 
         except intc_exc.DataTlbException:
             return b'E%02d' % signal.SIGBUS
+
+    def _serverWriteRegVal(self, reg_idx, reg_val):
+        try:
+            envi_idx = self._gdb_to_envi_map[reg_idx][GDB_TO_ENVI_IDX]
+        except IndexError:
+            logger.warning("Attempted Bad Register Write: %d", reg_idx)
+            return 0
+
+        try:
+            self.emu.writeRegValue(envi_idx, reg_val)
+        except IndexError:
+            logger.warning("Attempted Bad Register Write: %d -> %d", reg_idx, envi_idx)
+            return 0
+
+
+        return b'OK'
+
+    def _serverReadRegVal(self, reg_idx):
+        try:
+            _, size, envi_idx, mask = self._gdb_to_envi_map[reg_idx]
+        except IndexError:
+            logger.warning("Attempted Bad Register Read: %d", reg_idx)
+            return 0, None
+
+        try:
+            # Sometimes the register format may specify a bit width that is 
+            # smaller than the internal register size, ensure the value 
+            # returned is the correct size
+            return (self.emu.readRegValue(envi_idx) & mask), size
+        except IndexError:
+            logger.warning("Attempted Bad Register Read: %d -> %d", reg_idx, envi_idx)
+            return 0, None

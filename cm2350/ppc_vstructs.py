@@ -1585,9 +1585,12 @@ class BitFieldSPR(PeriphRegister):
         emu.addSprReadHandler(self._reg, self.read)
         emu.addSprWriteHandler(self._reg, self.write)
 
+        # Register the SPR object
+        emu.sprs[self._reg] = self
+
         super().init(emu)
 
-    def read(self, emu, op):
+    def read(self, emu, op=None):
         """
         Handles SPR read requests, returns the current value of the object
         returned by vsEmit() as an integer.
@@ -1607,8 +1610,13 @@ class BitFieldSPR(PeriphRegister):
         be special bitfield processing that causes the new "current" SPR value
         to be different than the value being written by the operand.
         """
-        # Convert operand 1 to bytes before it can be parsed
-        write_val = emu.getOperValue(op, 1)
+        # If the "op" parameter is an integer, just convert it directly, 
+        # otherwise get the value from the first operand (which is always the 
+        # destination in PowerPC).
+        if isinstance(op, int):
+            write_val = op
+        else:
+            write_val = emu.getOperValue(op, 1)
         self.vsParse(struct.pack(self._fmt, write_val))
 
         # vsEmit() returns bytes, convert to an integer value

@@ -134,9 +134,8 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
         logger.info("Client attached: %r", repr(addr))
         logger.info("Halting processor")
 
-        # After the client has connected, halt the execution of the emulator
-        self._serverSetHWBreak(self.emu.getProgramCounter())
-        self._putDownBreakpoints()
+        self._halt_reason = signal.SIGTRAP
+        self.emu.halt_exec()
 
     def _serverBreak(self, sig=signal.SIGTRAP):
         self._halt_reason = sig

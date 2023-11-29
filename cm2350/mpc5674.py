@@ -752,6 +752,12 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         # Init the core
         super().init()
 
+        # If the --gdb-port flag was provided then we should wait for a GDB 
+        # client to connect before continuing
+        if self._wait_for_gdb_client:
+            print('Waiting for GDB client to connect on port %d' % self.gdbstub._gdb_port)
+            self.gdbstub.waitForClient()
+
     def reset(self):
         logger.info("RESET")
 
@@ -772,12 +778,6 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
     def run(self):
         try:
             logger.info('Starting execution @ 0x%x', self._cur_instr[2])
-
-            # If the --gdb-port flag was provided then we should wait for a GDB 
-            # client to connect before continuing
-            if self._wait_for_gdb_client:
-                print('Waiting for GDB client to connect on port %d' % self.gdbstub._gdb_port)
-                self.gdbstub.waitForClient()
             e200z7.PPC_e200z7.run(self)
         except KeyboardInterrupt:
             print()

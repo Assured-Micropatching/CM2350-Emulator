@@ -57,7 +57,7 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
         #    ('spr',         'org.gnu.gdb.power.spr'),
         #]
         #vtp_gdb.GdbBaseEmuServer.__init__(self, emu, reggrps=reggrps)
-        vtp_gdb.GdbBaseEmuServer.__init__(self, emu)
+        vtp_gdb.GdbBaseEmuServer.__init__(self, emu, haltregs=['pc', 'r1'])
 
         emu.modules['GDBSTUB'] = self
 
@@ -73,7 +73,7 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
         # We don't support the vfile handlers for this debug connection
         self.vfile_handlers = {}
 
-    def getTargetXml(self, reggrps):
+    def getTargetXml(self, reggrps=None, haltregs=None):
         # Hardcoded register format and XML
         self._gdb_reg_fmt = e200z759n3.reg_fmt
         self._gdb_target_xml = e200z759n3.target_xml
@@ -85,6 +85,13 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
         # Generate the information required based on the parsed register format.
         self._genRegPktFmt()
         self._updateEnviGdbIdxMap()
+
+        # To mimic what the GdbBaseEmuServer.getTargetXml() function does, go 
+        # find the gdb register indexes for the halt
+        for reg_name, (_, reg_idx) in self._gdb_reg_fmt.items():
+            envi_idx = self._gdb_to_envi_map[reg_idx][vtp_gdb.GDB_TO_ENVI_IDX]
+            if envi_idx in haltregs or reg_name in haltregs:
+                self._haltregs.append(reg_idx)
 
     def initProcessInfo(self):
         self.pid = 1
@@ -122,6 +129,9 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
         if self.isClientConnected():
             self.emu._do_halt()
             self._pullUpBreakpoints()
+
+            # The emulator halted for some reason, inform the debug client why.
+            self.transmitHaltInfo()
         else:
             self.emu.queueException(interrupt)
 
@@ -138,9 +148,7 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
         self.emu.halt_exec()
 
     def _serverBreak(self, sig=signal.SIGTRAP):
-        self._halt_reason = sig
         self.emu.halt_exec()
-        return self._halt_reason
 
     def _serverCont(self, sig=0):
         # If the program counter is at a breakpoint execute the current 
@@ -157,10 +165,14 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
         self._putDownBreakpoints()
 
         # Continue execution
-        self._halt_reason = sig
         self.emu.resume_exec()
 
-        return self._halt_reason
+    def _serverStepi(self, sig=signal.SIGTRAP):
+        # resume and halt immediately to step a single instruction
+        self._halt_reason = signal.SIGTRAP
+        self.emu.resume_exec()
+        self.emu.halt_exec()
+        self.transmitHaltInfo()
 
     def _installBreakpoint(self, addr):
         ea, vle, _, _, breakbytes, breakop = self._bpdata[addr]
@@ -333,7 +345,7 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
 
     def _serverWriteRegVal(self, reg_idx, reg_val):
         try:
-            envi_idx = self._gdb_to_envi_map[reg_idx][GDB_TO_ENVI_IDX]
+            envi_idx = self._gdb_to_envi_map[reg_idx][vtp_gdb.GDB_TO_ENVI_IDX]
         except IndexError:
             logger.warning("Attempted Bad Register Write: %d", reg_idx)
             return 0

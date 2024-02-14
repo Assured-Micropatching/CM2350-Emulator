@@ -429,6 +429,8 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         '''
         self.halt_time()
         self._run.clear()
+
+    def _do_wait_resume(self):
         self._run.wait()
         self.resume_time()
 

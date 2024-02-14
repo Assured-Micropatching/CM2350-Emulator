@@ -21,13 +21,6 @@ __all__ = [
 
 
 # TODO: handle reset
-# TODO: handle monitor commands (monitor reset)
-
-
-STATE_DISCONNECTED = 0
-STATE_CONNECTED = 1
-STATE_RUNNING = 2
-STATE_PAUSED = 3
 
 
 # the DNH instruction opcodes for BookE and VLE modes, the instructions are 
@@ -103,8 +96,8 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
         self.vfile_pid = None
 
     def waitForClient(self):
-        while self.connstate != vtp_gdb.STATE_CONN_CONNECTED:
-            time.sleep(0.1)
+        # Queue up a debug interrupt
+        self.emu.halt_exec()
 
     def isClientConnected(self):
         return self.connstate == vtp_gdb.STATE_CONN_CONNECTED
@@ -126,14 +119,15 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
         # If there is a debugger connected halt execution, otherwise queue the 
         # debug exception so it can be processed by the normal PPC exception 
         # handler.
-        if self.isClientConnected():
-            self.emu._do_halt()
-            self._pullUpBreakpoints()
+        logger.info('Execution halted at %x', self.emu._cur_instr[1])
+        self.emu._do_halt()
 
-            # The emulator halted for some reason, inform the debug client why.
-            self.transmitHaltInfo()
-        else:
-            self.emu.queueException(interrupt)
+        # TODO: different signal reasons based on the interrupt type?
+        self._halt_reason = signal.SIGTRAP
+
+        self._pullUpBreakpoints()
+
+        self.emu._do_wait_resume()
 
     def _postClientAttach(self, addr):
         vtp_gdb.GdbBaseEmuServer._postClientAttach(self, addr)
@@ -142,10 +136,6 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
         # halt.
 
         logger.info("Client attached: %r", repr(addr))
-        logger.info("Halting processor")
-
-        self._halt_reason = signal.SIGTRAP
-        self.emu.halt_exec()
 
     def _serverBreak(self, sig=signal.SIGTRAP):
         self.emu.halt_exec()
@@ -166,13 +156,6 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
 
         # Continue execution
         self.emu.resume_exec()
-
-    def _serverStepi(self, sig=signal.SIGTRAP):
-        # resume and halt immediately to step a single instruction
-        self._halt_reason = signal.SIGTRAP
-        self.emu.resume_exec()
-        self.emu.halt_exec()
-        self.transmitHaltInfo()
 
     def _installBreakpoint(self, addr):
         ea, vle, _, _, breakbytes, breakop = self._bpdata[addr]

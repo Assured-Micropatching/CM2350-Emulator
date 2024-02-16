@@ -20,9 +20,9 @@ class MPC5674_BAM_GDB_Test(MPC5674_Test):
     args = MPC5674_Test.args + ['-g']
     maxDiff = 10000
 
-    def write(self, data, end='\n'):
-        if end and not data.endswith('\n'):
-            data += '\n'
+    def write(self, data, end='\r\n'):
+        if end and not data.endswith('\r\n'):
+            data += '\r\n'
         self.gdb.stdin.write(data.encode())
         self.gdb.stdin.flush()
 
@@ -153,7 +153,7 @@ class MPC5674_BAM_GDB_Test(MPC5674_Test):
         super().tearDown()
 
     def test_gdb_info_reg(self):
-        self.write('info reg\r')
+        self.write('info reg')
         out = self.read(timeout=1)
 
         # The MSR in the following test is set to the following value by the 
@@ -340,30 +340,76 @@ SVR            0x0                 0
         # (gdb) set $r2 = 0x123456789ABCDEF
         # (gdb) p/x $r2
         # $2 = 0x89abcdef
-        self.write('set $r2 = 0x12345678\r')
-        out = self.read(timeout=1)
-        self.assertEqual(out, '(gdb) ')
+        self.write('set $r2 = 0x12345678')
+        self.read(until='(gdb) ', timeout=1)
 
-        self.write('p/x $r2\r')
-        out = self.read(timeout=1)
+        self.write('p/x $r2')
+        out = self.read(timeout=0.1)
         self.assertEqual(out, '''$1 = 0x12345678
 (gdb) ''')
 
         self.assertEqual(self.emu.getRegister(eapr.REG_R2), 0x12345678)
 
-        self.write('set $r2 = 0x123456789abcdef\r')
-        out = self.read(timeout=1)
-        self.assertEqual(out, '(gdb) ')
+        self.write('set $r2 = 0x123456789abcdef')
+        self.read(until='(gdb) ', timeout=1)
 
-        self.write('p/x $r2\r')
-        out = self.read(timeout=1)
+        self.write('p/x $r2')
+        out = self.read(timeout=0.1)
         self.assertEqual(out, '''$2 = 0x89abcdef
 (gdb) ''')
 
         self.assertEqual(self.emu.getRegister(eapr.REG_R2), 0x89abcdef)
 
-    #def test_gdb_set_mem(self):
-    #    pass
+    def test_gdb_set_mem(self):
+        # (gdb) set {int} 0x40000000 = 0x12345678
+        # (gdb) p/x *0x40000000
+        # $1 = 0x12345678
+        # (gdb) set {int} 0x40000000 = 0x12345678abcdef
+        # (gdb) p/x *0x40000000
+        # $2 = 0x78abcdef
+        self.write('set {int} 0x40000004 = 0x12345678')
+        self.read(until='(gdb) ', timeout=1)
+
+        self.write('x/4wx 0x40000000')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''0x40000000:\t0x00000000\t0x12345678\t0x00000000\t0x00000000
+(gdb) ''')
+
+        expected = bytes.fromhex('00000000 12345678 00000000 00000000')
+        self.assertEqual(self.emu.readMemory(0x40000000, 16), expected)
+
+        self.write('set {int} 0x40000008 = 0xfedcba987654321')
+        self.read(until='(gdb) ', timeout=1)
+
+        self.write('x/4wx 0x40000000')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''0x40000000:\t0x00000000\t0x12345678\t0x87654321\t0x00000000
+(gdb) ''')
+
+        expected = bytes.fromhex('00000000 12345678 87654321 00000000')
+        self.assertEqual(self.emu.readMemory(0x40000000, 16), expected)
+
+        self.write('set {char} 0x40000002 = 0xff')
+        self.read(until='(gdb) ', timeout=1)
+
+        self.write('x/4wx 0x40000000')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''0x40000000:\t0x0000ff00\t0x12345678\t0x87654321\t0x00000000
+(gdb) ''')
+
+        expected = bytes.fromhex('0000ff00 12345678 87654321 00000000')
+        self.assertEqual(self.emu.readMemory(0x40000000, 16), expected)
+
+        self.write('set {char} 0x40000005 = 0xff')
+        self.read(until='(gdb) ', timeout=1)
+
+        self.write('x/4wx 0x40000000')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''0x40000000:\t0x0000ff00\t0x12ff5678\t0x87654321\t0x00000000
+(gdb) ''')
+
+        expected = bytes.fromhex('0000ff00 12ff5678 87654321 00000000')
+        self.assertEqual(self.emu.readMemory(0x40000000, 16), expected)
 
     #def test_gdb_stepi(self):
     #    pass

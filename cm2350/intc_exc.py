@@ -195,7 +195,7 @@ class MachineCheckPrioException(INTCException):
     __priority__ = INTC_LEVEL.MACHINE_CHECK
 
 class ResetException(INTCException):
-    __priority__ = INTC_LEVEL.MACHINE_CHECK
+    __priority__ = INTC_LEVEL.RESET
     __ivor__ = EXC_RESET
     __maskable__ = False
 
@@ -758,5 +758,8 @@ class MceWriteBusError(MachineCheckException):
 ###############################################################################
 
 class GdbClientDetachEvent(DebugException):
+    pass
+
+class GdbServerHaltEvent(DebugException):
     pass
 

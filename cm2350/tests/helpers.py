@@ -3,6 +3,7 @@ import os
 import queue
 import random
 import unittest
+import threading
 
 import envi.bits as e_bits
 import envi.common as e_common
@@ -10,7 +11,7 @@ import envi.archs.ppc.spr as eaps
 import envi.archs.ppc.regs as eapr
 import envi.archs.ppc.const as eapc
 
-from .. import MPC5674_Emulator, intc_exc, ppc_vstructs
+from .. import MPC5674_Emulator, intc_exc, ppc_vstructs, intc_exc
 
 import logging
 logger = logging.getLogger(__name__)
@@ -129,6 +130,12 @@ class MPC5674_Test(unittest.TestCase):
         # Clean up the resources
         self.emu.shutdown()
         del self.emu
+
+        # There should only be one thread of execution now.
+        threads = threading.enumerate()
+        if len(threads) > 1:
+            print('too many threads still running: %s' % threads)
+        self.assertEqual(threads, [threading.current_thread()])
 
         # Re-enable the garbage collector if it was disabled and force memory
         # cleanup now

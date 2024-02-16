@@ -78,6 +78,20 @@ class Peripheral:
                 raise Exception('ERROR: duplicate project config entries for peripheral %s:\n%s' %
                         (devname, emu.vw.config.project.reprConfigPaths()))
 
+    def __del__(self):
+        self.shutdown()
+
+    def shutdown():
+        """
+        Standard "module" peripheral shutdown/cleanup function. This is called
+        when deleting/shutting down the emulator to clean up any allocated or
+        opened resources. During a normal shutdown this isn't critical but it
+        is helpful to have a clean shutdown for unit testing.
+
+        This function is required to be implemented by all peripherals.
+        """
+        raise NotImplementedError('%s class should implement this method' % self.__class__.__name__)
+
     def init(self, emu):
         """
         Standard "module" peripheral init function. This is called only once
@@ -377,6 +391,9 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
             for item in self.registers:
                 if isVstructType(item) and hasattr(item, 'reset'):
                     item.reset(emu)
+
+    def shutdown(self):
+        pass
 
     def _getPeriphReg(self, offset, size):
         """
@@ -827,7 +844,7 @@ class ExternalIOPeripheral(MMIOPeripheral):
             ExternalIOPeripheral._tasks.append(self)
 
     def __del__(self):
-        self.stop()
+        self.shutdown()
 
         # Close the client connections
         for sock in self._clients:
@@ -853,7 +870,7 @@ class ExternalIOPeripheral(MMIOPeripheral):
                 # Probably means not fully initialized, ignore the error
                 pass
 
-    def stop(self):
+    def shutdown(self):
         """
         Stop the IO thread from running, but don't close the client sockets
         """

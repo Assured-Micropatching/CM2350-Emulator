@@ -224,8 +224,9 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
             # Go through each peripheral and if any of them have a server thread
             # running, stop it now
             for mname in list(self.modules):
-                if hasattr(self.modules[mname], 'stop'):
-                    self.modules[mname].stop()
+                if hasattr(self.modules[mname], 'shutdown'):
+                    logger.debug("shutdown: Cleaning up %s...", mname)
+                    self.modules[mname].shutdown()
                 del self.modules[mname]
 
     def _mcuWDTHandler(self):
@@ -370,7 +371,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
 
         # initialize the various modules on this chip.
         for key, module in self.modules.items():
-            logger.debug("init: Initializing %r...", key)
+            logger.debug("init: Initializing %s...", key)
             module.init(self)
 
         # Start the core emulator time now
@@ -395,7 +396,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         self.systimeReset()
         for key, module in self.modules.items():
             if hasattr(module, 'reset'):
-                logger.debug("reset: Resetting %r...", key)
+                logger.debug("reset: Resetting %s...", key)
                 module.reset(self)
 
         # Start the core emulator time now
@@ -439,14 +440,6 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         Resume the emulator, which has been "paused"
         '''
         self._run.set()
-
-    def debug_client_detached(self):
-        '''
-        Handles the condition when a gdb client detaches. For now we will halt
-        the emulator when this occurs.
-        '''
-        self.queueException(intc_exc.GdbClientDetachEvent())
-        self.resume_exec()
 
     ###############################################################################
     # Redirect TLB instruction emulation functions to the MMU peripheral
@@ -684,6 +677,10 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
                 if hasattr(module, 'setResetSource'):
                     logger.debug("system reset: setting reset source %s in %s", exc.source, key)
                     module.setResetSource(exc.source)
+
+        except intc_exc.GdbServerHaltEvent as exc:
+            # Halt execution of the emulator
+            raise exc
 
         except intc_exc.DebugException as exc:
             # TODO: If the op is DNH

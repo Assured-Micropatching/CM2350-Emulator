@@ -1,3 +1,4 @@
+import os
 import sys
 import time
 import signal
@@ -65,6 +66,13 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
 
         # We don't support the vfile handlers for this debug connection
         self.vfile_handlers = {}
+
+    def __del__(self):
+        self.shutdown()
+
+    def shutdown(self):
+        # Signal the run thread that it's time to exit
+        self.shutdownServer()
 
     def getTargetXml(self, reggrps=None, haltregs=None):
         # Hardcoded register format and XML
@@ -265,8 +273,8 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
         self._bpdata = {}
         self._bps_in_place = False
 
-        # Signal to the emulator that the gdb client has detached
-        self.emu.debug_client_detached()
+        # Since the client has detached let the core start executing.
+        self.emu.resume_exec()
 
     def _serverQSymbol(self, cmd_data):
         # we have no symbol information

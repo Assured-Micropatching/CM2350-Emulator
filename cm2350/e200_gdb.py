@@ -104,7 +104,8 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
         self.vfile_pid = None
 
     def waitForClient(self):
-        # Queue up a debug interrupt
+        # Set the halt reason to TRAP and queue up a debug interrupt
+        self._halt_reason = signal.SIGTRAP
         self.emu.halt_exec()
 
     def isClientConnected(self):
@@ -346,7 +347,6 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
         except IndexError:
             logger.warning("Attempted Bad Register Write: %d -> %d", reg_idx, envi_idx)
             return 0
-
 
         return b'OK'
 

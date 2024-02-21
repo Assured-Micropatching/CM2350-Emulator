@@ -652,12 +652,13 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         """
         self.processIO()
 
+        pc = self.getProgramCounter()
+
         try:
             # See if there are any exceptions that need to start being handled
             self.mcu_intc.checkException()
 
             # do normal opcode parsing and execution
-            pc = self.getProgramCounter()
             op = self.parseOpcode(pc)
 
             # TODO: check MSR for FP (MSR_FP_MASK) and SPE (MSR_SPE_MASK)
@@ -694,8 +695,8 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
             #       handling is set this instruction generates a debug 
             #       exception, otherwise it is a no-op.
 
-            # If the Debug APU is enabled and a debug client is attached and 
-            # this was a DNH instruction, pass control to the GDB stub.
+            # Pass this to the GDB stub (the emulator equivalent of the Debug 
+            # APU) for processing.
             self.gdbstub.handleInterrupts(exc)
 
         except (envi.UnsupportedInstruction, envi.InvalidInstruction) as exc:

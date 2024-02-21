@@ -3,6 +3,7 @@ import os
 import queue
 import random
 import unittest
+import warnings
 import threading
 
 import envi.bits as e_bits
@@ -52,6 +53,9 @@ class MPC5674_Test(unittest.TestCase):
     _disable_gc = None
 
     def setUp(self):
+        # Stop warning about unclosed sockets
+        warnings.filterwarnings(action="ignore", message="unclosed", category=ResourceWarning)
+
         initLogging(logger)
 
         if self._start_timebase_paused is None:

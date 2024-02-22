@@ -81,7 +81,7 @@ class Peripheral:
     def __del__(self):
         self.shutdown()
 
-    def shutdown():
+    def shutdown(self):
         """
         Standard "module" peripheral shutdown/cleanup function. This is called
         when deleting/shutting down the emulator to clean up any allocated or

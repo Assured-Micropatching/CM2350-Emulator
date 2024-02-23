@@ -1182,7 +1182,7 @@ class BusDevice:
         The client device's transmit function is sending data back to the bus
         peripheral, so call the bus's receive() function.
         """
-        self.bus.receive(self.bus.devname, value)
+        self.bus.receive(value)
 
 
 class PlaceholderBusDevice(BusDevice):

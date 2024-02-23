@@ -116,7 +116,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
                  eape.Ppc32EmbeddedEmulator, ppc_time.PpcEmuTime,
                  #emutimers.ScaledEmuTimeCore, clocks.EmuClocks):
                  emutimers.EmuTimeCore, clocks.EmuClocks):
-    def __init__(self):
+    def __init__(self, vw):
         # module registry
         self.modules = {}
 
@@ -139,12 +139,12 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         # class the PPC_e200z7 is designed so that the core vivisect workspace
         # emulator can be removed in the future to improve performance (at the
         # cost of analysis/inspection/live debug capabilities).
-        vimp_emu.WorkspaceEmulator.__init__(self, self.vw, nostack=True, funconly=False)
+        vimp_emu.WorkspaceEmulator.__init__(self, vw, nostack=True, funconly=False)
 
         # The workspace emulator initializer copies the memory maps from the 
         # vivisect workspace, but the standalone emulator memory maps should be 
         # independent from the vivisect workspace.
-        for mva, _, _, _ in self.vw.getMemoryMaps():
+        for mva, _, _, _ in vw.getMemoryMaps():
             self.delMemoryMap(mva)
 
         ppc_time.PpcEmuTime.__init__(self)

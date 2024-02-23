@@ -465,7 +465,7 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
 
         # the self.vw attribute will get created when the e200z7 class calls the
         # workspace emulator initializer.
-        e200z7.PPC_e200z7.__init__(self)
+        e200z7.PPC_e200z7.__init__(self, self.vw)
 
         # Now that the standard options have been parsed process anything
         # leftover

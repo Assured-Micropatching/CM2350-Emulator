@@ -6,13 +6,14 @@ import traceback
 
 from envi.archs.ppc import regs as ppcregs
 
+from .ppc_peripherals import Module
 from .intc_const import *
 from . import intc_exc
 
 logger = logging.getLogger(__name__)
 
 
-class e200INTC:
+class e200INTC(Module):
     '''
     This is the Interrupt Controller for the e200 core.
 
@@ -38,9 +39,8 @@ class e200INTC:
         If IVORS are supported, the next instruction address will be retrieved from the IVOR# register
         Otherwise, the offset from the base address in IVPR is used (0x20 for each)
         '''
-        self.emu = emu
+        Module.__init__(self, emu, 'MCU_INTC')
         self.ivors = ivors
-        emu.modules['MCU_INTC'] = self
         self._needreset = reset
 
         # callback handlers
@@ -67,14 +67,6 @@ class e200INTC:
             raise Exception("Registering External Interrupt Controller when one exists")
 
         self._external_intc = extintc
-
-    def init(self, emu):
-        '''
-        Support the CPU init/reset functions.
-        '''
-        logger.debug('init: e200INTC module (Interrupt Controller)')
-
-        self.reset(emu)
 
     def reset(self, emu):
         '''

@@ -9,6 +9,12 @@ MMIO_BYTES_REF = 2
 MMIO_LAST_REF = MMIO_BYTES_REF
 
 
+__all__ = [
+    'ComplexMemoryMap',
+    'MMIO_DEVICE',
+]
+
+
 class ComplexMemoryMap(e_mem.MemoryObject):
     def addMemoryMap(self, va, perms, fname, bytez, align=None):
         '''
@@ -107,6 +113,12 @@ class ComplexMemoryMap(e_mem.MemoryObject):
 
         raise envi.SegmentationViolation(va)
 
+    def getMemorySnap(self):
+        raise NotImplementedError('Implement this method to support memory snapshots')
+
+    def setMemorySnap(self, snap):
+        raise NotImplementedError('Implement this method to support memory snapshots')
+
 
 class MMIO_DEVICE:
     '''
@@ -118,24 +130,22 @@ class MMIO_DEVICE:
     and _mmio_write() are provided.
     '''
     def __init__(self, emu, devname, mapaddr, mapsize, **kwargs):
-        self.emu = emu
         emu.addMMIO(mapaddr, mapsize, devname, self._mmio_read, self._mmio_write, **kwargs)
 
     def _mmio_write(self, va, offset, bytez):
-        print("%r: [%x] = %r" % (self.__class__, va, bytez))
+        raise NotImplementedError('%s needs to implement this method to support basic MMIO functionality' % self.__class__.__name__)
 
     def _mmio_read(self, va, offset, size):
-        print("%r: read [%x:%r]" % (self.__class__, va, size))
-        return "@" * size
+        raise NotImplementedError('%s needs to implement this method to support basic MMIO functionality' % self.__class__.__name__)
 
     def _mmio_bytes(self):
-        return b''
+        raise NotImplementedError('%s needs to implement this method to support envi instruction parsing' % self.__class__.__name__)
 
     def __getstate__(self):
-        return 'FAKESTATE'
+        raise NotImplementedError('%s needs to implement this method to support memory snapshots' % self.__class__.__name__)
 
     def __setstate__(self, state):
-        print("restoring: %r" % state)
+        raise NotImplementedError('%s needs to implement this method to support memory snapshots' % self.__class__.__name__)
 
 
 # MMIO Exceptions

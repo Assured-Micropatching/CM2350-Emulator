@@ -128,9 +128,9 @@ def get_int(dev, event):
     return intc_exc.ExternalException(intc_exc.INTC_SRC(get_int_src(dev, event)))
 
 
-class TestPeriph(ppc_peripherals.BusPeripheral):
+class TestPeriph(ppc_peripherals.BusDevice):
     def __init__(self, emu, bus):
-        ppc_peripherals.BusPeripheral.__init__(self, emu, 'TestPeriph_' + bus, bus, 0)
+        ppc_peripherals.BusDevice.__init__(self, emu, 'TestPeriph_' + bus, bus, 0)
         self.msgs = []
 
     def receive(self, data):

@@ -11,6 +11,8 @@ import vtrace.platforms.gdbstub as vtp_gdb
 
 from . import mmio
 from . import intc_exc
+from . import ppc_peripherals
+
 from .gdbdefs import e200z759n3
 
 logger = logging.getLogger(__name__)
@@ -21,7 +23,7 @@ __all__ = [
 ]
 
 
-# TODO: handle reset
+# TODO: handle "monitor reset"
 
 
 # the DNH instruction opcodes for BookE and VLE modes, the instructions are 
@@ -38,7 +40,7 @@ PPC_DNH_INSTR_BYTES = {
 }
 
 
-class e200GDB(vtp_gdb.GdbBaseEmuServer):
+class e200GDB(ppc_peripherals.Module, vtp_gdb.GdbBaseEmuServer):
     '''
     Emulated hardware debugger/gdb-stub for the e200 core.
     '''
@@ -52,8 +54,7 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
         #]
         #vtp_gdb.GdbBaseEmuServer.__init__(self, emu, reggrps=reggrps)
         vtp_gdb.GdbBaseEmuServer.__init__(self, emu, haltregs=['pc', 'r1'])
-
-        emu.modules['GDBSTUB'] = self
+        ppc_peripherals.Module.__init__(self, emu, 'GDBSTUB')
 
         # To track breakpoints, for the purposes of emulation both hardware and 
         # software breakpoints are treated the same
@@ -66,9 +67,6 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
 
         # We don't support the vfile handlers for this debug connection
         self.vfile_handlers = {}
-
-    def __del__(self):
-        self.shutdown()
 
     def shutdown(self):
         # Signal the run thread that it's time to exit
@@ -112,14 +110,14 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
         return self.connstate == vtp_gdb.STATE_CONN_CONNECTED
 
     def init(self, emu):
-        logger.info("e200GDB Initialized.")
-
         if self.runthread is None:
             logger.info("starting GDBServer runthread")
             self.runthread = threading.Thread(target=self.runServer, daemon=True)
             self.runthread.start()
         else:
             logger.critical("WTFO!  self.runthread is not None?")
+
+        ppc_peripherals.Module.init(self, emu)
 
     def handleInterrupts(self, interrupt):
         # TODO: emulate the PPC debug control registers that can disable/enable 

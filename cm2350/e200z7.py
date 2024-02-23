@@ -213,21 +213,42 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         self._read_callbacks = {}
         self._write_callbacks = {}
 
+    def installModule(self, name, module):
+        # Ensure that this module has all the required functions:
+        #   - init
+        #   - reset
+        #   - shutdown
+        if not hasattr(module, 'init') or \
+                not hasattr(module, 'reset') or \
+                not hasattr(module, 'shutdown'):
+            raise NotImplementedError('Cannot install module %s (%s), all of the following functions must be implemented: "init", "reset", "shutdown"' %
+                                      (name, module))
+
+        # Ensure that installing this module won't overwrite one that is already 
+        # installed
+        if name in self.modules:
+            raise KeyError('Cannot install peripheral %s: %s already installed, cannot install %s' %
+                           (name, self.modules[name], peripheral))
+
+        self.modules[name] = module
+
+    def getModule(self, name):
+        return self.modules[name]
+
     def __del__(self):
         self.shutdown()
 
     def shutdown(self):
         # Call the emutime shutdown function
-        super().shutdown()
+        emutimers.EmuTimeCore.shutdown(self)
 
-        if hasattr(self, 'modules') and self.modules:
-            # Go through each peripheral and if any of them have a server thread
-            # running, stop it now
-            for mname in list(self.modules):
-                if hasattr(self.modules[mname], 'shutdown'):
-                    logger.debug("shutdown: Cleaning up %s...", mname)
-                    self.modules[mname].shutdown()
-                del self.modules[mname]
+        # Go through each peripheral and if any of them have a server thread
+        # running, stop it now, use a duplicate list because the modules will be 
+        # deleting themselves from the list after they are shutdown
+        for mname in list(self.modules):
+            logger.debug("shutdown: Cleaning up %s...", mname)
+            self.modules[mname].shutdown()
+            del self.modules[mname]
 
     def _mcuWDTHandler(self):
         # From "Figure 8-1. Watchdog State Machine" (EREF_RM.pdf page 886)
@@ -395,9 +416,8 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         # First reset the system emulation time, then reset all modules
         self.systimeReset()
         for key, module in self.modules.items():
-            if hasattr(module, 'reset'):
-                logger.debug("reset: Resetting %s...", key)
-                module.reset(self)
+            logger.debug("reset: Resetting %s...", key)
+            module.reset(self)
 
         # Start the core emulator time now
         self.resume_time()

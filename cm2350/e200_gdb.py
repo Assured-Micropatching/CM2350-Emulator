@@ -139,10 +139,19 @@ class e200GDB(ppc_peripherals.Module, vtp_gdb.GdbBaseEmuServer):
     def _postClientAttach(self, addr):
         vtp_gdb.GdbBaseEmuServer._postClientAttach(self, addr)
 
+        # If the emulator is not already halted, halt now
+        if self._halt_reason == vtp_gdb.SIGNAL_NONE:
+            self._halt_reason = signal.SIGTRAP
+            self.emu.halt_exec()
+
         # TODO: Install callbacks for signals that should cause execution to 
         # halt.
 
-        logger.info("Client attached: %r", repr(addr))
+        logger.info("Client attached: %r", addr)
+
+    def _serverQAttached(self, cmd_data):
+        # Return 1 to indicate that this is always an existing process
+        return b'1'
 
     def _serverBreak(self, sig=signal.SIGTRAP):
         self.emu.halt_exec()

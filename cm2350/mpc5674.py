@@ -599,8 +599,8 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
             self.setProgramCounter(self.custom_entrypoint)
 
             # Update the stack pointer
-            sram_end = self.vw.config.project.MPC5674.SRAM.addr + \
-                    self.vw.config.project.MPC5674.SRAM.size
+            ram_config = self.get_project_config('project.MPC5674.SRAM')
+            sram_end = ram_config.addr + ram_config.size
 
             # Get the calling convention stack alignment
             align = max(c.align for _, c in self.getCallingConventions())
@@ -633,18 +633,18 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
 
         # Track if this is a new configuration directory or not (needed by
         # init_flash)
-        if self.vw.vivhome and not os.path.isdir(self.vw.vivhome):
+        if self.home and not os.path.isdir(self.home):
             new_config = True
             # Save the initial config
-            logger.critical('Creating new config directory %s', self.vw.vivhome)
-            self.vw.config.saveConfigFile()
+            logger.critical('Creating new config directory %s', self.home)
+            self.config.saveConfigFile()
         else:
             new_config = False
 
         # Use the EnviConfig.cfginfo attribute directly so we can overwrite the
         # running configuration values for a specific run of the emulator if the 
         # "no backup" 
-        flash_cfg = self.vw.config.project.MPC5674.FLASH.cfginfo
+        flash_cfg = self.get_project_config('project.MPC5674.FLASH')
 
         mode = self.vw.getTransMeta("ProjectMode")
 
@@ -690,8 +690,8 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
                 flash_cfg['shadowBOffset'] = updated_config['shadowBOffset']
 
             # If init_flash was specified save the config file now
-            logger.critical('Saving configuration file %s', self.vw.config.filename)
-            self.vw.config.saveConfigFile()
+            logger.critical('Saving configuration file %s', self.config.filename)
+            self.config.saveConfigFile()
 
         elif self.args.no_backup:
             # Since this is just a temporary run copy any valid flash
@@ -722,7 +722,7 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         load firmware into the emulator
         '''
         # Get the FLASH configuration info as a dict
-        flash_cfg = self.vw.config.project.MPC5674.FLASH
+        flash_cfg = self.get_project_config('project.MPC5674.FLASH')
 
         if flash_cfg['fwFilename']:
             # First check if the file can be found without adding the project
@@ -736,7 +736,7 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
                 logger.info("Loading Firmware Blob from %r @ 0x%x", path, flash_cfg['baseaddr'])
                 self.flash.load(FlashDevice.FLASH_MAIN, path, flash_cfg['baseaddr'])
             else:
-                logger.critical("Starting emulator without valid firmware, please update config: %s", self.vw.vivhome)
+                logger.critical("Starting emulator without valid firmware, please update config: %s", self.home)
 
         if flash_cfg['shadowAFilename']:
             # First check if the file can be found without adding the project
@@ -808,9 +808,11 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
     def init(self):
         logger.info('INIT')
 
+        ram_config = self.get_project_config('project.MPC5674.SRAM')
+
         # Create the initial RAM data (it isn't all cleared out during reset)
-        size = self.vw.config.project.MPC5674.SRAM.size
-        addr = self.vw.config.project.MPC5674.SRAM.addr
+        size = ram_config.size
+        addr = ram_config.addr
 
         # The initial SRAM memory block must be created
         logger.debug("init: Initializing SRAM 0x%08x - 0x%08x",
@@ -833,10 +835,12 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
     def reset(self):
         logger.info("RESET")
 
+        ram_config = self.get_project_config('project.MPC5674.SRAM')
+
         # Clear or initialize SRAM and external RAM
-        size = self.vw.config.project.MPC5674.SRAM.size
-        addr = self.vw.config.project.MPC5674.SRAM.addr
-        standby_size = self.vw.config.project.MPC5674.SRAM.standby_size
+        size = ram_config.size
+        addr = ram_config.addr
+        standby_size = ram_config.standby_size
 
         start = addr + standby_size
         end = addr + size

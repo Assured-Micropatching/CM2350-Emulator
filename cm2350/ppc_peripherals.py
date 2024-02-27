@@ -69,8 +69,8 @@ class Module:
 
         # If there is a configuration entry for this peripheral name, save it
         # for easy access
-        for project in emu.vw.config.project.getSubConfigNames():
-            project_subcfg = emu.vw.config.project.getSubConfig(project)
+        for project in emu.config.project.getSubConfigNames():
+            project_subcfg = emu.config.project.getSubConfig(project)
             if self._config is None:
                 devcfg = project_subcfg.getSubConfig(devname, add=False)
                 if devcfg is not None:
@@ -78,7 +78,7 @@ class Module:
                     break
             else:
                 raise Exception('ERROR: duplicate project config entries for peripheral %s:\n%s' %
-                        (devname, emu.vw.config.project.reprConfigPaths()))
+                        (devname, emu.config.project.reprConfigPaths()))
 
     def __del__(self):
         self.shutdown()

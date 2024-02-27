@@ -506,7 +506,7 @@ class CM2350_CLI(unittest.TestCase):
 
             initialized = True
 
-            self.assertEqual(ecu.emu.vw.config.getConfigPrimitive(), cfg)
+            self.assertEqual(ecu.emu.config.getConfigPrimitive(), cfg)
             self.assertEqual(ecu.emu.flash.get_hash().hex(), hash_value.hex())
 
             if invalid_bin:

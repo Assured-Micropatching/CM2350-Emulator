@@ -212,7 +212,7 @@ class MPC5674_FlexCAN_Test(MPC5674_Test):
     def set_sysclk_240mhz(self):
         # Default PLL clock based on the PCB params selected for these tests is
         # 60 MHz
-        self.assertEqual(self.emu.vw.config.project.MPC5674.FMPLL.extal, 40000000)
+        self.assertEqual(self.emu.config.project.MPC5674.FMPLL.extal, 40000000)
         self.assertEqual(self.emu.getClock('pll'), 60000000.0)
 
         # The max clock for the real hardware is 764 MHz:
@@ -1383,7 +1383,7 @@ class MPC5674_FlexCAN_RealIO(MPC5674_Test):
     def set_sysclk_240mhz(self):
         # Default PLL clock based on the PCB params selected for these tests is
         # 60 MHz
-        self.assertEqual(self.emu.vw.config.project.MPC5674.FMPLL.extal, 40000000)
+        self.assertEqual(self.emu.config.project.MPC5674.FMPLL.extal, 40000000)
         self.assertEqual(self.emu.getClock('pll'), 60000000.0)
 
         # The max clock for the real hardware is 764 MHz:

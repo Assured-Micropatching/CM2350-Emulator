@@ -270,7 +270,7 @@ class MPC5674_SIU_Test(MPC5674_Test):
         # that are not considered valid GPIO pins.
         pcr_defaults = {}
 
-        wkpcfg_default = self.emu.vw.config.project.MPC5674.SIU.wkpcfg
+        wkpcfg_default = self.emu.config.project.MPC5674.SIU.wkpcfg
 
         # I can't think of a better way to handle this
         for pin in range(75, 83):
@@ -503,7 +503,7 @@ class MPC5674_SIU_Test(MPC5674_Test):
     def set_sysclk_264mhz(self):
         # Default PLL clock based on the PCB params selected for these tests is
         # 60 MHz
-        self.assertEqual(self.emu.vw.config.project.MPC5674.FMPLL.extal, 40000000)
+        self.assertEqual(self.emu.config.project.MPC5674.FMPLL.extal, 40000000)
         self.assertEqual(self.emu.getClock('pll'), 60000000.0)
 
         # The max clock for the real hardware is 264 MHz:

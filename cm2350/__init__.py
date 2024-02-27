@@ -192,10 +192,11 @@ class CM2350:
             self.emu.setRegister(ppc_regs.REG_HID0, 0x4000)
 
         # start off with the external pins
-        self.emu.gpio(89, self.emu.vw.config.project.CM2350.p89)
-        self.emu.gpio(90, self.emu.vw.config.project.CM2350.p90)
-        self.emu.gpio(91, self.emu.vw.config.project.CM2350.p91)
-        self.emu.gpio(92, self.emu.vw.config.project.CM2350.p92)
+        cm2350_config = self.emu.get_project_config('project.CM2350')
+        self.emu.gpio(89, cm2350_config.p89)
+        self.emu.gpio(90, cm2350_config.p90)
+        self.emu.gpio(91, cm2350_config.p91)
+        self.emu.gpio(92, cm2350_config.p92)
 
         # Register the ASIC as a SPI peripheral and fill the rest of the SPI 
         # buses and chip select options with placeholder devices, not all of 

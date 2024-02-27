@@ -117,16 +117,6 @@ class VivProject(metaclass=VivProjectMeta):
         or a configuration file is specified that indicates the project-specific
         files and settings to use.
         """
-        if defconfig is None:
-            defconfig = {}
-
-        if docconfig is None:
-            docconfig = {}
-
-        # Merge the defaults and docs provided with the class config
-        defconfig = merge_dict(self.defconfig, defconfig)
-        docconfig = merge_dict(self.docconfig, docconfig)
-
         if parser is None:
             exename = os.path.basename(sys.modules['__main__'].__file__)
             parser = argparse.ArgumentParser(prog=exename)
@@ -147,13 +137,19 @@ class VivProject(metaclass=VivProjectMeta):
         parser.add_argument('file', nargs='*')
         parsed_args = parser.parse_args(args)
 
-        # If this project has non-standard default configuration settings set them #
-        # before creating the Vivisect workspace
-        if defconfig:
-            vivisect.defconfig = merge_dict(vivisect.defconfig, defconfig)
+        if defconfig is None:
+            defconfig = {}
 
-        if docconfig:
-            vivisect.docconfig = merge_dict(vivisect.docconfig, docconfig)
+        if docconfig is None:
+            docconfig = {}
+
+        # Merge the defaults and docs provided with the class config
+        defconfig = merge_dict(self.defconfig, defconfig)
+        docconfig = merge_dict(self.docconfig, docconfig)
+
+        # Merge the project options with the vivisect defaults
+        defconfig = merge_dict(vivisect.defconfig, defconfig)
+        docconfig = merge_dict(vivisect.docconfig, docconfig)
 
         if parsed_args.mode == 'emu':
             raise NotImplementedError('Fast emulator mode not yet supported, but coming soon!')
@@ -193,44 +189,48 @@ class VivProject(metaclass=VivProjectMeta):
             if configdir == default_vivhome:
                 raise Exception('Cannot use standard vivisect config in project mode')
 
-        # Initialize the workspace (don't pass a configuration directory yet, this
-        # will get filled in later based on the project name)
-        vw = clicls(confdir=configdir, autosave=False)
+            self.home = configdir
 
-        if configdir is None:
-            # Reset the configuration to the default values and set
-            # vw.config.filename and viv.vivhome to None
-            vw.config.filename = None
-            vw.vivhome = None
-            vw.config.setConfigPrimitive(vivisect.defconfig)
+            # Parse the configuration
+            cfgpath = os.path.join(self.home, 'viv.json')
+        else:
+            cfgpath = None
+            self.home = None
+
+        self.config = e_config.EnviConfig(filename=cfgpath, defaults=defconfig, docs=docconfig, autosave=False)
+
+        # workspace used for file parsing
+        # TODO: integrate VivWorkspace.MemoryObject behavior cleanly with 
+        vw = clicls(confdir=None, autosave=False)
 
         # Save the mode
+        # TODO: meta variables in project?
         vw.setTransMeta("ProjectMode", parsed_args.mode)
 
         # setup logging
-        vw.verbose = min(parsed_args.verbose, len(e_common.LOG_LEVELS)-1)
-        level = e_common.LOG_LEVELS[vw.verbose]
+        self.verbose = min(parsed_args.verbose, len(e_common.LOG_LEVELS)-1)
+        level = e_common.LOG_LEVELS[self.verbose]
         e_common.initLogging(logger, level=level)
-        logger.warning("LogLevel: %r  %r  %r", vw.verbose, level, logging.getLevelName(level))
+        logger.warning("LogLevel: %r  %r  %r", self.verbose, level, logging.getLevelName(level))
 
         # Parse any command-line options
         if parsed_args.option is not None:
             for option in parsed_args.option:
                 if option in ('-h', '?'):
-                    logger.critical(vw.config.reprConfigPaths())
+                    logger.critical(self.config.reprConfigPaths())
                     logger.critical("syntax: \t-O <secname>.<optname>=<optval> (optval must be json syntax)")
                     sys.exit(-1)
 
                 try:
-                    vw.config.parseConfigOption(option)
+                    self.config.parseConfigOption(option)
                 except e_exc.ConfigNoAssignment as e:
-                    logger.critical(vw.config.reprConfigPaths() + "\n")
+                    logger.critical(self.config.reprConfigPaths() + "\n")
                     logger.critical(e)
                     logger.critical("syntax: \t-O <secname>.<optname>=<optval> (optval must be json syntax)")
                     sys.exit(-1)
 
                 except Exception as e:
-                    logger.critical(vw.config.reprConfigPaths())
+                    logger.critical(self.config.reprConfigPaths())
                     logger.critical("With entry: %s", option)
                     logger.critical(e)
                     sys.exit(-1)
@@ -241,9 +241,11 @@ class VivProject(metaclass=VivProjectMeta):
             # to use the xcal parser utility.
             if (parsed_args.parsemod is None and fname.lower().endswith('.xcal')) or \
                     parsed_args.parsemod == 'ihex':
-                parsed_args.parsemod = 'xcal'
+                parsemod = 'xcal'
+            else:
+                parsemod = parsed_args.parsemod
 
-            vw.loadFromFile(fname, fmtname=parsed_args.parsemod)
+            vw.loadFromFile(fname, fmtname=parsemod)
 
             end = time.time()
             logger.info('Loaded (%.4f sec) %s', (end - start), fname)
@@ -256,21 +258,21 @@ class VivProject(metaclass=VivProjectMeta):
         # If a workspace was not specified we need to manually set all of the
         # various Meta options based on project configuration options.
         if vw.getMeta('Architecture') is None:
-            if vw.config.project.arch == 'unknown':
+            if self.config.project.arch == 'unknown':
                 raise Exception('architecture must be defined')
 
-            vw.setMeta('Architecture', vw.config.project.arch)
+            vw.setMeta('Architecture', self.config.project.arch)
 
         defaultcall = vw.getMeta('Platform')
         if defaultcall is None or defaultcall.lower() == 'unknown':
-            vw.setMeta('DefaultCall', viv_const.archcalls.get(vw.config.project.arch, 'unknown'))
+            vw.setMeta('DefaultCall', viv_const.archcalls.get(self.config.project.arch, 'unknown'))
 
         platform = vw.getMeta('Platform')
         if platform is None or platform.lower() == 'unknown':
-            vw.setMeta('Platform', vw.config.project.platform)
+            vw.setMeta('Platform', self.config.project.platform)
 
         # Always force it to use the project endianness
-        vw.setMeta('bigend', vw.config.project.bigend)
+        vw.setMeta('bigend', self.config.project.bigend)
 
         # Save the workspace and parsed args
         self.vw = vw
@@ -285,11 +287,25 @@ class VivProject(metaclass=VivProjectMeta):
         Project files would be in this directory by default:
             ~/.PROJECT/WORKSPACE/filename
         """
-        if filename is None or self.vw.vivhome is None:
+        if filename is None or self.home is None:
             return None
-        elif filename.startswith(self.vw.vivhome):
-            return os.path.relpath(filename, self.vw.vivhome)
+        elif filename.startswith(self.home):
+            return os.path.relpath(filename, self.home)
         elif os.path.isabs(filename):
             return filename
         else:
-            return os.path.normpath(os.path.join(self.vw.vivhome, filename))
+            return os.path.normpath(os.path.join(self.home, filename))
+
+    def get_project_config(self, path=None):
+        if path is None:
+            path = ''
+
+        cfg = self.config
+        for part in path.split('.'):
+            if part in cfg.cfgsubsys:
+                cfg = cfg.getSubConfig(part)
+            elif part in cfg.cfginfo:
+                # Should be the last item
+                cfg = cfg.get(part)
+
+        return cfg

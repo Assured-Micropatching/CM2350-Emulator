@@ -535,13 +535,12 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
             eapr.REG_ESR,
             #eapr.REG_HID0, eapr.REG_HID1,
             eapr.REG_IAC1, eapr.REG_IAC2, eapr.REG_IAC3, eapr.REG_IAC4,
-            # pending update to vivisect to add the SPRs
-            #eapr.REG_IAC5, eapr.REG_IAC6, eapr.REG_IAC7, eapr.REG_IAC8,
+            eapr.REG_IAC5, eapr.REG_IAC6, eapr.REG_IAC7, eapr.REG_IAC8,
             eapr.REG_L1CSR0, eapr.REG_L1CSR1,
             eapr.REG_L1FINV0, eapr.REG_L1FINV1,
             #eapr.REG_MCSR,
             eapr.REG_MSR,
-            eapr.REG_PID,  # PID0
+            eapr.REG_PID,  # different name for PID0
             eapr.REG_SPEFSCR,
             #eapr.REG_TCR,
             #eapr.REG_TSR,

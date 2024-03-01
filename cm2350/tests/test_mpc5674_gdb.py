@@ -1,48 +1,37 @@
 import os
 import time
 import fcntl
+import signal
 import unittest
+import threading
 import subprocess
-import multiprocessing
 
-from .helpers import initLogging
+from .helpers import MPC5674_Test, initLogging
+
+import envi.common as e_cmn
+import envi.archs.ppc.regs as eapr
 
 from cm2350.mpc5674 import MPC5674_Emulator
+from cm2350.intc_exc import GdbServerHaltEvent
 
 import logging
 logger = logging.getLogger(__name__)
 
 
-class CM2350_Process(multiprocessing.Process):
-    def run(self):
-        initLogging(logger)
-        args = ['-m', 'test', '-c', '-g']
+class MPC5674_BAM_GDB_Test(MPC5674_Test):
+    args = MPC5674_Test.args + ['-g']
+    maxDiff = 10000
 
-        # Minimal required configuration
-        config = {
-            'project': {
-                'arch': 'ppc32-embedded',
-            },
-            'MPC5674': {
-                'FMPLL': {
-                    'extal': 40000000,
-                },
-            },
-        }
+    def ctrl_c(self):
+        self.gdb.send_signal(signal.SIGINT)
 
-        logger.debug('Creating MPC5674 with args: %r', args)
-        self.emu = MPC5674_Emulator(defconfig=config, args=args)
-        self.emu.run()
-
-
-class MPC5674_BAM_GDB_Test(unittest.TestCase):
-    def write(self, data, end='\n'):
-        if end and not data.endswith('\n'):
-            data += '\n'
+    def write(self, data, end='\r\n'):
+        if end and not data.endswith('\r\n'):
+            data += '\r\n'
         self.gdb.stdin.write(data.encode())
         self.gdb.stdin.flush()
 
-    def read(self, until=None, timeout=None):
+    def _read(self, fd, until=None, timeout=None):
         start = time.time()
 
         self._buffer = ''
@@ -70,21 +59,78 @@ class MPC5674_BAM_GDB_Test(unittest.TestCase):
             out = self._buffer
             self._buffer = ''
 
-        logger.debug('read(until=%r, timeout=%r) elapsed time %f',
-                     until, timeout, time.time()-start)
+        logger.log(e_cmn.MIRE, 'read(%s, until=%r, timeout=%r) elapsed time %f = %s',
+                   until, timeout, time.time()-start, out)
 
         return out
 
-    def setUp(self):
-        initLogging(logger)
+    def read(self, until=None, timeout=None, ignore_errors=False):
+        out = self._read(self.gdb.stdout, until, timeout)
 
-        # Start the emulator
-        self.emu = CM2350_Process()
-        self.emu.daemon = True
-        self.emu.start()
+        # Read any stderr output that has happened and log it
+        err = self.gdb.stderr.read()
+        if err and not ignore_errors:
+            err = err.rstrip().decode()
+            self.fail(err)
+
+        return out
+
+    def run_emu(self):
+        try:
+            self.emu.run()
+        except GdbServerHaltEvent:
+            pass
+
+    def setUp(self):
+        super().setUp()
 
         # Give the emulator time to start
         time.sleep(2)
+
+        # TODO: we need to build that disassembler into vivisect...
+
+        # Fill in a bunch of NOPs starting at the current PC (0x00000000). But 
+        # put a few different types of branches so we can test that the gdb 
+        # client is able to properly step through and control different 
+        # instructions.
+        #
+        #   0x00000000:  60000000  ori r0,r0,0
+        #   ...
+        #   0x0000004c:  60000000  ori r0,r0,0
+        #   0x00000050:  3c604000  lis r3,0x4000
+        #   0x00000054:  2c030000  cmpi r3,0
+        #   0x00000058:  41810008  bgt 0x00000060
+        #   0x0000005c:  3be00001  li r31,1
+        #   0x00000060:  60000000  ori r0,r0,0
+        #   ...
+        #   0x000000ac:  60000000  ori r0,r0,0
+        #   0x000000b0:  39000000  li r8,0
+        #   0x000000b4:  7d0903a6  mtctr r8
+        #   0x000000b8:  4e800420  bctr
+        #   0x000000bc:  60000000  ori r0,r0,0
+        #   ...
+        #   0x000000f8:  60000000  ori r0,r0,0
+        #   0x000000fc:  48000006  ba 0x00000004
+        #
+        pc = self.emu.getProgramCounter()
+        instrs = b''.join(([b'\x60\x00\x00\x00'] * 20) + \
+                [b'\x3c\x60\x40\x00',
+                 b'\x2c\x03\x00\x00',
+                 b'\x41\x81\x00\x08',
+                 b'\x3b\xe0\x00\x01'] + \
+                ([b'\x60\x00\x00\x00'] * 20) + \
+                [b'\x39\x00\x00\x00',
+                 b'\x7d\x09\x03\xa6',
+                 b'\x4e\x80\x04\x20'] + \
+                ([b'\x60\x00\x00\x00'] * 16) + \
+                [b'\x48\x00\x00\x06'])
+        self.assertEqual(len(instrs), 0x100)
+
+        self.emu.flash.data[pc:pc+len(instrs)] = instrs
+
+        # Run the emulator
+        self.thread = threading.Thread(target=self.run_emu, daemon=True)
+        self.thread.start()
 
         # spawn GDB
         gdb_args = [
@@ -96,32 +142,43 @@ class MPC5674_BAM_GDB_Test(unittest.TestCase):
         ]
         self.gdb = subprocess.Popen(gdb_args,
                                     stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE,
                                     stdin=subprocess.PIPE)
 
         self._buffer = ''
 
-        # Make stdout nonblocking
+        # Make stdout and stderr nonblocking
         flags = fcntl.fcntl(self.gdb.stdout, fcntl.F_GETFL)
         fcntl.fcntl(self.gdb.stdout, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+        flags = fcntl.fcntl(self.gdb.stderr, fcntl.F_GETFL)
+        fcntl.fcntl(self.gdb.stderr, fcntl.F_SETFL, flags | os.O_NONBLOCK)
 
         # Wait until the (gdb) prompt is printed
-        self.read(until='(gdb) ', timeout=1)
+        self.read(until='(gdb) ', timeout=1, ignore_errors=True)
 
     def tearDown(self):
+        # Queue the halt signal to stop the emulator thread, as soon as the 
+        # debugger disconnects the emulator will start executing.
+        self.emu.queueException(GdbServerHaltEvent())
+
         self.write('detach')
         self.write('quit')
         self.gdb.stdin.close()
         self.gdb.stdout.close()
+        self.gdb.stderr.close()
 
         ret = self.gdb.wait(1)
         self.assertNotEqual(ret, None)
 
-    #def test_gdb_connect(self):
-    #    pass
+        super().tearDown()
 
     def test_gdb_info_reg(self):
-        self.write('info reg\r')
+        self.write('info reg')
         out = self.read(timeout=1)
+
+        # The MSR in the following test is set to the following value by the 
+        # helper.MPC5674_Test class initialization:
+        #   0x29200: MSR_EE_MASK | MSR_CE_MASK | MSR_ME_MASK | MSR_DE_MASK
 
         # TODO: this feels janky, how to improve?
         expected = '''r0             0x0                 0
@@ -157,7 +214,7 @@ r29            0x0                 0
 r30            0x0                 0
 r31            0x0                 0
 pc             0x0                 0x0
-msr            0x0                 0
+msr            0x29200             168448
 cr             0x0                 0
 lr             0x0                 0
 ctr            0x0                 0
@@ -293,19 +350,287 @@ PWRMGTCR0      0x0                 0
 SCCSRBAR       0x0                 0
 SVR            0x0                 0
 (gdb) '''
+
         self.assertEqual(out, expected)
 
-    #def test_gdb_set_mem(self):
-    #    pass
+    def test_gdb_set_reg(self):
+        # (gdb) set $r2 = 0x12345678
+        # (gdb) p/x $r2
+        # $1 = 0x12345678
+        # (gdb) set $r2 = 0x123456789ABCDEF
+        # (gdb) p/x $r2
+        # $2 = 0x89abcdef
+        self.write('set $r2 = 0x12345678')
+        self.read(until='(gdb) ', timeout=1)
 
-    #def test_gdb_stepi(self):
-    #    pass
+        self.write('p/x $r2')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''$1 = 0x12345678
+(gdb) ''')
 
-    #def test_gdb_set_pc(self):
-    #    pass
+        self.assertEqual(self.emu.getRegister(eapr.REG_R2), 0x12345678)
 
-    #def test_gdb_breakpoint(self):
-    #    pass
+        self.write('set $r2 = 0x123456789abcdef')
+        self.read(until='(gdb) ', timeout=1)
 
-    #def test_gdb_continue_interrupt(self):
-    #    pass
+        self.write('p/x $r2')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''$2 = 0x89abcdef
+(gdb) ''')
+
+        self.assertEqual(self.emu.getRegister(eapr.REG_R2), 0x89abcdef)
+
+    def test_gdb_set_mem(self):
+        # (gdb) set {int} 0x40000000 = 0x12345678
+        # (gdb) p/x *0x40000000
+        # $1 = 0x12345678
+        # (gdb) set {int} 0x40000000 = 0x12345678abcdef
+        # (gdb) p/x *0x40000000
+        # $2 = 0x78abcdef
+        self.write('set {int} 0x40000004 = 0x12345678')
+        self.read(until='(gdb) ', timeout=1)
+
+        self.write('x/4wx 0x40000000')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''0x40000000:\t0x00000000\t0x12345678\t0x00000000\t0x00000000
+(gdb) ''')
+
+        expected = bytes.fromhex('00000000 12345678 00000000 00000000')
+        self.assertEqual(self.emu.readMemory(0x40000000, 16), expected)
+
+        self.write('set {int} 0x40000008 = 0xfedcba987654321')
+        self.read(until='(gdb) ', timeout=1)
+
+        self.write('x/4wx 0x40000000')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''0x40000000:\t0x00000000\t0x12345678\t0x87654321\t0x00000000
+(gdb) ''')
+
+        expected = bytes.fromhex('00000000 12345678 87654321 00000000')
+        self.assertEqual(self.emu.readMemory(0x40000000, 16), expected)
+
+        self.write('set {char} 0x40000002 = 0xff')
+        self.read(until='(gdb) ', timeout=1)
+
+        self.write('x/4wx 0x40000000')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''0x40000000:\t0x0000ff00\t0x12345678\t0x87654321\t0x00000000
+(gdb) ''')
+
+        expected = bytes.fromhex('0000ff00 12345678 87654321 00000000')
+        self.assertEqual(self.emu.readMemory(0x40000000, 16), expected)
+
+        self.write('set {char} 0x40000005 = 0xff')
+        self.read(until='(gdb) ', timeout=1)
+
+        self.write('x/4wx 0x40000000')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''0x40000000:\t0x0000ff00\t0x12ff5678\t0x87654321\t0x00000000
+(gdb) ''')
+
+        expected = bytes.fromhex('0000ff00 12ff5678 87654321 00000000')
+        self.assertEqual(self.emu.readMemory(0x40000000, 16), expected)
+
+    def test_gdb_stepi(self):
+        # (gdb) p/x $pc
+        # $1 = 0x00000000
+        # (gdb) x/i $pc
+        # 0x00000000:  nop
+        # (gdb) stepi
+        # (gdb) p/x $pc
+        # $2 = 0x00000004
+        # (gdb) set $pc = 0x50
+        # (gdb) p/x $pc
+        # $3 = 0x00000050
+        # (gdb) x/i $pc
+        # 0x00000050:  lis r3,0x4000
+        # (gdb) stepi
+        # (gdb) p/x $pc
+        # $4 = 0x00000054
+        # (gdb) p/x $r3
+        # $5 = 0x40000000
+        self.write('p/x $pc')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''$1 = 0x0
+(gdb) ''')
+        self.write('x/i $pc')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''=> 0x0:\tnop
+(gdb) ''')
+        self.assertEqual(self.emu.getRegister(eapr.REG_PC), 0x00000000)
+
+        self.write('stepi')
+        self.read(until='(gdb) ', timeout=1)
+        self.write('p/x $pc')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''$2 = 0x4
+(gdb) ''')
+        self.assertEqual(self.emu.getRegister(eapr.REG_PC), 0x00000004)
+
+        self.write('set $pc = 0x50')
+        self.read(until='(gdb) ', timeout=1)
+        self.write('p/x $pc')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''$3 = 0x50
+(gdb) ''')
+        self.write('x/i $pc')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''=> 0x50:\tlis     r3,16384
+(gdb) ''')
+        self.assertEqual(self.emu.getRegister(eapr.REG_PC), 0x00000050)
+        self.assertEqual(self.emu.getRegister(eapr.REG_R3), 0x00000000)
+
+        self.write('stepi')
+        self.read(until='(gdb) ', timeout=1)
+        self.write('p/x $pc')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''$4 = 0x54
+(gdb) ''')
+        self.assertEqual(self.emu.getRegister(eapr.REG_PC), 0x00000054)
+
+        self.write('p/x $r3')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''$5 = 0x40000000
+(gdb) ''')
+        self.assertEqual(self.emu.getRegister(eapr.REG_R3), 0x40000000)
+
+        # TODO branch test with changed compare reg value
+
+    def test_gdb_breakpoint(self):
+        self.write('p/x $pc')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''$1 = 0x0
+(gdb) ''')
+        self.assertEqual(self.emu.getRegister(eapr.REG_PC), 0x00000000)
+
+        self.write('break *0xb8')
+        self.read(until='(gdb) ', timeout=1)
+        self.write('continue')
+
+        # should reach that quickly
+        self.read(until='(gdb) ', timeout=0.1)
+
+        self.write('p/x $pc')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''$2 = 0xb8
+(gdb) ''')
+        self.assertEqual(self.emu.getRegister(eapr.REG_PC), 0x000000b8)
+
+        # the CTR register should point to address 0
+        self.write('p/x $ctr')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''$3 = 0x0
+(gdb) ''')
+        self.assertEqual(self.emu.getRegister(eapr.REG_CTR), 0x00000000)
+
+        # Ensure we go to 0
+        self.write('stepi')
+        self.read(until='(gdb) ', timeout=1)
+        self.write('p/x $pc')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''$4 = 0x0
+(gdb) ''')
+        self.assertEqual(self.emu.getRegister(eapr.REG_PC), 0x00000000)
+
+        # continue again
+        self.write('continue')
+        self.read(until='(gdb) ', timeout=0.1)
+
+        self.write('p/x $pc')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''$5 = 0xb8
+(gdb) ''')
+        self.assertEqual(self.emu.getRegister(eapr.REG_PC), 0x000000b8)
+
+        # Modify the CTR register
+        self.write('set $ctr = 0xbc')
+        self.read(until='(gdb) ', timeout=1)
+
+        self.write('p/x $ctr')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''$6 = 0xbc
+(gdb) ''')
+
+        self.assertEqual(self.emu.getRegister(eapr.REG_CTR), 0x000000bc)
+
+        # Ensure we go to 0xbc
+        self.write('stepi')
+        self.read(until='(gdb) ', timeout=1)
+        self.write('p/x $pc')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''$7 = 0xbc
+(gdb) ''')
+        self.assertEqual(self.emu.getRegister(eapr.REG_PC), 0x000000bc)
+
+        # continue again
+        self.write('continue')
+        self.read(until='(gdb) ', timeout=0.1)
+
+        self.write('p/x $pc')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''$8 = 0xb8
+(gdb) ''')
+        self.assertEqual(self.emu.getRegister(eapr.REG_PC), 0x000000b8)
+
+        # current instruction should be a bctr
+        self.write('x/i $pc')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''=> 0xb8:\tbctr
+(gdb) ''')
+
+    @unittest.skip("vFlashErase and vFlashWrite not implemented")
+    def test_gdb_modify_flash(self):
+        # Should be able to change it to a nop through the GDB interface
+        # TODO: change to a load command:
+        self.write('set {int} $pc = 0x60000000')
+        self.read(until='(gdb) ', timeout=1)
+
+        self.write('x/wx $pc')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''0xb8:\t0x60000000
+(gdb) ''')
+
+        self.write('x/i $pc')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''=> 0xb8:\tnop
+(gdb) ''')
+
+        self.assertEqual(self.emu.readMemory(0xb8, 4), bytes.fromhex('60000000'))
+
+        # Ensure that the CTR register is currently 0 and we go to 0xbc
+        self.write('p/x $ctr')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''$9 = 0x0
+(gdb) ''')
+        self.assertEqual(self.emu.getRegister(eapr.REG_CTR), 0x00000000)
+
+        self.write('stepi')
+        self.read(until='(gdb) ', timeout=1)
+        self.write('p/x $pc')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''$10 = 0x0
+(gdb) ''')
+        self.assertEqual(self.emu.getRegister(eapr.REG_PC), 0x00000000)
+
+    def test_gdb_continue_interrupt(self):
+        self.write('p/x $pc')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''$1 = 0x0
+(gdb) ''')
+        self.assertEqual(self.emu.getRegister(eapr.REG_PC), 0x00000000)
+
+        self.write('continue')
+        time.sleep(1)
+        self.ctrl_c()
+        self.read(until='(gdb) ', timeout=1)
+
+        pc = self.emu.getRegister(eapr.REG_PC)
+
+        self.write('p/x $pc')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''$2 = 0x%x
+(gdb) ''' % pc)
+
+        # The instructions should continuously loop between PC's 0x4 and 0xFC
+        self.assertIn(pc, range(0x00000004, 0x00000100))
+        self.assertEqual(self.emu.getRegister(eapr.REG_PC), pc)

@@ -8,7 +8,7 @@ import envi.bits as e_bits
 import envi.memory as e_mem
 from envi.common import EMULOG
 
-from .. import mmio
+from .. import mmio, ppc_peripherals
 from ..ppc_vstructs import *
 from ..intc_exc import MceDataReadBusError, MceWriteBusError
 
@@ -980,7 +980,7 @@ class FlashArray:
         # silently do nothing?
 
 
-class FLASH(mmio.MMIO_DEVICE):
+class FLASH(ppc_peripherals.Module, mmio.MMIO_DEVICE):
     """
     This is the FLASH Controller.
 
@@ -988,7 +988,7 @@ class FLASH(mmio.MMIO_DEVICE):
     weirdly the different memory regions need to work.
     """
     def __init__(self, emu, filename=None):
-        emu.modules['FLASH'] = self
+        ppc_peripherals.Module.__init__(self, emu, 'FLASH')
 
         # Empty flash for the moment
         self.data = None
@@ -1075,16 +1075,10 @@ class FLASH(mmio.MMIO_DEVICE):
             (0x00380000, 0x00400000,   None, FlashBlock.H5),
         )
 
-    def __del__(self):
+    def shutdown(self):
         # Gracefully close the backup file
         if self._backup:
             self._backup.close()
-
-    def init(self, emu):
-        logger.debug('init: FLASH module')
-        self.emu = emu
-
-        self.reset(emu)
 
     def reset(self, emu):
         # Some flash control registers get their initial values from shadow

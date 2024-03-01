@@ -213,20 +213,42 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         self._read_callbacks = {}
         self._write_callbacks = {}
 
+    def installModule(self, name, module):
+        # Ensure that this module has all the required functions:
+        #   - init
+        #   - reset
+        #   - shutdown
+        if not hasattr(module, 'init') or \
+                not hasattr(module, 'reset') or \
+                not hasattr(module, 'shutdown'):
+            raise NotImplementedError('Cannot install module %s (%s), all of the following functions must be implemented: "init", "reset", "shutdown"' %
+                                      (name, module))
+
+        # Ensure that installing this module won't overwrite one that is already 
+        # installed
+        if name in self.modules:
+            raise KeyError('Cannot install peripheral %s: %s already installed, cannot install %s' %
+                           (name, self.modules[name], peripheral))
+
+        self.modules[name] = module
+
+    def getModule(self, name):
+        return self.modules[name]
+
     def __del__(self):
         self.shutdown()
 
     def shutdown(self):
         # Call the emutime shutdown function
-        super().shutdown()
+        emutimers.EmuTimeCore.shutdown(self)
 
-        if hasattr(self, 'modules') and self.modules:
-            # Go through each peripheral and if any of them have a server thread
-            # running, stop it now
-            for mname in list(self.modules):
-                if hasattr(self.modules[mname], 'stop'):
-                    self.modules[mname].stop()
-                del self.modules[mname]
+        # Go through each peripheral and if any of them have a server thread
+        # running, stop it now, use a duplicate list because the modules will be 
+        # deleting themselves from the list after they are shutdown
+        for mname in list(self.modules):
+            logger.debug("shutdown: Cleaning up %s...", mname)
+            self.modules[mname].shutdown()
+            del self.modules[mname]
 
     def _mcuWDTHandler(self):
         # From "Figure 8-1. Watchdog State Machine" (EREF_RM.pdf page 886)
@@ -370,7 +392,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
 
         # initialize the various modules on this chip.
         for key, module in self.modules.items():
-            logger.debug("init: Initializing %r...", key)
+            logger.debug("init: Initializing %s...", key)
             module.init(self)
 
         # Start the core emulator time now
@@ -394,9 +416,8 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         # First reset the system emulation time, then reset all modules
         self.systimeReset()
         for key, module in self.modules.items():
-            if hasattr(module, 'reset'):
-                logger.debug("reset: Resetting %r...", key)
-                module.reset(self)
+            logger.debug("reset: Resetting %s...", key)
+            module.reset(self)
 
         # Start the core emulator time now
         self.resume_time()
@@ -429,6 +450,8 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         '''
         self.halt_time()
         self._run.clear()
+
+    def _do_wait_resume(self):
         self._run.wait()
         self.resume_time()
 
@@ -437,14 +460,6 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         Resume the emulator, which has been "paused"
         '''
         self._run.set()
-
-    def debug_client_detached(self):
-        '''
-        Handles the condition when a gdb client detaches. For now we will halt
-        the emulator when this occurs.
-        '''
-        self.queueException(intc_exc.GdbClientDetachEvent())
-        self.resume_exec()
 
     ###############################################################################
     # Redirect TLB instruction emulation functions to the MMU peripheral
@@ -657,12 +672,13 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         """
         self.processIO()
 
+        pc = self.getProgramCounter()
+
         try:
             # See if there are any exceptions that need to start being handled
             self.mcu_intc.checkException()
 
             # do normal opcode parsing and execution
-            pc = self.getProgramCounter()
             op = self.parseOpcode(pc)
 
             # TODO: check MSR for FP (MSR_FP_MASK) and SPE (MSR_SPE_MASK)
@@ -683,6 +699,10 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
                     logger.debug("system reset: setting reset source %s in %s", exc.source, key)
                     module.setResetSource(exc.source)
 
+        except intc_exc.GdbServerHaltEvent as exc:
+            # Halt execution of the emulator
+            raise exc
+
         except intc_exc.DebugException as exc:
             # TODO: If the op is DNH
             #       If debug exceptions are enabled and external exception 
@@ -695,8 +715,8 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
             #       handling is set this instruction generates a debug 
             #       exception, otherwise it is a no-op.
 
-            # If the Debug APU is enabled and a debug client is attached and 
-            # this was a DNH instruction, pass control to the GDB stub.
+            # Pass this to the GDB stub (the emulator equivalent of the Debug 
+            # APU) for processing.
             self.gdbstub.handleInterrupts(exc)
 
         except (envi.UnsupportedInstruction, envi.InvalidInstruction) as exc:

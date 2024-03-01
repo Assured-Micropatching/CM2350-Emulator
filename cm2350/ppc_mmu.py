@@ -5,6 +5,7 @@ from envi.archs.ppc.regs import *
 from envi.archs.ppc.const import *
 
 from .ppc_vstructs import BitFieldSPR, v_const
+from .ppc_peripherals import Module
 from .intc_exc import DataTlbException, InstructionTlbException
 
 import logging
@@ -316,9 +317,9 @@ class PpcTLBEntry:
             self.valid = 0
 
 
-class PpcMMU:
+class PpcMMU(Module):
     def __init__(self, emu):
-        emu.modules['MMU'] = self
+        Module.__init__(self, emu, 'MMU')
 
         # SPRs to related to the PPC/e200z7 MMU
         self.mmucfg = MMUCFG(emu)
@@ -332,16 +333,14 @@ class PpcMMU:
         self._tlb = tuple(PpcTLBEntry(i) for i in range(32))
 
     def init(self, emu):
-        self.emu = emu
-
         # The TLB entries can be invalidated selectively with the tlbivax
         # instruction, or all TLB entries can be invalidated by writing 1 to the
         # MMUCSR0[TLB1_FI] bit.
-        self.emu.addSprWriteHandler(REG_MMUCSR0, self._mmucsr0WriteHandler)
+        emu.addSprWriteHandler(REG_MMUCSR0, self._mmucsr0WriteHandler)
 
         # Handle writes to the cache status and control SPRs
-        self.emu.addSprWriteHandler(REG_L1CSR0, self._l1csr0WriteHandler)
-        self.emu.addSprWriteHandler(REG_L1CSR1, self._l1csr1WriteHandler)
+        emu.addSprWriteHandler(REG_L1CSR0, self._l1csr0WriteHandler)
+        emu.addSprWriteHandler(REG_L1CSR1, self._l1csr1WriteHandler)
 
         # Set TLB1 entry 0 to the correct default values.
         #   (from "10.6.7 TLB load on reset" e200z759CRM.pdf page 570)
@@ -349,6 +348,8 @@ class PpcMMU:
         # It is not clear from the e200z7 documentation if the EPN/RPN page
         # should be the BAM memory range, but for now we assume it is
         self.tlbConfig(0, tsiz=PpcTlbPageSize.SIZE_4KB, epn=0xFFFFF000, rpn=0xFFFFF000)
+
+        Module.init(self, emu)
 
     def i_tlbre(self, op):
         '''

@@ -6,13 +6,14 @@ import traceback
 
 from envi.archs.ppc import regs as ppcregs
 
+from .ppc_peripherals import Module
 from .intc_const import *
 from . import intc_exc
 
 logger = logging.getLogger(__name__)
 
 
-class e200INTC:
+class e200INTC(Module):
     '''
     This is the Interrupt Controller for the e200 core.
 
@@ -38,9 +39,8 @@ class e200INTC:
         If IVORS are supported, the next instruction address will be retrieved from the IVOR# register
         Otherwise, the offset from the base address in IVPR is used (0x20 for each)
         '''
-        self.emu = emu
+        Module.__init__(self, emu, 'MCU_INTC')
         self.ivors = ivors
-        emu.modules['MCU_INTC'] = self
         self._needreset = reset
 
         # callback handlers
@@ -67,14 +67,6 @@ class e200INTC:
             raise Exception("Registering External Interrupt Controller when one exists")
 
         self._external_intc = extintc
-
-    def init(self, emu):
-        '''
-        Support the CPU init/reset functions.
-        '''
-        logger.debug('init: e200INTC module (Interrupt Controller)')
-
-        self.reset(emu)
 
     def reset(self, emu):
         '''
@@ -161,31 +153,13 @@ class e200INTC:
         with self.lock:
             newexc = self.pending.pop(0)
 
-        # If this was a debug exception and the external debugger is connected 
-        # it should have been handled through the external debugger by now, 
-        # don't change the PC
-        #
-
-        if isinstance(newexc, intc_exc.ResetException):
+        # If a reset or debug exception has been queued, raise it right now so 
+        # it'll be handled by the normal method.
+        if isinstance(newexc, (intc_exc.ResetException, intc_exc.DebugException)):
+            # Before raising the exception make sure to update the hasInterrupt 
+            # flag since we removed a queued exception.
+            self.hasInterrupt = self.pending and self.curlvl > self.pending[0].prio
             raise newexc
-
-        elif isinstance(newexc, intc_exc.DebugException) and \
-                self.emu.gdbstub.isClientConnected():
-            # Before halting re-evaluate if there are any pending interrupts. If 
-            # a stepi happens it may be done from the GDB server thread in which 
-            # case we don't want this event to appear to be an event that has to 
-            # be handled again.
-            self.hasInterrupt = self.pending and self.curlvl > self.pending[0].prio
-
-            self.emu._do_halt()
-
-            # Double check if there are any pending interrupts or not
-            self.hasInterrupt = self.pending and self.curlvl > self.pending[0].prio
-            if self.hasInterrupt:
-                newexc = self.pending.pop(0)
-            else:
-                # No more exceptions to handle, just return
-                return
 
         # If the debug client has detached stop the emulator.
         if isinstance(newexc, intc_exc.GdbClientDetachEvent):

@@ -309,18 +309,6 @@ class DSPI_REGISTERS(PeripheralRegisterSet):
         self.dsicr1 = (DSPI_DSICR1_OFFSET, DSPI_x_DSICR1())
 
 
-class PlaceholderSPIDevice(BusPeripheral):
-    """
-    A placeholder SPI device that always returns the same value no matter what
-    """
-    def __init__(self, emu, name, bus, cs, value, *args, **kwargs):
-        BusPeripheral.__init__(self, emu, name, bus, cs)
-        self.value = value
-
-    def receive(self, data):
-        return self.value
-
-
 SPI_CS2PCS = {
     0: 0b000001,
     1: 0b000010,
@@ -331,30 +319,27 @@ SPI_CS2PCS = {
 }
 
 
-class SPIBus(ExternalIOPeripheral):
+class SPIBus(BusPeripheral):
     """
     The SPI device doesn't require an external IO thread. Instead bus devices
     are registered and the transmit function identifies the registered device
     to call that can perform custom handling of the read/write request.
     """
-    def __init__(self, emu, devname, mapaddr, mapsize, regsetcls=None,
-                 isrstatus=None, isrflags=None, isrevents=None, **kwargs):
-        ExternalIOPeripheral.__init__(self, emu=emu, devname=devname,
-                                      mapaddr=mapaddr, mapsize=mapsize,
-                                      regsetcls=regsetcls, isrstatus=isrstatus,
-                                      isrflags=isrflags, isrevents=isrevents,
-                                      **kwargs)
-
-        # Ensure the server arguments are clear so the io thread is not started
-        self._server_args = None
-
-        # Add a dictionary to lookup SPI bus peripheral devices
-        self.devices = {}
-
-    def registerBusPeripheral(self, device, cs):
-        self.devices[SPI_CS2PCS[cs]] = device
+    def registerBusDevice(self, device, cs):
+        """
+        Customization of the BusPeripheral.registerBusDevice() function, to
+        ensure that any chip select values 
+        """
+        # Normalize incoming chip select values from the chip select 0-5 signal 
+        # numbers into a PCS register mask
+        super().registerBusDevice(device=device, key=SPI_CS2PCS[cs])
 
     def transmit(self, cs, value):
+        """
+        Customization of the BusPeripheral.transmit() function, to give easier
+        to read log messages because the values passed to and from SPI devices
+        are integers.
+        """
         device = self.devices.get(cs)
         if device is not None:
             logger.log(e_cmn.EMULOG, '%s -> %s: 0x%x', self.devname, device.name, value)

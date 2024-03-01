@@ -11,7 +11,6 @@ import envi.bits as e_bits
 from vstruct import VStruct, isVstructType
 from vstruct.bitfield import VBitField
 
-
 import logging
 logger = logging.getLogger(__name__)
 
@@ -781,20 +780,30 @@ class PeriphRegister(VBitField):
         else:
             self._vs_bigend = None
 
+        # PeriphRegisters can be directly connected to the emulator as modules, 
+        # or more often are part of a higher-level module. But only install this 
+        # register object as a module on the emulator if a valid emulator object 
+        # has been supplied.
         if emu is not None:
             if name is None:
                 name = self.__class__.__name__
-            if name in emu.modules:
-                idx = emu.modules.index(name)
-                cur_module = emu.modules[idx]
-                raise ValueError('Module %s:%r already registered, cannot register %s:%r' % (name, cur_module, name, self))
-            emu.modules[name] = self
+
+            emu.installModule(name, self)
 
             if self._vs_bigend is None:
                 self.vsSetEndian(emu.getEndian())
 
     # TODO: implement more efficient lookup of fields in the bitfield for
     #       vsParse, vsEmit?
+
+    def __del__(self):
+        # To match standard Module behavior
+        self.shutdown()
+
+    def shutdown(self):
+        # This function is required in case a PeriphRegister object is being 
+        # installed as a standalone module in the emulator
+        pass
 
     def vsSetEndian(self, bigend):
         if bigend is None:

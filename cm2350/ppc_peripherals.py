@@ -22,10 +22,12 @@ logger = logging.getLogger(__name__)
 
 
 __all__ = [
-    'Peripheral',
+    'Module',
     'MMIOPeripheral',
     'ExternalIOPeripheral',
     'BusPeripheral',
+    'BusDevice',
+    'PlaceholderBusDevice',
     'TimerRegister',
 ]
 
@@ -46,7 +48,7 @@ PPC_MAX_READ_SIZE = 8
 PPC_INVALID_READ_VAL = b'\x00'
 
 
-class Peripheral:
+class Module:
     """
     Most basic emulator peripheral class, it automatically registers itself
     with the emulator as a "module" using the device name as the module name.
@@ -57,7 +59,7 @@ class Peripheral:
         register with the emulator as a module.
         """
         self.devname = devname
-        emu.modules[devname] = self
+        emu.installModule(devname, self)
 
         # Don't save an emulator instance yet because it may not be ready for
         # this module to interface with it
@@ -78,6 +80,20 @@ class Peripheral:
                 raise Exception('ERROR: duplicate project config entries for peripheral %s:\n%s' %
                         (devname, emu.vw.config.project.reprConfigPaths()))
 
+    def __del__(self):
+        self.shutdown()
+
+    def shutdown(self):
+        """
+        Standard "module" peripheral shutdown/cleanup function. This is called
+        when deleting/shutting down the emulator to clean up any allocated or
+        opened resources. During a normal shutdown this isn't critical but it
+        is helpful to have a clean shutdown for unit testing.
+
+        This function is required to be implemented by all peripherals.
+        """
+        pass
+
     def init(self, emu):
         """
         Standard "module" peripheral init function. This is called only once
@@ -90,8 +106,6 @@ class Peripheral:
         ensure that during initial start up and during each subsequent reset
         the registers and any internal attribute are set to the correct state.
         """
-        logger.debug('init: %s module', self.devname)
-
         # Now save the emulator, it should be ready to be used where needed
         self.emu = weakref.proxy(emu)
 
@@ -108,10 +122,10 @@ class Peripheral:
 
         This function is required to be implemented by all peripherals.
         """
-        raise NotImplementedError('%s class should implement this method' % self.__class__.__name__)
+        pass
 
 
-class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
+class MMIOPeripheral(Module, mmio.MMIO_DEVICE):
     """
     A peripheral class that implements read/write functions to connect this
     object as an MMIO device to an emulator.
@@ -132,14 +146,11 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
                       emu.addMMIO() to allow a peripheral object to specify
                       custom permissions or an mmio_bytes function.
         """
-        super().__init__(emu, devname)
+        Module.__init__(self, emu, devname)
+        mmio.MMIO_DEVICE.__init__(self, emu, devname, mapaddr, mapsize, **kwargs)
 
         # Keep track of the base address for this peripheral
         self.baseaddr = mapaddr
-
-        # Don't do the normal MMIO_DEVICE __init__ because it assigns emu, since
-        # this is a module we should wait to store the emu instance
-        emu.addMMIO(mapaddr, mapsize, devname, self._mmio_read, self._mmio_write, **kwargs)
 
         # To be customized by subclasses, if ppc_vstructs.PeripheralRegisterSet
         # is used the read/write functions in this base class can be used
@@ -377,6 +388,9 @@ class MMIOPeripheral(Peripheral, mmio.MMIO_DEVICE):
             for item in self.registers:
                 if isVstructType(item) and hasattr(item, 'reset'):
                     item.reset(emu)
+
+    def shutdown(self):
+        pass
 
     def _getPeriphReg(self, offset, size):
         """
@@ -778,9 +792,9 @@ class ExternalIOPeripheral(MMIOPeripheral):
                       emu.addMMIO() to allow a peripheral object to specify
                       custom permissions or an mmio_bytes function.
         """
-        super().__init__(emu, devname, mapaddr, mapsize, regsetcls=regsetcls,
-                         isrstatus=isrstatus, isrflags=isrflags,
-                         isrevents=isrevents, **kwargs)
+        MMIOPeripheral.__init__(self, emu, devname, mapaddr, mapsize, regsetcls=regsetcls,
+                                isrstatus=isrstatus, isrflags=isrflags,
+                                isrevents=isrevents, **kwargs)
 
         # Get the server configuration from the peripheral config (if a config
         # was found)
@@ -827,7 +841,7 @@ class ExternalIOPeripheral(MMIOPeripheral):
             ExternalIOPeripheral._tasks.append(self)
 
     def __del__(self):
-        self.stop()
+        self.shutdown()
 
         # Close the client connections
         for sock in self._clients:
@@ -853,7 +867,7 @@ class ExternalIOPeripheral(MMIOPeripheral):
                 # Probably means not fully initialized, ignore the error
                 pass
 
-    def stop(self):
+    def shutdown(self):
         """
         Stop the IO thread from running, but don't close the client sockets
         """
@@ -1078,20 +1092,112 @@ class ExternalIOPeripheral(MMIOPeripheral):
                         inputs.remove(sock)
 
 
-class BusPeripheral:
+class BusPeripheral(ExternalIOPeripheral):
+    """
+    A Variation of the ExternalIOPeripheral class that assumes there is direct
+    access to any "client" devices, and instead of connecting with a socket
+    these client devices connect by calling the registerBusDevice() function.
+    For example:
+    - SPI devices would register against a bus (i.e. "DSPI_A") with a unique 
+      chip select signals
+    - I2C devices would register against a bus (i.e. "I2C_A" or "eSCI_A") with a 
+      unique device address
+    - PCI devices would register against a PCI bus with a unique memory address
+    """
+    def __init__(self, emu, devname, mapaddr, mapsize, regsetcls=None,
+                 isrstatus=None, isrflags=None, isrevents=None, **kwargs):
+        ExternalIOPeripheral.__init__(self, emu=emu, devname=devname,
+                                      mapaddr=mapaddr, mapsize=mapsize,
+                                      regsetcls=regsetcls, isrstatus=isrstatus,
+                                      isrflags=isrflags, isrevents=isrevents,
+                                      **kwargs)
+
+        # Ensure the server arguments are clear so the io thread is not started
+        self._server_args = None
+
+        # Add a dictionary to lookup SPI bus peripheral devices
+        self.devices = {}
+
+    def registerBusDevice(self, device, key):
+        """
+        Base implementation to keep track of client devices based on whatever
+        their "key" is. For SPI devices this will be a chip select value, I2C
+        devices will use a unique number, PCI devices will use a memory address,
+        etc.
+        """
+        if key in self.devices:
+            raise KeyError('Cannot install bus device %s: %s already installed, cannot install %s' %
+                           (key, self.devices[key], device))
+        self.devices[key] = device
+
+    def transmit(self, key, value):
+        """
+        Base implementation to transmit a value from a bus peripheral to a
+        client device. This function can be overridden for more specific
+        handling or log messages.
+
+        This function intentionally gets a value from the client device using
+        it's receive() function and then uses the device's transmit() function
+        to send that value back to the emulator core. This is done to simplify
+        the necessary of implementing a bus device, no unique logging will need
+        to be managed by the bus device because it's all done here.
+        """
+        device = self.devices.get(key)
+        if device is not None:
+            logger.log(e_cmn.EMULOG, '%s -> %s: %s', self.devname, device.name, value)
+            result = device.receive(value)
+            if result is not None:
+                logger.log(e_cmn.EMULOG, '%s <- %s: %s', self.devname, device.name, result)
+                device.transmit(result)
+        else:
+            # Make sure that transmits to non-existent devices is clearly 
+            # indicated
+            logger.warning('%s TRANSMIT %s: %s (NO DEVICE)', self.devname, key, value)
+
+
+class BusDevice:
+    """
+    A standard bus device class that can be registered with an existing
+    "bus" peripheral that has already been registered and initialized in an
+    emulator. This supports directly reading/writing values to and from a
+    client device without going through the overhead of using external TCP
+    socket communication.
+    """
     def __init__(self, emu, name, bus, *args, **kwargs):
-        self.name = name
-
         self.emu = emu
-
-        self.bus = emu.modules[bus]
-        self.bus.registerBusPeripheral(self, *args, **kwargs)
+        self.name = name
+        self.bus = emu.getModule(bus)
+        self.bus.registerBusDevice(self, *args, **kwargs)
 
     def receive(self, value):
-        raise NotImplementedError
+        """
+        A function that used to handle data being sent from the bus peripheral
+        to the client device. Implement this function for the client device to
+        properly handle the incoming data.
+        """
+        raise NotImplementedError('receive() must be implemented for %s' % self.__class__.__name__)
 
     def transmit(self, value):
-        self.emu.putIO(self.bus.devname, value)
+        """
+        The client device's transmit function is sending data back to the bus
+        peripheral, so call the bus's receive() function.
+        """
+        self.bus.receive(value)
+
+
+class PlaceholderBusDevice(BusDevice):
+    """
+    A placeholder bus device that always returns the same value no matter what.
+    """
+    def __init__(self, emu, name, bus, key, value, *args, **kwargs):
+        BusDevice.__init__(self, emu, name, bus, key)
+        self.value = value
+
+    def receive(self, data):
+        """
+        Return the initialized value
+        """
+        return self.value
 
 
 class TimerRegister:

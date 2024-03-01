@@ -1,3 +1,4 @@
+import os
 import sys
 import time
 import signal
@@ -10,6 +11,8 @@ import vtrace.platforms.gdbstub as vtp_gdb
 
 from . import mmio
 from . import intc_exc
+from . import ppc_peripherals
+
 from .gdbdefs import e200z759n3
 
 logger = logging.getLogger(__name__)
@@ -20,14 +23,7 @@ __all__ = [
 ]
 
 
-# TODO: handle reset
-# TODO: handle monitor commands (monitor reset)
-
-
-STATE_DISCONNECTED = 0
-STATE_CONNECTED = 1
-STATE_RUNNING = 2
-STATE_PAUSED = 3
+# TODO: handle "monitor reset"
 
 
 # the DNH instruction opcodes for BookE and VLE modes, the instructions are 
@@ -44,7 +40,7 @@ PPC_DNH_INSTR_BYTES = {
 }
 
 
-class e200GDB(vtp_gdb.GdbBaseEmuServer):
+class e200GDB(ppc_peripherals.Module, vtp_gdb.GdbBaseEmuServer):
     '''
     Emulated hardware debugger/gdb-stub for the e200 core.
     '''
@@ -57,9 +53,8 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
         #    ('spr',         'org.gnu.gdb.power.spr'),
         #]
         #vtp_gdb.GdbBaseEmuServer.__init__(self, emu, reggrps=reggrps)
-        vtp_gdb.GdbBaseEmuServer.__init__(self, emu)
-
-        emu.modules['GDBSTUB'] = self
+        vtp_gdb.GdbBaseEmuServer.__init__(self, emu, haltregs=['pc', 'r1'])
+        ppc_peripherals.Module.__init__(self, emu, 'GDBSTUB')
 
         # To track breakpoints, for the purposes of emulation both hardware and 
         # software breakpoints are treated the same
@@ -73,7 +68,11 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
         # We don't support the vfile handlers for this debug connection
         self.vfile_handlers = {}
 
-    def getTargetXml(self, reggrps):
+    def shutdown(self):
+        # Signal the run thread that it's time to exit
+        self.shutdownServer()
+
+    def getTargetXml(self, reggrps=None, haltregs=None):
         # Hardcoded register format and XML
         self._gdb_reg_fmt = e200z759n3.reg_fmt
         self._gdb_target_xml = e200z759n3.target_xml
@@ -86,6 +85,13 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
         self._genRegPktFmt()
         self._updateEnviGdbIdxMap()
 
+        # To mimic what the GdbBaseEmuServer.getTargetXml() function does, go 
+        # find the gdb register indexes for the halt
+        for reg_name, (_, reg_idx) in self._gdb_reg_fmt.items():
+            envi_idx = self._gdb_to_envi_map[reg_idx][vtp_gdb.GDB_TO_ENVI_IDX]
+            if envi_idx in haltregs or reg_name in haltregs:
+                self._haltregs.append(reg_idx)
+
     def initProcessInfo(self):
         self.pid = 1
         self.tid = 1
@@ -96,21 +102,22 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
         self.vfile_pid = None
 
     def waitForClient(self):
-        while self.connstate != vtp_gdb.STATE_CONN_CONNECTED:
-            time.sleep(0.1)
+        # Set the halt reason to TRAP and queue up a debug interrupt
+        self._halt_reason = signal.SIGTRAP
+        self.emu.halt_exec()
 
     def isClientConnected(self):
         return self.connstate == vtp_gdb.STATE_CONN_CONNECTED
 
     def init(self, emu):
-        logger.info("e200GDB Initialized.")
-
         if self.runthread is None:
             logger.info("starting GDBServer runthread")
             self.runthread = threading.Thread(target=self.runServer, daemon=True)
             self.runthread.start()
         else:
             logger.critical("WTFO!  self.runthread is not None?")
+
+        ppc_peripherals.Module.init(self, emu)
 
     def handleInterrupts(self, interrupt):
         # TODO: emulate the PPC debug control registers that can disable/enable 
@@ -119,28 +126,35 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
         # If there is a debugger connected halt execution, otherwise queue the 
         # debug exception so it can be processed by the normal PPC exception 
         # handler.
-        if self.isClientConnected():
-            self.emu._do_halt()
-            self._pullUpBreakpoints()
-        else:
-            self.emu.queueException(interrupt)
+        logger.info('Execution halted at %x', self.emu._cur_instr[1])
+        self.emu._do_halt()
+
+        # TODO: different signal reasons based on the interrupt type?
+        self._halt_reason = signal.SIGTRAP
+
+        self._pullUpBreakpoints()
+
+        self.emu._do_wait_resume()
 
     def _postClientAttach(self, addr):
         vtp_gdb.GdbBaseEmuServer._postClientAttach(self, addr)
 
+        # If the emulator is not already halted, halt now
+        if self._halt_reason == vtp_gdb.SIGNAL_NONE:
+            self._halt_reason = signal.SIGTRAP
+            self.emu.halt_exec()
+
         # TODO: Install callbacks for signals that should cause execution to 
         # halt.
 
-        logger.info("Client attached: %r", repr(addr))
-        logger.info("Halting processor")
+        logger.info("Client attached: %r", addr)
 
-        self._halt_reason = signal.SIGTRAP
-        self.emu.halt_exec()
+    def _serverQAttached(self, cmd_data):
+        # Return 1 to indicate that this is always an existing process
+        return b'1'
 
     def _serverBreak(self, sig=signal.SIGTRAP):
-        self._halt_reason = sig
         self.emu.halt_exec()
-        return self._halt_reason
 
     def _serverCont(self, sig=0):
         # If the program counter is at a breakpoint execute the current 
@@ -157,10 +171,7 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
         self._putDownBreakpoints()
 
         # Continue execution
-        self._halt_reason = sig
         self.emu.resume_exec()
-
-        return self._halt_reason
 
     def _installBreakpoint(self, addr):
         ea, vle, _, _, breakbytes, breakop = self._bpdata[addr]
@@ -270,8 +281,8 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
         self._bpdata = {}
         self._bps_in_place = False
 
-        # Signal to the emulator that the gdb client has detached
-        self.emu.debug_client_detached()
+        # Since the client has detached let the core start executing.
+        self.emu.resume_exec()
 
     def _serverQSymbol(self, cmd_data):
         # we have no symbol information
@@ -333,7 +344,7 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
 
     def _serverWriteRegVal(self, reg_idx, reg_val):
         try:
-            envi_idx = self._gdb_to_envi_map[reg_idx][GDB_TO_ENVI_IDX]
+            envi_idx = self._gdb_to_envi_map[reg_idx][vtp_gdb.GDB_TO_ENVI_IDX]
         except IndexError:
             logger.warning("Attempted Bad Register Write: %d", reg_idx)
             return 0
@@ -343,7 +354,6 @@ class e200GDB(vtp_gdb.GdbBaseEmuServer):
         except IndexError:
             logger.warning("Attempted Bad Register Write: %d -> %d", reg_idx, envi_idx)
             return 0
-
 
         return b'OK'
 

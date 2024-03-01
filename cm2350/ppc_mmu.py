@@ -4,7 +4,6 @@ import envi
 from envi.archs.ppc.regs import *
 from envi.archs.ppc.const import *
 
-from .ppc_peripherals import Peripheral
 from .ppc_vstructs import BitFieldSPR, v_const
 from .ppc_peripherals import Module
 from .intc_exc import DataTlbException, InstructionTlbException
@@ -333,6 +332,7 @@ class PpcMMU(Module):
         # emulate having two TLBs.
         self._tlb = tuple(PpcTLBEntry(i) for i in range(32))
 
+    def init(self, emu):
         # The TLB entries can be invalidated selectively with the tlbivax
         # instruction, or all TLB entries can be invalidated by writing 1 to the
         # MMUCSR0[TLB1_FI] bit.
@@ -341,6 +341,8 @@ class PpcMMU(Module):
         # Handle writes to the cache status and control SPRs
         emu.addSprWriteHandler(REG_L1CSR0, self._l1csr0WriteHandler)
         emu.addSprWriteHandler(REG_L1CSR1, self._l1csr1WriteHandler)
+
+        Module.init(self, emu)
 
     def reset(self, emu):
         # Return the TLB entries to the initial configuration.
@@ -353,8 +355,6 @@ class PpcMMU(Module):
         # It is not clear from the e200z7 documentation if the EPN/RPN page
         # should be the BAM memory range, but for now we assume it is
         self.tlbConfig(0, tsiz=PpcTlbPageSize.SIZE_4KB, epn=0xFFFFF000, rpn=0xFFFFF000)
-
-        Module.init(self, emu)
 
     def i_tlbre(self, op):
         '''

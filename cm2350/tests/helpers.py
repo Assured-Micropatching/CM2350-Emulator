@@ -64,8 +64,6 @@ class MPC5674_Test(unittest.TestCase):
             self._disable_gc = True if self.accurate_timing else False
 
         logger.debug('Creating MPC5674 with args: %r', self.args)
-        #self.ECU = CM2350(self.args)
-        #self.emu = self.ECU.emu
 
         # Minimal required configuration
         config = {

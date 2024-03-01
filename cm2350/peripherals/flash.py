@@ -1081,6 +1081,11 @@ class FLASH(ppc_peripherals.Module, mmio.MMIO_DEVICE):
             (0x00380000, 0x00400000,   None, FlashBlock.H5),
         )
 
+        # Start the main flash as erased, this will probably be overridden when 
+        # the initial state of flash is restored.
+        flash_size = FLASH_DEVICE_MMIO_SIZE[FlashDevice.FLASH_MAIN]
+        self.data = bytearray(_genErasedBytes(flash_size))
+
     def shutdown(self):
         # Gracefully close the backup file
         if self._backup:

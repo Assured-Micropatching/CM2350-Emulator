@@ -66,6 +66,24 @@ class HID0(BitFieldSPR):
         self.nopti = v_bits(1)
 
 
+# Define some HID0 register masks since these are processor specific they are 
+# defined here rather than in the standards envi.archs.ppc.regs module
+EFLAGS_HID0_EMCP      = 0x80000000
+EFLAGS_HID0_DOZE      = 0x00800000
+EFLAGS_HID0_NAP       = 0x00400000
+EFLAGS_HID0_SLEEP     = 0x00200000
+EFLAGS_HID0_ICR       = 0x00020000
+EFLAGS_HID0_NHR       = 0x00010000
+EFLAGS_HID0_TBE       = 0x00004000
+EFLAGS_HID0_SEL_TBCLK = 0x00002000
+EFLAGS_HID0_DCLREE    = 0x00001000
+EFLAGS_HID0_DCLRCE    = 0x00000800
+EFLAGS_HID0_CICLERDE  = 0x00000400
+EFLAGS_HID0_MCCLRDE   = 0x00000200
+EFLAGS_HID0_DAPUEN    = 0x00000100
+EFLAGS_HID0_NOPTI     = 0x00000001
+
+
 class HID1(BitFieldSPR):
     def __init__(self, emu):
         super().__init__(eapr.REG_HID1, emu)
@@ -73,6 +91,12 @@ class HID1(BitFieldSPR):
         self.sysctl = v_bits(8)
         self.ats = v_bits(1)
         self._pad1 = v_bits(7)
+
+
+# Define some HID1 register masks since these are processor specific they are 
+# defined here rather than in the standards envi.archs.ppc.regs module
+EFLAGS_HID1_SYSCTL    = 0x0000FF00
+EFLAGS_HID1_ATS       = 0x00000080
 
 
 class TSR(BitFieldSPR):

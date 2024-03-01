@@ -7,6 +7,7 @@ import envi.archs.ppc.regs as ppc_regs
 import vivisect.cli as v_cli
 
 from .mpc5674 import MPC5674_Emulator
+from . import e200z7
 from . import project
 from . import ppc_peripherals
 
@@ -188,8 +189,8 @@ class CM2350:
             # that need to be updated to ensure that the application can operate 
             # correctly., the MSR must be updated to enable machine check 
             # exceptions, and the PPC timebase should be enabled.
-            self.emu.setRegister(ppc_regs.REG_MSR, 0x1000)
-            self.emu.setRegister(ppc_regs.REG_HID0, 0x4000)
+            self.emu.writeRegValue(ppc_regs.REG_MSR, ppc_regs.EFLAGS_MSR_ME)
+            self.emu.writeRegValue(ppc_regs.REG_HID0, e200z7.EFLAGS_HID0_TBEN)
 
         # start off with the external pins
         cm2350_config = self.emu.get_project_config('project.CM2350')

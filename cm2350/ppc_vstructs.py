@@ -1639,16 +1639,10 @@ class PpcSprCallbackWrapper:
         self._write = write_handler
 
         if self._read:
-            self.read = self._read_handler_wrapper
-            emu.addSprReadHandler(self._reg, self.read)
-        else:
-            self.read = self._get_register_wrapper
+            emu.addSprReadHandler(self._reg, self._read_handler_wrapper)
 
         if self._write:
-            self.write = self._write_handler_wrapper
-            emu.addSprWriteHandler(self._reg, self.write)
-        else:
-            self.write = self._set_register_wrapper
+            emu.addSprWriteHandler(self._reg, self._write_handler_wrapper)
 
         # Register the SPR object
         emu.installSPR(self._reg, self)
@@ -1657,7 +1651,6 @@ class PpcSprCallbackWrapper:
         """
         Return the value from the SPR read handler
         """
-        # vsEmit() returns bytes, convert to an integer value
         return self._read()
 
     def _write_handler_wrapper(self, emu, op):
@@ -1673,21 +1666,23 @@ class PpcSprCallbackWrapper:
             value = emu.getOperValue(op, 1)
         return self._write(value)
 
-    def _get_register_wrapper(self, emu, op=None):
+    def read(self, emu, op=None):
         """
-        A wrapper for getRegister that fits the parameter pattern expected by
-        emu.readRegValue.
+        BitFieldSPR.read() compatible function, the op parameter is ignored.
+        If a value is read through this interface it is written to the SPR for
+        this object.
         """
-        return emu.getRegister(self._reg)
-
-    def _write_handler_wrapper(self, emu, op=None):
-        """
-        A wrapper for emu.setRegister that fits the parameter pattern expected by
-        emu.writeRegValue.
-        """
-        if isinstance(op, int):
-            value = op
+        if self._read:
+            value = self._read()
+            emu.setRegister(self._reg, value)
         else:
-            value = emu.getOperValue(op, 1)
-        emu.setRegister(self._reg, value)
+            value = emu.getRegister(self._reg)
         return value
+
+    def write(self, emu, value):
+        """
+        BitFieldSPR.write() compatible function.
+        """
+        if self._write:
+            value = self._write(value)
+        emu.setRegister(self._reg, value)

@@ -74,7 +74,7 @@ EFLAGS_HID0_NAP       = 0x00400000
 EFLAGS_HID0_SLEEP     = 0x00200000
 EFLAGS_HID0_ICR       = 0x00020000
 EFLAGS_HID0_NHR       = 0x00010000
-EFLAGS_HID0_TBE       = 0x00004000
+EFLAGS_HID0_TBEN      = 0x00004000
 EFLAGS_HID0_SEL_TBCLK = 0x00002000
 EFLAGS_HID0_DCLREE    = 0x00001000
 EFLAGS_HID0_DCLRCE    = 0x00000800
@@ -346,7 +346,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         wdt_bit = self.tcr.wp << 4 | self.tcr.wpext
 
         # Determine the actual bit number and then the bit mask is the period
-        self.mcu_wdt.start(ticks=e_bits.b_mask[63 - wdt_bit])
+        self.mcu_wdt.start(ticks=e_bits.b_masks[63 - wdt_bit])
 
     def _startMCUFIT(self):
         # The fixed-interval period is determined by the TCR[WP] and TCR[WPEXT]
@@ -355,7 +355,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         fit_bit = self.tcr.fp << 4 | self.tcr.fpext
 
         # Determine the actual bit number and then the bit mask is the period
-        self.mcu_fit.start(ticks=e_bits.b_mask[63 - fit_bit])
+        self.mcu_fit.start(ticks=e_bits.b_masks[63 - fit_bit])
 
     def _startMCUDEC(self):
         # If there is a queued or active decrementer exception already, attach a
@@ -392,11 +392,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
 
     def _readDec(self):
         # If the decremeter is running return how many ticks are remaining.
-        if self.mcu_dec.running():
-            return self.mcu_dec.ticks()
-        else:
-            # If we return None then the existing REG_DEC value will be used.
-            return None
+        return self.mcu_dec.ticks()
 
     def _writeDec(self, value):
         # If the decrementer is enabled, restart it.

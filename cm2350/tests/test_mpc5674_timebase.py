@@ -100,11 +100,22 @@ class MPC5674_SPRHOOKS_Test(MPC5674_Test):
         # The getTimebase function should return the same value
         self.assertEqual(self.emu.getTimebase(), (tbu << 32) | tbl)
 
-        # Writing to the TBL/TBU SPRs should have no effect
-        # TODO: this may need to produce an error eventually.
-        self.tb_write(0, tbl=eapr.REG_TB, tbu=eapr.REG_TBU)
+        # The write-only SPRs shoudl always read 0
+        self.assertEqual(self.tb_read(tbl=eapr.REG_TBL_WO, tbu=eapr.REG_TBU_WO), (0, 0))
+        self.assertEqual(self.tb_read(), (tbl, tbu))
 
-        # Values read should be unchanged
+        # Writing to the TB/TBU and TBL_WO/TBU_WO SPRs should overwrite the 
+        # current timebase value
+        tbl = 0x00080000
+        tbu = 0x00000002
+        self.tb_write(tbu << 32 | tbl, tbl=eapr.REG_TB, tbu=eapr.REG_TBU)
+        self.assertEqual(self.tb_read(tbl=eapr.REG_TBL_WO, tbu=eapr.REG_TBU_WO), (0, 0))
+        self.assertEqual(self.tb_read(), (tbl, tbu))
+
+        tbl = 0x000A5A50
+        tbu = 0x00020000
+        self.tb_write(tbu << 32 | tbl, tbl=eapr.REG_TBL_WO, tbu=eapr.REG_TBU_WO)
+        self.assertEqual(self.tb_read(tbl=eapr.REG_TBL_WO, tbu=eapr.REG_TBU_WO), (0, 0))
         self.assertEqual(self.tb_read(), (tbl, tbu))
 
     def test_spr_tb_write(self):

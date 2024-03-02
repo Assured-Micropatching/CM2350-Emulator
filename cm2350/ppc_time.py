@@ -153,7 +153,7 @@ class PpcEmuTime:
         '''
         # Ensure that the offset value is only 32-bits wide regardless of the
         # platform size.
-        tbu = kalue & 0xFFFFFFFF
+        tbu = value & 0xFFFFFFFF
 
         # Based on the new TBU offset and the current value of TBL (the lower 32 
         # bits of the current offset), calculate the new desired timebase offset

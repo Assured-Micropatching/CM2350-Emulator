@@ -1,6 +1,8 @@
 from . import emutimers
+from .ppc_vstructs import PpcSprCallbackWrapper
+
 import envi.bits as e_bits
-from envi.archs.ppc.regs import REG_TBU, REG_TB, REG_TBU_WO, REG_TBL_WO, REG_R3
+import envi.archs.ppc.regs as eapr
 
 import logging
 logger = logging.getLogger(__name__)
@@ -30,12 +32,13 @@ class PpcEmuTime:
         # systicks() will be unmodified.
         self._tb_offset = None
 
-        # Register the TBU/TBL callbacks, these are read-only so no write
-        # callback is attached.
-        self.addSprReadHandler(REG_TB, self.tbRead)
-        self.addSprReadHandler(REG_TBU, self.tbuRead)
-        self.addSprWriteHandler(REG_TB, self._invalid_tb_write)
-        self.addSprWriteHandler(REG_TBU, self._invalid_tb_write)
+        # Register the TBU/TBL callbacks, both read and write is valid
+        self.tb = PpcSprCallbackWrapper(eapr.REG_TB, self,
+                                        read_handler=self.tbRead,
+                                        write_handler=self.tbWrite)
+        self.tbu = PpcSprCallbackWrapper(eapr.REG_TBU, self,
+                                         read_handler=self.tbuRead,
+                                         write_handler=self.tbuWrite)
 
         # TODO: The TBU/TBL hypervisor access registers are write-only, but this
         # is not yet implemented
@@ -43,15 +46,17 @@ class PpcEmuTime:
         # The TBU_WO/TBL_WO SPRs are used to hold the desired timebase offset
         # value in them.  They are write-only so these callback functions ensure
         # the reads are correctly emulated.
-        self.addSprReadHandler(REG_TBL_WO, self._invalid_tb_read)
-        self.addSprReadHandler(REG_TBU_WO, self._invalid_tb_read)
-        self.addSprWriteHandler(REG_TBL_WO, self.tbWrite)
-        self.addSprWriteHandler(REG_TBU_WO, self.tbuWrite)
+        self.tbl_wo = PpcSprCallbackWrapper(eapr.REG_TBL_WO, self,
+                                            read_handler=self._invalid_tb_read,
+                                            write_handler=self.tbWrite)
+        self.tbu_wo = PpcSprCallbackWrapper(eapr.REG_TBU_WO, self,
+                                            read_handler=self._invalid_tb_read,
+                                            write_handler=self.tbuWrite)
 
-    def _invalid_tb_write(self, emu, op):
+    def _invalid_tb_write(self, value):
         pass
 
-    def _invalid_tb_read(self, emu, op):
+    def _invalid_tb_read(self):
         return 0
 
     def enableTimebase(self):
@@ -99,7 +104,7 @@ class PpcEmuTime:
         '''
         return self._tb_offset is not None
 
-    def tbRead(self, emu, op):
+    def tbRead(self):
         '''
         Read callback handler to associate the value of the TBL SPR with the
         EmulationTime.
@@ -110,7 +115,7 @@ class PpcEmuTime:
         # handler that calls this)
         return self.getTimebase()
 
-    def tbuRead(self, emu, op):
+    def tbuRead(self):
         '''
         Read callback handler to associate the value of the TBU SPR with the
         EmulationTime.
@@ -119,7 +124,7 @@ class PpcEmuTime:
         # wide regardless of if this is a 64-bit or 32-bit machine.
         return (self.getTimebase() >> 32) & 0xFFFFFFFF
 
-    def tbWrite(self, emu, op):
+    def tbWrite(self, value):
         '''
         Update the tb_offset so TBL values returned from this point on
         reflect the new offset.
@@ -127,7 +132,7 @@ class PpcEmuTime:
         # On 64 bit platforms this will be the full timebase, on 32 bit 
         # platforms this needs to be combined with the current TBU value to get 
         # the full timebase
-        tb = self.getOperValue(op, 1)
+        tb = value
 
         if self.psize == 4:
             # Based on the new TB offset and the current value of TBU, calculate
@@ -141,14 +146,14 @@ class PpcEmuTime:
         # calculate the desired timebase offset.
         return tb & e_bits.b_masks[self.psize]
 
-    def tbuWrite(self, emu, op):
+    def tbuWrite(self, value):
         '''
         Update the tb_offset so TBU values returned from this point on
         reflect the new offset.
         '''
         # Ensure that the offset value is only 32-bits wide regardless of the
         # platform size.
-        tbu = self.getOperValue(op, 1) & 0xFFFFFFFF
+        tbu = kalue & 0xFFFFFFFF
 
         # Based on the new TBU offset and the current value of TBL (the lower 32 
         # bits of the current offset), calculate the new desired timebase offset

@@ -28,7 +28,7 @@ import envi.memory as e_mem
 
 # PPC registers
 import envi.archs.ppc.regs as eapr
-from .ppc_vstructs import BitFieldSPR, v_const, v_w1c, v_bits
+from .ppc_vstructs import v_const, v_w1c, v_bits, BitFieldSPR, PpcSprCallbackWrapper
 
 # PPC Specific packages
 from . import emutimers, clocks, ppc_time, mmio, ppc_mmu, ppc_xbar, e200_intc, \
@@ -193,8 +193,9 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
 
         self.tsr = TSR(self)
 
-        self.addSprReadHandler(eapr.REG_DEC, self._readDec)
-        self.addSprWriteHandler(eapr.REG_DEC, self._writeDec)
+        self.dec = PpcSprCallbackWrapper(eapr.REG_DEC, self,
+                                         read_handler=self._readDec,
+                                         write_handler=self._writeDec)
 
         # Attach a callback to HID0[TBEN] that can start/stop timebase
         self.hid0 = HID0(self)
@@ -214,7 +215,8 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
 
         # MSR callback handler. We don't need a full BitFieldSPR object but we 
         # do need to re-evaluate pending interrupts when the MSR changes
-        self.addSprWriteHandler(eapr.REG_MSR, self.mcu_intc.msrUpdated)
+        self.msr = PpcSprCallbackWrapper(eapr.REG_MSR, self,
+                                         write_handler=self.mcu_intc.msrUpdated)
 
         # Create GDBSTUB Server
         self.gdbstub = e200_gdb.e200GDB(self)
@@ -261,7 +263,23 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         self.modules[name] = module
 
     def getModule(self, name):
-        return self.modules[name]
+        return self.modules.get(name)
+
+    def installSPR(self, reg, spr):
+        '''
+        Install a BitfieldSPR register or simply an SPR that has custom
+        read/write hooks.
+        '''
+        # Ensure that installing this module won't overwrite one that is already 
+        # installed
+        if reg in self.sprs:
+            raise KeyError('Cannot install SPR %d (%s): %s already installed, cannot install %s' %
+                           (reg, emu.getRegisterName(reg), self.sprs[reg], spr))
+
+        self.sprs[reg] = spr
+
+    def getSPR(self, reg):
+        return self.sprs.get(reg)
 
     def __del__(self):
         self.shutdown()
@@ -372,7 +390,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         else:
             self.mcu_dec.stop()
 
-    def _readDec(self, emu, op):
+    def _readDec(self):
         # If the decremeter is running return how many ticks are remaining.
         if self.mcu_dec.running():
             return self.mcu_dec.ticks()
@@ -380,13 +398,10 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
             # If we return None then the existing REG_DEC value will be used.
             return None
 
-    def _writeDec(self, emu, op):
-        value = self.getOperValue(op, 1)
-
+    def _writeDec(self, value):
         # If the decrementer is enabled, restart it.
         if self.tcr.die:
             self.mcu_dec.start(ticks=value)
-
         return value
 
     def _hid0TBUpdate(self, hid0):
@@ -765,7 +780,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         unless necessary.
         """
         # TODO: figure out how to integrate BitFieldSPR objects more seemlessly?
-        sprobj = self.sprs.get(reg)
+        sprobj = self.getSPR(reg)
         if sprobj is None:
             return self.getRegister(reg)
         else:
@@ -781,7 +796,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         unless necessary.
         """
         # TODO: figure out how to integrate BitFieldSPR objects more seemlessly?
-        sprobj = self.sprs.get(reg)
+        sprobj = self.getSPR(reg)
         if sprobj is None:
             return self.setRegister(reg, value)
         else:

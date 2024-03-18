@@ -7,7 +7,7 @@ from ..ppc_peripherals import *
 from ..intc_exc import INTC_EVENT
 
 import logging
-from envi.common import EMULOG
+from envi.common import MIRE
 logger = logging.getLogger(__name__)
 
 
@@ -342,10 +342,10 @@ class SPIBus(BusPeripheral):
         """
         device = self.devices.get(cs)
         if device is not None:
-            logger.log(EMULOG, '%s -> %s: 0x%x', self.devname, device.name, value)
+            logger.log(MIRE, '%s -> %s: 0x%x', self.devname, device.name, value)
             result = device.receive(value)
             if result is not None:
-                logger.log(EMULOG, '%s <- %s: 0x%x', self.devname, device.name, result)
+                logger.log(MIRE, '%s <- %s: 0x%x', self.devname, device.name, result)
                 device.transmit(result)
         else:
             logger.info('%s TRANSMIT PCS%d: 0x%x (NO DEVICE)', self.devname, cs, value)
@@ -390,7 +390,7 @@ class DSPI(SPIBus):
             self._popr_empty_data = b'\x00\x00\x87\xad'
         else:
             self._popr_empty_data = b'\x00\x00\xff\xff'
-        logger.log(EMULOG, '[%s] setting 0x%s as data to return when receive queue is empty',
+        logger.log(MIRE, '[%s] setting 0x%s as data to return when receive queue is empty',
                    self.devname, self._popr_empty_data)
 
         # Update the state of the peripheral based on MCR writes

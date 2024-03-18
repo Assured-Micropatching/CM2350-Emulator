@@ -6,7 +6,7 @@ import os.path
 import envi
 import envi.bits as e_bits
 import envi.memory as e_mem
-from envi.common import EMULOG
+from envi.common import MIRE
 
 from .. import mmio, ppc_peripherals
 from ..ppc_vstructs import *
@@ -726,13 +726,13 @@ class FlashArray:
             # This shouldn't happen
             raise Exception('Invalid FLASH CONFIG register @ 0x%x: %r' % (va, vst))
 
-        logger.log(EMULOG, "0x%x:  %s[%s] read  [%x:%r] (%r)",
+        logger.log(MIRE, "0x%x:  %s[%s] read  [%x:%r] (%r)",
                    self.flashdev.emu._cur_instr[1],
                    self.__class__.__name__, self.name, va, size, val)
         return val
 
     def _mmio_write(self, va, offset, bytez):
-        logger.log(EMULOG, "0x%x:  %s[%s] write [%x] = %r",
+        logger.log(MIRE, "0x%x:  %s[%s] write [%x] = %r",
                    self.flashdev.emu._cur_instr[1],
                    self.__class__.__name__, self.name, va, bytez)
         try:
@@ -1373,7 +1373,7 @@ class FLASH(ppc_peripherals.Module, mmio.MMIO_DEVICE):
     def _flash_read(self, va, offset, size):
         value = self.data[offset:offset+size]
         # Flash read happens often enough that it's not worth logging
-        #logger.log(EMULOG, "0x%x:  FLASH read  [%x:%r] (%r)",
+        #logger.log(MIRE, "0x%x:  FLASH read  [%x:%r] (%r)",
         #           self.emu._cur_instr[1], offset, size, value)
         return value
 
@@ -1383,7 +1383,7 @@ class FLASH(ppc_peripherals.Module, mmio.MMIO_DEVICE):
         if self.emu._supervisor:
             self.writeMemory(offset, bytez)
         else:
-            logger.log(EMULOG, "0x%x:  FLASH write [%x] = %s",
+            logger.log(MIRE, "0x%x:  FLASH write [%x] = %s",
                        self.emu._cur_instr[1], va, bytez.hex())
             # The array corresponding to the block being modified must be 
             # identified because the writes are cached by the sub-array until 
@@ -1401,12 +1401,12 @@ class FLASH(ppc_peripherals.Module, mmio.MMIO_DEVICE):
 
     def _shadow_A_read(self, va, offset, size):
         value = self.A.shadow[offset:offset+size]
-        logger.log(EMULOG, "0x%x:  ShadowFlash[A] read  [%x:%r] (%r)",
+        logger.log(MIRE, "0x%x:  ShadowFlash[A] read  [%x:%r] (%r)",
                    self.emu._cur_instr[1], va, size, value)
         return value
 
     def _shadow_A_write(self, va, offset, bytez):
-        logger.log(EMULOG, "0x%x:  ShadowFlash[A] write [%x] = %r", 
+        logger.log(MIRE, "0x%x:  ShadowFlash[A] write [%x] = %r", 
                    self.emu._cur_instr[1], va, bytez)
         self.A.write(FlashBlock.S0, offset, bytez)
 
@@ -1419,7 +1419,7 @@ class FLASH(ppc_peripherals.Module, mmio.MMIO_DEVICE):
 
     def _shadow_B_read(self, va, offset, size):
         value = self.B.shadow[offset:offset+size]
-        logger.log(EMULOG, "0x%x:  ShadowFlash[B] read  [%x:%r] (%r)",
+        logger.log(MIRE, "0x%x:  ShadowFlash[B] read  [%x:%r] (%r)",
                    self.emu._cur_instr[1], va, size, value)
         return value
 

@@ -30,7 +30,9 @@ class LOG_LEVEL(enum.IntEnum):
     WARN     = logging.WARN
     INFO     = logging.INFO
     DEBUG    = logging.DEBUG
-    EMULOG   = e_common.EMULOG
+    #EMULOG   = e_common.EMULOG this log level is going away eventually
+    SHITE    = e_common.SHITE
+    MIRE     = e_common.MIRE
 
 
 def parseExpression(emu, expr, lcls={}):

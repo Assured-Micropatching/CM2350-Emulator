@@ -9,7 +9,7 @@ import atexit
 import inspect
 
 import envi.bits as e_bits
-from envi.common import EMULOG
+from envi.common import MIRE
 
 from . import mmio
 from .ppc_vstructs import *
@@ -69,8 +69,8 @@ class Module:
 
         # If there is a configuration entry for this peripheral name, save it
         # for easy access
-        for project in emu.vw.config.project.getSubConfigNames():
-            project_subcfg = emu.vw.config.project.getSubConfig(project)
+        for project in emu.config.project.getSubConfigNames():
+            project_subcfg = emu.config.project.getSubConfig(project)
             if self._config is None:
                 devcfg = project_subcfg.getSubConfig(devname, add=False)
                 if devcfg is not None:
@@ -78,7 +78,7 @@ class Module:
                     break
             else:
                 raise Exception('ERROR: duplicate project config entries for peripheral %s:\n%s' %
-                        (devname, emu.vw.config.project.reprConfigPaths()))
+                        (devname, emu.config.project.reprConfigPaths()))
 
     def __del__(self):
         self.shutdown()
@@ -486,7 +486,7 @@ class MMIOPeripheral(Module, mmio.MMIO_DEVICE):
 
         try:
             value = self._getPeriphReg(offset, size)
-            logger.log(EMULOG, "0x%x:  %s: read  [%x:%r] (%r)",
+            logger.log(MIRE, "0x%x:  %s: read  [%x:%r] (%r)",
                        self.emu._cur_instr[1], self.devname, va, size, value)
             return value
 
@@ -539,7 +539,7 @@ class MMIOPeripheral(Module, mmio.MMIO_DEVICE):
             # TODO: this seems inefficient, but should be good enough for now
             return self._slow_mmio_write(va, offset, data)
 
-        logger.log(EMULOG, "0x%x:  %s: write [%x] = %r",
+        logger.log(MIRE, "0x%x:  %s: write [%x] = %r",
                    self.emu._cur_instr[1], self.devname, va, data)
         try:
             self._setPeriphReg(offset, data)
@@ -693,7 +693,7 @@ def _recvData(sock):
     data = sock.recv(4)
     if len(data) < 4:
         # If no data is received, assume this is an error and exit
-        logger.log(EMULOG, 'Incomplete data received %d bytes: %r', len(data), data)
+        logger.log(MIRE, 'Incomplete data received %d bytes: %r', len(data), data)
         raise OSError(errno.EAGAIN)
     size = struct.unpack('>I', data)[0]
 
@@ -802,12 +802,12 @@ class ExternalIOPeripheral(MMIOPeripheral):
             # Check if the IO thread should be created or not
             if emu.vw.getTransMeta('ProjectMode') == 'test':
                 self._server_args = None
-                logger.debug('Test mode enabled, not creating IO thread for IO module %s',
-                        self.devname)
+                logger.log(MIRE, 'Test mode enabled, not creating IO thread for IO module %s',
+                           self.devname)
             elif self._config['port'] is None:
                 self._server_args = None
-                logger.debug('No port configured, not creating IO thread for IO module %s',
-                        self.devname)
+                logger.log(MIRE, 'No port configured, not creating IO thread for IO module %s',
+                           self.devname)
             else:
                 # If the host IP address is empty default to localhost
                 if self._config['host'] is None:
@@ -1061,9 +1061,9 @@ class ExternalIOPeripheral(MMIOPeripheral):
                         if len(exc.args) >= 1 and exc.args[0] == errno.EAGAIN:
                             # If this indicates a connection lost (EAGAIN), 
                             # don't print the exception information.
-                            logger.log(EMULOG, 'Lost connection to main thread, exiting')
+                            logger.log(MIRE, 'Lost connection to main thread, exiting')
                         else:
-                            logger.log(EMULOG, 'Lost connection to main thread, exiting', exc_info=1)
+                            logger.log(MIRE, 'Lost connection to main thread, exiting', exc_info=1)
                         return
 
                 elif sock == self._server:
@@ -1085,9 +1085,9 @@ class ExternalIOPeripheral(MMIOPeripheral):
                         if len(exc.args) >= 1 and exc.args[0] == errno.EAGAIN:
                             # If this indicates a connection lost (EAGAIN), 
                             # don't print the exception information.
-                            logger.debug('client sock %r disconnected', sock)
+                            logger.log(MIRE, 'client sock %r disconnected', sock)
                         else:
-                            logger.debug('client sock %r disconnected', sock, exc_info=1)
+                            logger.log(MIRE, 'client sock %r disconnected', sock, exc_info=1)
                         self._clients.remove(sock)
                         inputs.remove(sock)
 
@@ -1144,10 +1144,10 @@ class BusPeripheral(ExternalIOPeripheral):
         """
         device = self.devices.get(key)
         if device is not None:
-            logger.log(e_cmn.EMULOG, '%s -> %s: %s', self.devname, device.name, value)
+            logger.log(MIRE, '%s -> %s: %s', self.devname, device.name, value)
             result = device.receive(value)
             if result is not None:
-                logger.log(e_cmn.EMULOG, '%s <- %s: %s', self.devname, device.name, result)
+                logger.log(MIRE, '%s <- %s: %s', self.devname, device.name, result)
                 device.transmit(result)
         else:
             # Make sure that transmits to non-existent devices is clearly 

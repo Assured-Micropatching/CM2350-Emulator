@@ -372,3 +372,6 @@ class e200GDB(ppc_peripherals.Module, vtp_gdb.GdbBaseEmuServer):
         except IndexError:
             logger.warning("Attempted Bad Register Read: %d -> %d", reg_idx, envi_idx)
             return 0, None
+        except:
+            print("Attempted Bad Register Read: %d -> %d" % (reg_idx, envi_idx))
+            raise

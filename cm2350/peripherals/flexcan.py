@@ -95,22 +95,23 @@ FLEXCAN_MB_RANGE                = range(FLEXCAN_MAX_MB)
 FLEXCAN_RXIMRx_SIZE             = 4
 
 # Rx-specific codes
-FLEXCAN_CODE_RX_INACTIVE        = 0x00
-FLEXCAN_CODE_RX_BUSY            = 0x01
-FLEXCAN_CODE_RX_FULL            = 0x02
-FLEXCAN_CODE_RX_OVERRUN         = 0x03
-FLEXCAN_CODE_RX_EMPTY           = 0x04
+FLEXCAN_CODE_RX_INACTIVE        = 0b0000
+FLEXCAN_CODE_RX_BUSY            = 0b0001
+FLEXCAN_CODE_RX_FULL            = 0b0010
+FLEXCAN_CODE_RX_OVERRUN         = 0b0110
+FLEXCAN_CODE_RX_EMPTY           = 0b0100
 
 # Tx codes
-FLEXCAN_CODE_TX_INACTIVE        = 0x08
-FLEXCAN_CODE_TX_ABORT           = 0x09
-FLEXCAN_CODE_TX_ACTIVE          = 0x0C
-FLEXCAN_CODE_TX_RTR             = 0x0A
+FLEXCAN_CODE_TX_INACTIVE        = 0b1000
+FLEXCAN_CODE_TX_ABORT           = 0b1001
+FLEXCAN_CODE_TX_ACTIVE          = 0b1100  # transmit once
+FLEXCAN_CODE_TX_RTR_ONCE        = 0b1000  # transmit RTR once (TODO: implement this feature)
+FLEXCAN_CODE_TX_RTR             = 0b1100  # always transmit data in response to correct RTR frame
 
 # In theory this a mailbox code is changed from 0b1010 to 0b1110 while the CAN
 # peripheral is responding to a RTR, if the code is manually set to 0b1110 then
 # what is normally a remote response frame will instead be sent immediately.
-FLEXCAN_CODE_TX_RTR_SENDING     = 0x0E
+FLEXCAN_CODE_TX_RTR_SENDING     = 0b1110
 
 # When checking normal messages being received messages marked with these 3
 # codes are checked to see if a message can be received, if the last valid

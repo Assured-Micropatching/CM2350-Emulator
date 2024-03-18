@@ -14,6 +14,8 @@ import envi.archs.ppc.regs as eapr
 from cm2350.mpc5674 import MPC5674_Emulator
 from cm2350.intc_exc import GdbServerHaltEvent
 
+from ..ppc_mmu import PpcTlbPageSize
+
 import logging
 logger = logging.getLogger(__name__)
 
@@ -634,3 +636,149 @@ SVR            0x0                 0
         # The instructions should continuously loop between PC's 0x4 and 0xFC
         self.assertIn(pc, range(0x00000004, 0x00000100))
         self.assertEqual(self.emu.getRegister(eapr.REG_PC), pc)
+
+    def test_gdb_set_bitfield_spr(self):
+        # Testing the registers defined as "BitFieldSPR" objects to ensure that 
+        # GDB can write and read them and the correct values will be reflected 
+        # on both the emulator and GDB client interface, and any side effects 
+        # can be properly observed
+
+        # Write to the TCR[WIE] bit to enable the MCU watchdog
+        self.assertEqual(self.emu.tcr.wie, 0)
+        self.assertEqual(self.emu.hid0.tben, 0)
+        self.assertEqual(self.emu.mcu_wdt.running(), False)
+
+        self.write('set $TCR = 0x08000000')
+        self.read(until='(gdb) ', timeout=1)
+
+        self.write('p/x $TCR')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''$1 = 0x8000000
+(gdb) ''')
+
+        self.assertEqual(self.emu.tcr.wie, 1)
+        self.assertEqual(self.emu.hid0.tben, 0)
+        self.assertEqual(self.emu.mcu_wdt.running(), False)
+
+        # then to HID0[TBEN] to enable the MCU timebase.
+        self.write('set $HID0 = 0x08000000')
+        self.read(until='(gdb) ', timeout=1)
+
+        self.write('p/x $HID0 = 0x00004000')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''$2 = 0x4000
+(gdb) ''')
+
+        # Ensure that the MCU watchdog has been started
+        self.assertEqual(self.emu.tcr.wie, 1)
+        self.assertEqual(self.emu.hid0.tben, 1)
+        self.assertEqual(self.emu.mcu_wdt.running(), True)
+
+    def test_gdb_set_invalidate_mmu(self):
+        # Testing registers with defined SPR write hooks (but that aren't 
+        # defined as bitfield SPR objects) to ensure that the proper write or 
+        # read hooks are called
+
+        # Add an unprotected TLB entry, then write to MMUCSR0[TLB1_FI] (bit 30) 
+        # to invalidate all unprotected MMU entries.
+        self.emu.mmu.tlbConfig(8, epn=0x12345000, rpn=0x40000000,
+                               tsiz=PpcTlbPageSize.SIZE_4KB, ts=0, tid=0, iprot=0)
+        self.assertEqual(self.emu.mmu._tlb[8].valid, 1)
+
+        # Search for the 
+        pc = self.emu.getProgramCounter()
+        # 7C001F24  tlbsx 0,r3
+        self.emu.flash.data[pc:pc+4] = bytes.fromhex('7C001F24')
+
+        self.write('x/i $pc')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''=> 0x0:\ttlbsx   0,r3
+(gdb) ''')
+
+        # Write the value to search for to R3 and then execute the instruction
+        self.write('set $r3 = 0x12345678')
+        self.read(until='(gdb) ', timeout=1)
+        self.assertEqual(self.emu.readRegValue(eapr.REG_R3), 0x12345678)
+
+        self.write('stepi')
+        self.read(until='(gdb) ', timeout=1)
+
+        # MAS0-MAS3 should now have TLB entry 8 in it
+        #   MAS0:   0x10080000 (entry 8)
+        #   MAS1:   0x80000100 (valid, iprot=0, 4KB)
+        #   MAS1:   0x12345000 (virt addr, no special bits set)
+        #   MAS1:   0x4000003f (phys addr, full RWX)
+
+        self.write('p/x $MAS0')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''$1 = 0x10080000
+(gdb) ''')
+        self.assertEqual(self.emu.readRegValue(eapr.REG_MAS0), 0x10080000)
+        self.write('p/x $MAS1')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''$2 = 0x80000100
+(gdb) ''')
+        self.assertEqual(self.emu.readRegValue(eapr.REG_MAS1), 0x80000100)
+        self.write('p/x $MAS2')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''$3 = 0x12345000
+(gdb) ''')
+        self.assertEqual(self.emu.readRegValue(eapr.REG_MAS2), 0x12345000)
+        self.write('p/x $MAS3')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''$4 = 0x4000003f
+(gdb) ''')
+        self.assertEqual(self.emu.readRegValue(eapr.REG_MAS3), 0x4000003f)
+
+        # Put a value in RAM and it should be able to be read the new virtual 
+        # address
+        self.emu.writeMemory(0x40000678, bytes.fromhex('11112222333344445555666677778888'))
+        self.write('x/4wx 0x12345678')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''0x12345678:\t0x11112222\t0x33334444\t0x55556666\t0x77778888
+(gdb) ''')
+
+        # Now write to MMUCSR0[TLB1_FI]
+        self.write('set $MMUCSR0 = 2')
+        self.read(until='(gdb) ', timeout=1)
+
+        self.write('p/x $MMUCSR0')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''$5 = 0x0
+(gdb) ''')
+
+        self.assertEqual(self.emu.mmu._tlb[8].valid, 0)
+
+        # Reading an invalid memory address through GDB will result in a bunch 
+        # of 0's. This mimics how the P&E Micro GDB server works.
+        self.write('x/4wx 0x12345678')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''0x12345678:\t0x00000000\t0x00000000\t0x00000000\t0x00000000
+(gdb) ''')
+
+    def test_gdb_set_invalidate_cache(self):
+        # Write to L1CSR0[ICINV] and L1CSR1[ICINV] and ensure that bit 30 is not 
+        # set in either register
+        self.assertEqual(self.emu.readRegValue(eapr.REG_L1CSR0), 0)
+
+        self.write('set $L1CSR0 = 0xffffffff')
+        self.read(until='(gdb) ', timeout=1)
+
+        self.write('p/x $L1CSR0')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''$1 = 0xfffffffd
+(gdb) ''')
+
+        self.assertEqual(self.emu.readRegValue(eapr.REG_L1CSR0), 0xfffffffd)
+
+        self.assertEqual(self.emu.readRegValue(eapr.REG_L1CSR1), 0)
+
+        self.write('set $L1CSR1 = 0xffffffff')
+        self.read(until='(gdb) ', timeout=1)
+
+        self.write('p/x $L1CSR1')
+        out = self.read(timeout=0.1)
+        self.assertEqual(out, '''$2 = 0xfffffffd
+(gdb) ''')
+
+        self.assertEqual(self.emu.readRegValue(eapr.REG_L1CSR1), 0xfffffffd)

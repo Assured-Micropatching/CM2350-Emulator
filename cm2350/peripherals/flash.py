@@ -6,10 +6,11 @@ import os.path
 import envi
 import envi.bits as e_bits
 import envi.memory as e_mem
-from envi.common import EMULOG
+from envi.common import MIRE
 
 from .. import mmio, ppc_peripherals
 from ..ppc_vstructs import *
+from ..ppc_peripherals import *
 from ..intc_exc import MceDataReadBusError, MceWriteBusError
 
 import logging
@@ -544,6 +545,11 @@ class FlashArray:
 
         self.mcr.vsAddParseCallback('ehv', self._handleEHV)
 
+        # Initialize the state of shadow flash to the default erased state, this 
+        # will probably be overwritten later when the initial state of flash is 
+        # restored.
+        self.load_defaults()
+
     def load_defaults(self):
         # Return the contents of shadow flash to their default state
         if self.device == FlashDevice.FLASH_A_CONFIG:
@@ -720,14 +726,14 @@ class FlashArray:
             # This shouldn't happen
             raise Exception('Invalid FLASH CONFIG register @ 0x%x: %r' % (va, vst))
 
-        logger.log(EMULOG, "0x%x:  %s[%s] read  [%x:%r] (%r)",
-                   self.flashdev.emu._cur_instr[2],
+        logger.log(MIRE, "0x%x:  %s[%s] read  [%x:%r] (%r)",
+                   self.flashdev.emu._cur_instr[1],
                    self.__class__.__name__, self.name, va, size, val)
         return val
 
     def _mmio_write(self, va, offset, bytez):
-        logger.log(EMULOG, "0x%x:  %s[%s] write [%x] = %r",
-                   self.flashdev.emu._cur_instr[2],
+        logger.log(MIRE, "0x%x:  %s[%s] write [%x] = %r",
+                   self.flashdev.emu._cur_instr[1],
                    self.__class__.__name__, self.name, va, bytez)
         try:
             vst = self._write_registers[offset//4]
@@ -1075,6 +1081,11 @@ class FLASH(ppc_peripherals.Module, mmio.MMIO_DEVICE):
             (0x00380000, 0x00400000,   None, FlashBlock.H5),
         )
 
+        # Start the main flash as erased, this will probably be overridden when 
+        # the initial state of flash is restored.
+        flash_size = FLASH_DEVICE_MMIO_SIZE[FlashDevice.FLASH_MAIN]
+        self.data = bytearray(_genErasedBytes(flash_size))
+
     def shutdown(self):
         # Gracefully close the backup file
         if self._backup:
@@ -1198,6 +1209,13 @@ class FLASH(ppc_peripherals.Module, mmio.MMIO_DEVICE):
 
         return flash_hash.digest()
 
+    def delete_backup(self, backup_filename=None):
+        if backup_filename is not None:
+            filename = backup_filename + '.' + self.get_hash().hex()
+            if os.path.exists(filename):
+                logger.debug('Deleting flash backup file %s', filename)
+                os.unlink(filename)
+
     def load_complete(self, backup_filename=None):
         """
         This function indicates to the flash peripheral that all initial
@@ -1219,24 +1237,13 @@ class FLASH(ppc_peripherals.Module, mmio.MMIO_DEVICE):
         # Start with the assumption that a backup needs to be created
         backup_valid = False
 
-        # The loaded/not loaded state of main flash is used to identify if a
-        # backup file should be opened or restored from, but before
-        # self.get_hash() returns a valid value the shadow flash must be
-        # initalized
-        if self.B.shadow is None:
-            logger.debug('Generating default %s', FlashDevice.FLASH_B_SHADOW)
-            self.B.load_defaults()
-        if self.A.shadow is None:
-            logger.debug('Generating default %s', FlashDevice.FLASH_A_SHADOW)
-            self.A.load_defaults()
-
         if self.data is not None:
             # If a backup filename was provided see if a backup file exists that
             # matches the hash digest that was created
             if backup_filename is not None:
                 filename = backup_filename + '.' + self.get_hash().hex()
                 if os.path.exists(filename):
-                    logger.debug('Opening flash backup file %s', filename)
+                    logger.debug('Restoring state of system from flash backup file %s', filename)
                     # use 'r+b' mode with open to avoid truncating the backup
                     # file
                     self._backup = open(filename, 'r+b')
@@ -1249,11 +1256,17 @@ class FLASH(ppc_peripherals.Module, mmio.MMIO_DEVICE):
                     #
                     # Shadow flash B is first in the backup file
                     flash_data = self._backup.read(flash_size)
-                    logger.debug('Restoring %s from backup file %s @ 0x%x to 0x%x', FlashDevice.FLASH_MAIN, filename, self._backup.tell(), self._backup.tell() + flash_size)
+                    logger.debug('Restoring %s from backup file %s @ 0x%x to 0x%x',
+                                 FlashDevice.FLASH_MAIN, filename, self._backup.tell(),
+                                 self._backup.tell() + flash_size)
                     shadow_b_data = self._backup.read(shadow_B_size)
-                    logger.debug('Restoring %s from backup file %s @ 0x%x to 0x%x', FlashDevice.FLASH_B_SHADOW, filename, self._backup.tell(), self._backup.tell() + shadow_B_size)
+                    logger.debug('Restoring %s from backup file %s @ 0x%x to 0x%x',
+                                 FlashDevice.FLASH_B_SHADOW, filename, self._backup.tell(),
+                                 self._backup.tell() + shadow_B_size)
                     shadow_a_data = self._backup.read(shadow_A_size)
-                    logger.debug('Restoring %s from backup file %s @ 0x%x to 0x%x', FlashDevice.FLASH_A_SHADOW, filename, self._backup.tell(), self._backup.tell() + shadow_A_size)
+                    logger.debug('Restoring %s from backup file %s @ 0x%x to 0x%x',
+                                 FlashDevice.FLASH_A_SHADOW, filename, self._backup.tell(),
+                                 self._backup.tell() + shadow_A_size)
 
                     if len(flash_data) == flash_size and \
                             len(shadow_b_data) == shadow_B_size and \
@@ -1268,12 +1281,6 @@ class FLASH(ppc_peripherals.Module, mmio.MMIO_DEVICE):
                 else:
                     # Create the backup file
                     self._backup = open(filename, 'w+b')
-
-        else:
-            # If the main flash has not been initialized yet, initialize it now
-            # to the default (erased) state
-            logger.debug('Generating default %s', FlashDevice.FLASH_MAIN)
-            self.data = bytearray(_genErasedBytes(flash_size))
 
         # If the backup has not been detected as valid, save a copy of the state
         # of flash now.
@@ -1366,8 +1373,8 @@ class FLASH(ppc_peripherals.Module, mmio.MMIO_DEVICE):
     def _flash_read(self, va, offset, size):
         value = self.data[offset:offset+size]
         # Flash read happens often enough that it's not worth logging
-        #logger.log(EMULOG, "0x%x:  FLASH read  [%x:%r] (%r)",
-        #           self.emu._cur_instr[2], offset, size, value)
+        #logger.log(MIRE, "0x%x:  FLASH read  [%x:%r] (%r)",
+        #           self.emu._cur_instr[1], offset, size, value)
         return value
 
     def _flash_write(self, va, offset, bytez):
@@ -1376,8 +1383,8 @@ class FLASH(ppc_peripherals.Module, mmio.MMIO_DEVICE):
         if self.emu._supervisor:
             self.writeMemory(offset, bytez)
         else:
-            logger.log(EMULOG, "0x%x:  FLASH write [%x] = %s",
-                       self.emu._cur_instr[2], va, bytez.hex())
+            logger.log(MIRE, "0x%x:  FLASH write [%x] = %s",
+                       self.emu._cur_instr[1], va, bytez.hex())
             # The array corresponding to the block being modified must be 
             # identified because the writes are cached by the sub-array until 
             # the MCR[EHV] bit is written which causes the cached data to be 
@@ -1394,13 +1401,13 @@ class FLASH(ppc_peripherals.Module, mmio.MMIO_DEVICE):
 
     def _shadow_A_read(self, va, offset, size):
         value = self.A.shadow[offset:offset+size]
-        logger.log(EMULOG, "0x%x:  ShadowFlash[A] read  [%x:%r] (%r)",
-                   self.emu._cur_instr[2], va, size, value)
+        logger.log(MIRE, "0x%x:  ShadowFlash[A] read  [%x:%r] (%r)",
+                   self.emu._cur_instr[1], va, size, value)
         return value
 
     def _shadow_A_write(self, va, offset, bytez):
-        logger.log(EMULOG, "0x%x:  ShadowFlash[A] write [%x] = %r", 
-                   self.emu._cur_instr[2], va, bytez)
+        logger.log(MIRE, "0x%x:  ShadowFlash[A] write [%x] = %r", 
+                   self.emu._cur_instr[1], va, bytez)
         self.A.write(FlashBlock.S0, offset, bytez)
 
     def _shadow_A_bytes(self):
@@ -1412,13 +1419,13 @@ class FLASH(ppc_peripherals.Module, mmio.MMIO_DEVICE):
 
     def _shadow_B_read(self, va, offset, size):
         value = self.B.shadow[offset:offset+size]
-        logger.log(EMULOG, "0x%x:  ShadowFlash[B] read  [%x:%r] (%r)",
-                   self.emu._cur_instr[2], va, size, value)
+        logger.log(MIRE, "0x%x:  ShadowFlash[B] read  [%x:%r] (%r)",
+                   self.emu._cur_instr[1], va, size, value)
         return value
 
     def _shadow_B_write(self, va, offset, bytez):
         logger.debug("0x%x:  ShadowFlash[B] write [%x] = %r",
-                     self.emu._cur_instr[2], va, bytez)
+                     self.emu._cur_instr[1], va, bytez)
         self.B.write(FlashBlock.S0, offset, bytez)
 
     def _shadow_B_bytes(self):

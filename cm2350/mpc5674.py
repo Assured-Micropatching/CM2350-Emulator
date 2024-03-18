@@ -144,7 +144,7 @@ import envi.archs.ppc.const as ppc_const
 import vivisect.const as viv_const
 import vivisect.impemu.monitor as viv_imp_monitor
 
-from . import project, e200z7, intc_exc
+from . import project, e200z7, intc_exc, mmio
 
 # Peripherals
 from .peripherals.bam import BAM
@@ -330,8 +330,6 @@ class MPC5674_monitor(viv_imp_monitor.AnalysisMonitor):
 
 ################################# END EmuMon
 
-DEFAULT_FLASH_FILENAME = 'cm2350.flash'
-
 
 class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
     # MPC5674-specific project configuration values
@@ -436,8 +434,8 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
                     'port': 'Host TCP port for eQADC_D IO server',
                 },
                 'eQADC_B': {
-                    'host': 'Host IP address for eQADC_D IO server',
-                    'port': 'Host TCP port for eQADC_D IO server',
+                    'host': 'Host IP address for eQADC_B IO server',
+                    'port': 'Host TCP port for eQADC_B IO server',
                 },
             }
         }
@@ -451,36 +449,27 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         # Before initializing the VivProject, add any MPC5674-specific options
         exename = os.path.basename(sys.modules['__main__'].__file__)
         parser = argparse.ArgumentParser(prog=exename)
-        parser.add_argument('-I', '--init-flash', action='store_true',
-                            help='Copy binary flash image to configuration directory (-c)')
-        parser.add_argument('-N', '--no-backup', action='store_true',
-                            help='run without a flash backup file, flash writes will be lost')
         parser.add_argument('-g', '--gdb-port', nargs='?', const=47001, type=int,
                             help='indicates that execution should\'nt start until a gdb client has connected, default is port 47001')
-        # TODO: make a "clear" backup instead of just "no" backup?
-        parser.add_argument('flash_image', nargs='?',
-                            help='Binary flash image to load in the emulator')
+        group = parser.add_mutually_exclusive_group()
+        group.add_argument('-N', '--no-backup',
+                           help='run without a flash backup file, flash writes will be lost')
+        group.add_argument('-I', '--init-flash',
+                           help='Copy binary flash image to configuration directory (-c)')
+        group.add_argument('-R', '--reset-backup', action='store_true',
+                           help='Reset backup file, undoing any cached changes to the state of flash.')
 
         # Open up the workspace and read the project configuration
-        project.VivProject.__init__(self)
-        vw, args = self.open_project_config(defconfig, docconfig, args, parser)
-
+        project.VivProject.__init__(self, defconfig=defconfig, docconfig=docconfig, args=args, parser=parser)
         del parser
 
         # the self.vw attribute will get created when the e200z7 class calls the
         # workspace emulator initializer.
-        e200z7.PPC_e200z7.__init__(self, vw)
+        e200z7.PPC_e200z7.__init__(self, self.vw)
 
         # Now that the standard options have been parsed process anything
         # leftover
-        self._process_args(args)
-
-        # Set the proper port to use for the GDB server.
-        if args.gdb_port:
-            self.gdbstub.setPort(args.gdb_port)
-            self._wait_for_gdb_client = True
-        else:
-            self._wait_for_gdb_client = False
+        self._process_args()
 
         # The backup file is assumed to be located in the "project directory"
         self.flash = FLASH(self)
@@ -563,7 +552,25 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         )
         #self.flexray = FLEXRAY(self, 0xFFFE0000)
         self.sim = SIM(self, 0xFFFEC000)
-        self.bam = BAM(self, 0xFFFFC000)
+
+        # The BAM object is configurable, supply the valid boot addresses for 
+        # the MPC5674F.
+        #
+        # Possible locations of the RCHW value from
+        #   "Table 3-4. RCHW Location" (MPC5674FRM.pdf page 147)
+        #
+        #   Boot Mode |   Address
+        #   ----------+-------------
+        #    External | 0x0000_0000
+        #   ----------+-------------
+        #    Internal | 0x0000_0000
+        #             | 0x0000_4000
+        #             | 0x0001_0000
+        #             | 0x0001_C000
+        #             | 0x0002_0000
+        #             | 0x0003_0000
+        self.bam = BAM(self, 0xFFFFC000,
+                       (0x0000, 0x4000, 0x10000, 0x1C000, 0x20000, 0x30000))
 
         ########################################
 
@@ -575,157 +582,218 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         # Complete initialization of the e200z7 core
         self.init()
 
-    def _process_args(self, args):
+    def overrideEntryPoint(self):
+        # If one valid entrypoint defined, move the PC there now and set the 
+        # stack pointer (r1) to the end of RAM - 16 bytes (standard PowerPC 
+        # stack frame is 16 bytes)
+        #   RAM = 0x40000000 - 0x40040000
+        #   SP  = 0x4003fff0
+        entrypoints = self.vw.getEntryPoints()
+        self.custom_entrypoint = None
+        if len(entrypoints) == 1:
+            # Set the program counter to the entry point, and then prepare the 
+            # processor to run as if the bootloader has been run.
+            self.custom_entrypoint = entrypoints[0]
+            logger.info('Overriding entry point 0x%x with 0x%x',
+                        self.getProgramCounter(), self.custom_entrypoint)
+            self.setProgramCounter(self.custom_entrypoint)
+
+            # Update the stack pointer
+            ram_config = self.get_project_config('project.MPC5674.SRAM')
+            sram_end = ram_config.addr + ram_config.size
+
+            # Get the calling convention stack alignment
+            align = max(c.align for _, c in self.getCallingConventions())
+            self.setRegister(ppc_regs.REG_R1, sram_end - align)
+
+    def _process_args(self):
         """
         Indicate that the supplied file can be used as an initial flash image if
         - The file is large enough to contain the main and shadow flash A & B
         OR
         - The file is large enough to contain the only main flash
 
-        If the file is a valid initial flash image:
-        1. Copy the file to the project config flash filename
-        2. Update the workspace configuration to indicate if main flash and
-           shadow flash data, or only main flash will be loaded from the file
+        There are four different possible modes to run the emulator:
+        1. No arguments:   run with existing configuration/initialized firmware
+        2. --no-backup:    Use the specified file without copying to the project
+                           directory or creating a backup file.
+        3. --init-flash:   copies the specified file to the project directory and
+                           creates an initial backup file.
+        4. --reset-backup: re-initializes the backup file using the original
+                           firmware file specified in the configuration.
         """
+
+        # First set the proper port to use for the GDB server if one was 
+        # specified.
+        if self.args.gdb_port:
+            self.gdbstub.setPort(self.args.gdb_port)
+            self._wait_for_gdb_client = True
+        else:
+            self._wait_for_gdb_client = False
+
         # Track if this is a new configuration directory or not (needed by
         # init_flash)
-        if args.config_dir != False and not os.path.isdir(self.vw.vivhome):
+        if self.home and not os.path.isdir(self.home):
             new_config = True
             # Save the initial config
-            logger.critical('Creating new config directory %s', self.vw.vivhome)
-            self.vw.config.saveConfigFile()
+            logger.critical('Creating new config directory %s', self.home)
+            self.config.saveConfigFile()
         else:
             new_config = False
 
         # Use the EnviConfig.cfginfo attribute directly so we can overwrite the
-        # running configuration values for a specific run of the emulator. Such
-        # as a overwriting a valid 'fwFilename' path temporarily when the
-        # "--init-flash" argument is provided but no "flash_image" is provided
-        # (indicating an empty firmware should be initialized).
-        cfg = self.vw.config.project.MPC5674.FLASH.cfginfo
-        orig_flash_file = cfg['fwFilename']
-        cfg_flash_file = self.get_project_path(DEFAULT_FLASH_FILENAME)
+        # running configuration values for a specific run of the emulator if the 
+        # "no backup" 
+        flash_cfg = self.get_project_config('project.MPC5674.FLASH')
 
         mode = self.vw.getTransMeta("ProjectMode")
-        updated_config = getFlashOffsets(args.flash_image)
 
-        if args.config_dir != False and args.init_flash:
-            # Update the configuration in the workspace with the values
-            for key, value in updated_config.items():
-                cfg[key] = value
+        # Get any custom file name and offsets to use for this run of the 
+        # emulator based on the init_flash and no_backup flags.
+        if self.args.init_flash:
+            updated_config = getFlashOffsets(self.args.init_flash)
+        elif self.args.no_backup:
+            updated_config = getFlashOffsets(self.args.no_backup)
+        else:
+            # Will return an empty config
+            updated_config = getFlashOffsets(None)
 
-            if cfg['fwFilename'] is not None:
-                if not new_config and orig_flash_file == cfg_flash_file and os.path.exists(cfg_flash_file):
-                    # If the flash image is valid, and this is NOT a new
-                    # configuration print a message indicating that the existing
-                    # flash image is being overwritten
-                    logger.critical('Overwriting flash image in existing config directory %s with %s', self.vw.vivhome, args.flash_image)
-                else:
-                    logger.warning('Copying flash image (%s) into config (%s)', args.flash_image, cfg_flash_file)
+        # Initialize the configuration flash file using the specified firmware 
+        # file.
+        if self.args.init_flash:
+            # If the filename specified in the command line arguments was not 
+            # valid, raise an exception
+            if updated_config['fwFilename'] is None:
+                raise ValueError('ERROR: --init-flash option requires valid initial firmware image')
 
-                # If this Copy the specified file to the correct location
-                shutil.copyfile(cfg['fwFilename'], cfg_flash_file)
+            # Figure out what configuration firmware filename is from the 
+            # existing config or from the new file.
+            flash_cfg['fwFilename'] = os.path.basename(updated_config['fwFilename'])
+            cfg_flash_file = self.get_project_path(flash_cfg['fwFilename'])
 
-                # Update the configuration with the name of the saved flash
-                # image file
-                cfg['fwFilename'] = self.get_project_path(DEFAULT_FLASH_FILENAME)
+            logger.critical('Initializing flash image in config directory %s with %s', 
+                            cfg_flash_file, self.args.init_flash)
 
-                if updated_config['shadowAFilename'] is not None:
-                    cfg['shadowAFilename'] = self.get_project_path(DEFAULT_FLASH_FILENAME)
+            # If the source and destination files are not the same, copy the 
+            # specified file to the destination flash file.
+            if self.args.init_flash != cfg_flash_file:
+                shutil.copyfile(self.args.init_flash, cfg_flash_file)
 
-                if updated_config['shadowBFilename'] is not None:
-                    cfg['shadowBFilename'] = self.get_project_path(DEFAULT_FLASH_FILENAME)
-            else:
-                # If there is no initial flash image, but there used to be (and
-                # this is an existing config) show a warning and delete the
-                # previous flash file
-                if not new_config and os.path.exists(cfg_flash_file):
-                    logger.critical('No flash file provided: deleting existing flash image from config directory %s', self.vw.vivhome)
-                    os.unlink(self.get_project_path(DEFAULT_FLASH_FILENAME))
+            # If the init flash file was large enough to contain the shadow 
+            # flash regions, also specify those as being in the flash file
+            if updated_config['shadowAFilename'] is not None:
+                flash_cfg['shadowAFilename'] = os.path.basename(updated_config['shadowAFilename'])
+                flash_cfg['shadowAOffset'] = updated_config['shadowAOffset']
+
+            if updated_config['shadowBFilename'] is not None:
+                flash_cfg['shadowBFilename'] = os.path.basename(updated_config['shadowBFilename'])
+                flash_cfg['shadowBOffset'] = updated_config['shadowBOffset']
 
             # If init_flash was specified save the config file now
-            logger.critical('Saving configuration file %s', self.vw.config.filename)
-            self.vw.config.saveConfigFile()
+            logger.critical('Saving configuration file %s', self.config.filename)
+            self.config.saveConfigFile()
 
-        else:
+        elif self.args.no_backup:
             # Since this is just a temporary run copy any valid flash
             # filename (and offset) config values from the updated config to
             # the running configuration.
             if updated_config['fwFilename'] is not None:
-                cfg['fwFilename'] = updated_config['fwFilename']
-                cfg['baseaddr'] = updated_config['baseaddr']
+                flash_cfg['fwFilename'] = updated_config['fwFilename']
+                flash_cfg['baseaddr'] = updated_config['baseaddr']
             if updated_config['shadowAFilename'] is not None:
-                cfg['shadowAFilename'] = updated_config['shadowAFilename']
-                cfg['shadowAOffset'] = updated_config['shadowAOffset']
+                flash_cfg['shadowAFilename'] = updated_config['shadowAFilename']
+                flash_cfg['shadowAOffset'] = updated_config['shadowAOffset']
             if updated_config['shadowBFilename'] is not None:
-                cfg['shadowBFilename'] = updated_config['shadowBFilename']
-                cfg['shadowBOffset'] = updated_config['shadowBOffset']
+                flash_cfg['shadowBFilename'] = updated_config['shadowBFilename']
+                flash_cfg['shadowBOffset'] = updated_config['shadowBOffset']
 
-        # If no firmware file is identified print an error now
-        if not cfg['fwFilename'] and mode != 'test':
-            logger.critical('No flash file provided, unable to load flash image')
-
-        # Lastly, if the --no-backup option was provided, remove the backup file
-        # name from the config for this run
-        if args.no_backup:
-            # Set to an empty string instead of None because otherwise
-            # retreiving this field through project.MPC5674.FLASH.backup throws
+            # Set to an empty string instead of None because otherwise 
+            # retreiving this field through project.MPC5674.FLASH.backup throws 
             # an error
-            cfg['backup'] = ''
+            flash_cfg['backup'] = ''
+
+        # If no firmware file is identified print an error now as long as we 
+        # aren't in test mode.
+        if not flash_cfg['fwFilename'] and mode != 'test':
+            logger.critical('No flash file provided, unable to load flash image')
 
     def loadInitialFirmware(self):
         '''
         load firmware into the emulator
         '''
         # Get the FLASH configuration info as a dict
-        cfg = self.vw.config.project.MPC5674.FLASH
+        flash_cfg = self.get_project_config('project.MPC5674.FLASH')
 
-        # Assume that the filenames are files in the project directory
-
-        if cfg['fwFilename']:
+        if flash_cfg['fwFilename']:
             # First check if the file can be found without adding the project
             # path. Otherwise assume it is intended to be a filename path
             # relative to the project path.
-            if os.path.exists(cfg['fwFilename']):
-                path = cfg['fwFilename']
+            if os.path.exists(flash_cfg['fwFilename']):
+                path = flash_cfg['fwFilename']
             else:
-                path = self.get_project_path(cfg['fwFilename'])
+                path = self.get_project_path(flash_cfg['fwFilename'])
             if os.path.exists(path):
-                logger.info("Loading Firmware Blob from %r @ 0x%x", path, cfg['baseaddr'])
-                self.flash.load(FlashDevice.FLASH_MAIN, path, cfg['baseaddr'])
+                logger.info("Loading Firmware Blob from %r @ 0x%x", path, flash_cfg['baseaddr'])
+                self.flash.load(FlashDevice.FLASH_MAIN, path, flash_cfg['baseaddr'])
             else:
-                logger.critical("Starting emulator without valid firmware, please update config: %s", self.vw.vivhome)
+                logger.critical("Starting emulator without valid firmware, please update config: %s", self.home)
 
-        if cfg['shadowAFilename']:
+        if flash_cfg['shadowAFilename']:
             # First check if the file can be found without adding the project
             # path. Otherwise assume it is intended to be a filename path
             # relative to the project path.
-            if os.path.exists(cfg['shadowAFilename']):
-                path = cfg['shadowAFilename']
+            if os.path.exists(flash_cfg['shadowAFilename']):
+                path = flash_cfg['shadowAFilename']
             else:
-                path = self.get_project_path(cfg['shadowAFilename'])
+                path = self.get_project_path(flash_cfg['shadowAFilename'])
             if os.path.exists(path):
-                logger.info("Loading Shadow A Blob from %r @ 0x%x", path, cfg['shadowAOffset'])
-                self.flash.load(FlashDevice.FLASH_A_SHADOW, path, cfg['shadowAOffset'])
+                logger.info("Loading Shadow A Blob from %r @ 0x%x", path, flash_cfg['shadowAOffset'])
+                self.flash.load(FlashDevice.FLASH_A_SHADOW, path, flash_cfg['shadowAOffset'])
 
-        if cfg['shadowBFilename']:
+        if flash_cfg['shadowBFilename']:
             # First check if the file can be found without adding the project
             # path. Otherwise assume it is intended to be a filename path
             # relative to the project path.
-            if os.path.exists(cfg['shadowBFilename']):
-                path = cfg['shadowBFilename']
+            if os.path.exists(flash_cfg['shadowBFilename']):
+                path = flash_cfg['shadowBFilename']
             else:
-                path = self.get_project_path(cfg['shadowBFilename'])
+                path = self.get_project_path(flash_cfg['shadowBFilename'])
             if os.path.exists(path):
-                logger.info("Loading Shadow B Blob from %r @ 0x%x", path, cfg['shadowBOffset'])
-                self.flash.load(FlashDevice.FLASH_B_SHADOW, path, cfg['shadowBOffset'])
+                logger.info("Loading Shadow B Blob from %r @ 0x%x", path, flash_cfg['shadowBOffset'])
+                self.flash.load(FlashDevice.FLASH_B_SHADOW, path, flash_cfg['shadowBOffset'])
+
+        # Check if there are any memory maps loaded through the standard 
+        # vivisect loading methods that we can copy into the emulator memory 
+        # space.
+        #
+        # Use the MMIO methods and not the e200z7 core methods, we can't use the 
+        # normal read/write functions yet because the MMU and other peripherals 
+        # have not yet been initialized
+        self.custom_overlay = False
+        for mva, msize, mperms, mname in self.vw.getMemoryMaps():
+            self.custom_overlay = True
+            offset, mbytes = self.vw.getByteDef(mva)
+            chunk = mbytes[offset:offset+msize]
+            if self.getMemoryMap(mva):
+                filename = self.vw.getFileByVa(mva)
+                logger.info('Updating %08x - %08x memory map from loaded file %s', mva, msize, filename)
+
+                # Enable supervisor mode so the actual contents of flash are 
+                # modified if this is a flash memory segment.
+                with mmio.supervisorMode(self):
+                    mmio.ComplexMemoryMap.writeMemory(self, mva, chunk)
+
+            else:
+                logger.info('Adding %08x - %08x memory map from loaded file %s', mva, msize, filename)
+                mmio.ComplexMemoryMap.addMemoryMap(self, mva, mperms, mname, chunk)
+
+        # Now that the initial state of flash has been loaded, if the command 
+        # line arguments indicates to reset the backup, delete the backup file
+        if self.args.reset_backup:
+            self.flash.delete_backup(self.get_project_path(flash_cfg['backup']))
 
         # Indicate that initial loading of flash memory from files is complete
-        backup_file = self.vw.config.project.MPC5674.FLASH.backup
-        if backup_file:
-            self.flash.load_complete(self.get_project_path(backup_file))
-        else:
-            self.flash.load_complete()
+        self.flash.load_complete(self.get_project_path(flash_cfg['backup']))
 
     def gpio(self, pinid, val=None):
         if val is not None:
@@ -740,9 +808,11 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
     def init(self):
         logger.info('INIT')
 
+        ram_config = self.get_project_config('project.MPC5674.SRAM')
+
         # Create the initial RAM data (it isn't all cleared out during reset)
-        size = self.vw.config.project.MPC5674.SRAM.size
-        addr = self.vw.config.project.MPC5674.SRAM.addr
+        size = ram_config.size
+        addr = ram_config.addr
 
         # The initial SRAM memory block must be created
         logger.debug("init: Initializing SRAM 0x%08x - 0x%08x",
@@ -752,8 +822,12 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         # Init the core
         super().init()
 
+        # After BAM has initialized, if a valid entrypoint override exists, 
+        # modify the initial state of the emulator.
+        self.overrideEntryPoint()
+
         # If the --gdb-port flag was provided then we should wait for a GDB 
-        # client to connect before continuing
+        # client to connect before completing initialization
         if self._wait_for_gdb_client:
             print('Waiting for GDB client to connect on port %d' % self.gdbstub._gdb_port)
             self.gdbstub.waitForClient()
@@ -761,10 +835,12 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
     def reset(self):
         logger.info("RESET")
 
+        ram_config = self.get_project_config('project.MPC5674.SRAM')
+
         # Clear or initialize SRAM and external RAM
-        size = self.vw.config.project.MPC5674.SRAM.size
-        addr = self.vw.config.project.MPC5674.SRAM.addr
-        standby_size = self.vw.config.project.MPC5674.SRAM.standby_size
+        size = ram_config.size
+        addr = ram_config.addr
+        standby_size = ram_config.standby_size
 
         start = addr + standby_size
         end = addr + size
@@ -775,13 +851,18 @@ class MPC5674_Emulator(e200z7.PPC_e200z7, project.VivProject):
         # Reset the core
         super().reset()
 
+        # After the emulator has been reset, BAM will have restored the initial 
+        # entry point, but if a valid custom entry point has been defined, 
+        # override the state of the emulator to start at the application.
+        self.overrideEntryPoint()
+
     def run(self):
         try:
-            logger.info('Starting execution @ 0x%x', self._cur_instr[2])
+            logger.info('Starting execution @ 0x%x', self._cur_instr[1])
             e200z7.PPC_e200z7.run(self)
         except KeyboardInterrupt:
             print()
-            logger.info('Execution stopped @ 0x%x', self._cur_instr[2])
+            logger.info('Execution stopped @ 0x%x', self._cur_instr[1])
 
 
 ### special register hardware interfacing

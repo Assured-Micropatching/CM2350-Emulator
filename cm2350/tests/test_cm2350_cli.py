@@ -1,5 +1,6 @@
 import os
 import copy
+import enum
 import glob
 import json
 import random
@@ -179,7 +180,7 @@ DEFAULT_PROJECT_CONFIG['project'] = {
     'arch': 'ppc32-embedded',
     'bigend': True,
     'format': 'blob',
-    'CM2350': { 'p89': 1, 'p90': 0, 'p91': 1, 'p92': 0},
+    'CM2350': { 'p89': 1, 'p90': 1, 'p91': 0, 'p92': 0},
     'MPC5674': {
         'SIU': {'pllcfg': 5, 'bootcfg': 0, 'wkpcfg': 1},
         'FMPLL': {'extal': 40000000},
@@ -222,10 +223,10 @@ def get_config(config, flash_cfg=None):
     cfg = copy.deepcopy(DEFAULT_PROJECT_CONFIG)
     # If this is the existing config then add the default flash file
     if config == EXISTING_CONFIG:
-        cfg['project']['MPC5674']['FLASH']['fwFilename'] = os.path.join(config, FLASH_FILENAME)
-        cfg['project']['MPC5674']['FLASH']['shadowAFilename'] = os.path.join(config, FLASH_FILENAME)
+        cfg['project']['MPC5674']['FLASH']['fwFilename'] = FLASH_FILENAME
+        cfg['project']['MPC5674']['FLASH']['shadowAFilename'] = FLASH_FILENAME
         cfg['project']['MPC5674']['FLASH']['shadowAOffset'] = 4210688
-        cfg['project']['MPC5674']['FLASH']['shadowBFilename'] = os.path.join(config, FLASH_FILENAME)
+        cfg['project']['MPC5674']['FLASH']['shadowBFilename'] = FLASH_FILENAME
         cfg['project']['MPC5674']['FLASH']['shadowBOffset'] = 4194304
 
     if flash_cfg:
@@ -264,14 +265,14 @@ def get_cm2350_args(*args):
 
 
 def get_expected_hash(binary, default_binary=None):
-    #print('CALCULATING HASH for %s (default=%s)' % (binary, default_binary))
+    print('CALCULATING HASH for %s (default=%s)' % (binary, default_binary))
     invalid = False
 
     if TEST_BIN_VALUES[binary]['size'] == SIZE_FULL:
         # If the binary's size contains both primary and shadow flash,
         # then use the TEST_BIN_VALUE
         hash_value = TEST_BIN_VALUES[binary]['hash'].digest()
-        #print('Using %s hash: %s' % (binary, hash_value.hex()))
+        print('Using %s hash: %s' % (binary, hash_value.hex()))
 
     elif TEST_BIN_VALUES[binary]['size'] == SIZE_FLASH:
         # Use the binary's hash as a starting point and then add in the
@@ -279,19 +280,19 @@ def get_expected_hash(binary, default_binary=None):
         # the default shadow flash states if the config does not have a
         # default binary.
         test_hash = TEST_BIN_VALUES[binary]['hash'].copy()
-        #print('Using %s ' % binary, end='')
+        print('Using %s ' % binary, end='')
         if default_binary is not None:
-            #print('+ %s hash: ' % default_binary, end='')
+            print('+ %s hash: ' % default_binary, end='')
             with open(default_binary, 'rb') as f:
                 f.seek(SIZE_FLASH)
                 test_hash.update(f.read())
         else:
-            #print('+ DEFAULTS hash: ', end='')
+            print('+ DEFAULTS hash: ', end='')
             # Supplement with the default shadow A and B contents
             test_hash.update(DEFAULT_SHADOW_FLASH_B)
             test_hash.update(DEFAULT_SHADOW_FLASH_A)
         hash_value = test_hash.digest()
-        #print(hash_value.hex())
+        print(hash_value.hex())
 
     else:
         invalid = True
@@ -299,7 +300,7 @@ def get_expected_hash(binary, default_binary=None):
         # Otherwise this binary should be considered invalid and the default
         # values for flash will be used
         hash_value = DEFAULT_FLASH_HASH
-        #print('Using default hash: %s' % (hash_value.hex()))
+        print('Using default hash: %s' % (hash_value.hex()))
 
     return invalid, hash_value
 
@@ -363,8 +364,17 @@ def tearDownModule():
             logger.debug('test file %s not present, skipping', testfile)
 
 
+class TEST_MODE(enum.Enum):
+    DEFAULT     = enum.auto()
+    INIT_FLASH  = enum.auto()
+    NO_BACKUP   = enum.auto()
+    RESET_FLASH = enum.auto()
+
+
 class CM2350_CLI(unittest.TestCase):
-    def do_config_test(self, flash_cfg, config=None, binary=None, init_flash=False):
+    maxDiff = 6000
+
+    def do_config_test(self, flash_cfg, config=None, binary=None, mode=TEST_MODE.DEFAULT, overlay_binary=None):
         """
         Utility to do a configuration test, each test works in essentially the
         same way, with a few different options:
@@ -379,18 +389,22 @@ class CM2350_CLI(unittest.TestCase):
                 - if not default then the "-c" CLI param is provided
                 - identifies the default path where the config files are
 
+            mode: TEST_MODE (optional)
+                - toggles between the --init-flash, --reset-flash, and 
+                  --no-backup options
+
             binary: path (optional)
                 - if None then the file in DEFAULT_BINS is used if there is an
                   entry for the supplied config
                 - used to calculate expected hash values
 
-            init_flash: bool (optional)
-                - if True then config's flash file and config to be updated
-                - if False then the config's flash file and configuration should
-                  remain unchanged, but the emulator's hash should reflect the
-                  contents of the "binary" param
+        TODO:
+            overlay_binary: path (optional)
+                - if a file is supplied it will be used to load additional 
+                  memory regions into the emulator which affect the backup file used.
+
         """
-        self.maxDiff = None
+
         #############################
         # Setup
 
@@ -405,41 +419,46 @@ class CM2350_CLI(unittest.TestCase):
         # "--config-dir" argument
         if config is not None and config != DEFAULT_CONFIG:
             args.extend(['--config-dir', config])
-        # if the init flash param is provided add "--init-flash"
-        if init_flash:
-            args.append('--init-flash')
 
-            # If init_flash is set when the config is EXISTING_CONFIG make a
-            # backup of the flash file and config that can be restored after the
-            # test is done
+        # Set any optional flags based on the test mode.
+        if mode == TEST_MODE.INIT_FLASH:
+            assert binary is not None
+
+            # The --init-flash argument takes a path argument
+            args.extend(['--init-flash', binary])
+
+            # If the mode is INIT_FLASH is set when the config is 
+            # EXISTING_CONFIG make a backup of the flash file and config that 
+            # can be restored after the test is done
             if config == EXISTING_CONFIG:
                 shutil.copyfile(EXISTING_CONFIG_BIN, EXISTING_CONFIG_BIN + '.bak')
                 config_file = os.path.join(EXISTING_CONFIG, CONFIG_FILENAME)
                 shutil.copyfile(config_file, config_file + '.bak')
 
-        # Add a binary if provided
-        if binary is not None:
-            args.append(binary)
+        elif mode == TEST_MODE.NO_BACKUP:
+            # The --no-backup argument takes a path argument
+            args.extend(['--no-backup', binary])
+
+        elif mode == TEST_MODE.RESET_FLASH:
+            args.append('--reset-flash')
 
         # Default configuration
         if config is None:
             config = DEFAULT_CONFIG
         default_binary = DEFAULT_BINS.get(config)
 
-        # If init_flash is set then there is no default or backup binary to use
-        # flash sections from
-        if init_flash:
-            invalid_bin, hash_value = get_expected_hash(binary)
+        # If the mode is INIT_FLASH then there is no default or backup binary to 
+        # use flash sections from
+        if mode == TEST_MODE.INIT_FLASH:
+            invalid_bin, hash_value = get_expected_hash(binary, default_binary)
 
             # Determine whether or not a cm2350.flash file should exist at the
-            # end of the test.  Since this branch is only taken if init_flash is
-            # set
+            # end of the test.  Since this branch is only taken if the mode is 
+            # not INIT_FLASH
             #   - if an initial flash image was supplied and is not invalid
-            config_flash_file_exists = not invalid_bin
-
-            # Force invalid_bin to be False so that the empty binary value is
-            # used
-            invalid_bin = False
+            #   - if this is not an existing config (otherwise the "existing 
+            #   config" binary will still exist)
+            expect_config_flash_file_exists = not invalid_bin or config == EXISTING_CONFIG
 
         else:
             invalid_bin, hash_value = get_expected_hash(binary, default_binary)
@@ -448,18 +467,23 @@ class CM2350_CLI(unittest.TestCase):
                 _, hash_value = get_expected_hash(default_binary)
 
             # Determine whether or not a cm2350.flash file should exist at the
-            # end of the test.  Since this branch is only taken if init_flash is
-            # false the cm2350.flash file should only exist if config ==
-            # EXISTING_CONFIG (the exists flag is set)
-            config_flash_file_exists = exists
+            # end of the test.  Since this branch is only taken if the mode is 
+            # not INIT_FLASH the cm2350.flash file should only exist
+            # if config == EXISTING_CONFIG (the exists flag is set)
+            expect_config_flash_file_exists = exists
 
         # Get a dictionary of the expected standard configuration values for the
         # selected config
         cfg = get_config(config, flash_cfg)
 
-        # A backup.flash file is only created if data is loaded from a flash
-        # file.  The filename should be "backup.flash.<hash>.
-        if cfg['project']['MPC5674']['FLASH']['fwFilename'] is None:
+        # Lastly add an overlay binary if provided
+        if overlay_binary is not None:
+            args.append(overlay_binary)
+
+        # A backup file should exist as long as the "no backup" mode is not set 
+        # and the supplied binary is not invalid. The filename should be 
+        # "backup.flash.<hash>.
+        if mode == TEST_MODE.NO_BACKUP:
             backup_file = None
         else:
             backup_file = os.path.join(config, '%s.%s' % (BACKUP_FILENAME, hash_value.hex()))
@@ -468,73 +492,89 @@ class CM2350_CLI(unittest.TestCase):
         # Start testing now
 
         self.assertEqual(os.path.exists(config), exists)
-        ecu = CM2350(get_cm2350_args(*args))
-        self.assertEqual(ecu.emu.vw.config.getConfigPrimitive(), cfg)
-        self.assertEqual(ecu.emu.flash.get_hash().hex(), hash_value.hex())
 
-        if invalid_bin:
-            # Use the default binary's RCHW and PC
-            self.assertEqual(ecu.emu.bam.rchw_addr, TEST_BIN_VALUES[default_binary]['rchw'])
-            self.assertEqual(ecu.emu.getProgramCounter(), TEST_BIN_VALUES[default_binary]['pc'])
+        if mode == TEST_MODE.INIT_FLASH and \
+                binary in (INVALID_BINARY_SMALL, INVALID_BINARY_LARGE):
+            msg = 'ERROR: --init-flash option requires valid initial firmware image'
+            with self.assertRaises(ValueError, msg=msg) as cm:
+                ecu = CM2350(get_cm2350_args(*args))
+
+            initialized = False
+
         else:
-            self.assertEqual(ecu.emu.bam.rchw_addr, TEST_BIN_VALUES[binary]['rchw'])
-            self.assertEqual(ecu.emu.getProgramCounter(), TEST_BIN_VALUES[binary]['pc'])
-        self.assertTrue(os.path.isdir(config))
+            ecu = CM2350(get_cm2350_args(*args))
+
+            initialized = True
+
+            self.assertEqual(ecu.emu.config.getConfigPrimitive(), cfg)
+            self.assertEqual(ecu.emu.flash.get_hash().hex(), hash_value.hex())
+
+            if invalid_bin:
+                # Use the default binary's RCHW and PC
+                self.assertEqual(ecu.emu.bam.rchw_addr, TEST_BIN_VALUES[default_binary]['rchw'])
+                self.assertEqual(ecu.emu.getProgramCounter(), TEST_BIN_VALUES[default_binary]['pc'])
+            else:
+                self.assertEqual(ecu.emu.bam.rchw_addr, TEST_BIN_VALUES[binary]['rchw'])
+                self.assertEqual(ecu.emu.getProgramCounter(), TEST_BIN_VALUES[binary]['pc'])
+            self.assertTrue(os.path.isdir(config))
+
+            # Check for the backup file, it should exist as long as the "no 
+            # backup" mode is not set
+            backup_file_glob = glob.glob(os.path.join(config, '%s.*' % BACKUP_FILENAME))
+            print(backup_file, backup_file_glob)
+            if backup_file is None:
+                self.assertEqual(backup_file_glob, [])
+            else:
+                # The backup files should always be the size of MAIN flash and both
+                # shadow regions
+                for bfile in backup_file_glob:
+                    self.assertEqual(os.stat(bfile).st_size, 0x408000, msg=bfile)
+                self.assertEqual(backup_file_glob, [backup_file])
+
+                # Lastly confirm that the hash of the backup file matches the
+                # expected hash_value (because the contents of flash should not have
+                # changed since it was initialized)
+                with open(backup_file, 'rb') as f:
+                    self.assertEqual(hashlib.md5(f.read()).digest().hex(), hash_value.hex())
+
+            # to gracefully clean up the ECU resources call halt() before deleting
+            # the object
+            ecu.shutdown()
+            del ecu
 
         # Confirm that the configuration json file is as expected:
         json_cfg_file = os.path.join(config, CONFIG_FILENAME)
         self.assertTrue(os.path.exists(json_cfg_file))
         with open(json_cfg_file, 'r') as f:
             json_cfg = json.loads(f.read())
-            if init_flash:
+            if mode == TEST_MODE.INIT_FLASH:
                 self.assertEqual(json_cfg, cfg)
             else:
                 self.assertEqual(json_cfg, get_config(config))
-
-        self.assertEqual(os.path.exists(os.path.join(config, FLASH_FILENAME)), config_flash_file_exists)
-
-        # Check for the backup file
-        backup_exists = backup_file is not None
-        backup_file_glob = glob.glob(os.path.join(config, '%s.*' % BACKUP_FILENAME))
-        if not backup_exists:
-            self.assertEqual(backup_file_glob, [])
-        else:
-            # The backup files should always be the size of MAIN flash and both
-            # shadow regions
-            for bfile in backup_file_glob:
-                self.assertEqual(os.stat(bfile).st_size, 0x408000, msg=bfile)
-            self.assertEqual(backup_file_glob, [backup_file])
-
-            # Lastly confirm that the hash of the backup file matches the
-            # expected hash_value (because the contents of flash should not have
-            # changed since it was initialized)
-            with open(backup_file, 'rb') as f:
-                self.assertEqual(hashlib.md5(f.read()).digest().hex(), hash_value.hex())
+        flash_filename = cfg['project']['MPC5674']['FLASH']['fwFilename']
+        if flash_filename is not None:
+            config_flash_file_exists = os.path.exists(os.path.join(config, flash_filename))
+            self.assertEqual(config_flash_file_exists, expect_config_flash_file_exists)
 
         #############################
         # Cleanup
-
-        # to gracefully clean up the ECU resources call halt() before deleting
-        # the object
-        ecu.shutdown()
-        del ecu
 
         # Test is completed, remove the configuration directory (unless config
         # == EXISTING_CONFIG)
         if not exists:
             shutil.rmtree(config)
-        elif backup_exists:
+        elif backup_file is not None and initialized:
             # If the configuration shouldn't be deleted, cleanup the backup file
             os.unlink(backup_file)
 
-        # If the config was EXISTING_CONFIG and init_flash was specified restore
+        # If the config was EXISTING_CONFIG and the mode is INIT_FLASH restore
         # the original test flash and config files
-        if init_flash and config == EXISTING_CONFIG:
+        if mode == TEST_MODE.INIT_FLASH and config == EXISTING_CONFIG:
             shutil.move(EXISTING_CONFIG_BIN + '.bak', EXISTING_CONFIG_BIN)
             config_file = os.path.join(EXISTING_CONFIG, CONFIG_FILENAME)
             shutil.move(config_file + '.bak', config_file)
 
-    ########## DEFAULT CONFIG ##########
+    ########## DEFAULT NEW CONFIG ##########
 
     def test_default_config(self):
         flash_cfg = {
@@ -546,6 +586,9 @@ class CM2350_CLI(unittest.TestCase):
             'shadowBOffset': 0,
             'backup': 'backup.flash'
         }
+
+        # This test doesn't use --init-flash because there is no binary to 
+        # initialize with, so it just runs on a default empty configuration.
         self.do_config_test(flash_cfg)
 
     def test_default_config_new_bin_full(self):
@@ -558,7 +601,7 @@ class CM2350_CLI(unittest.TestCase):
             'shadowBOffset': 0x400000,
             'backup': 'backup.flash'
         }
-        self.do_config_test(flash_cfg, binary=NEW_BINARY_FULL)
+        self.do_config_test(flash_cfg, binary=NEW_BINARY_FULL, mode=TEST_MODE.INIT_FLASH)
 
     def test_default_config_new_bin(self):
         flash_cfg = {
@@ -570,7 +613,7 @@ class CM2350_CLI(unittest.TestCase):
             'shadowBOffset': 0,
             'backup': 'backup.flash'
         }
-        self.do_config_test(flash_cfg, binary=NEW_BINARY)
+        self.do_config_test(flash_cfg, binary=NEW_BINARY, mode=TEST_MODE.INIT_FLASH)
 
     def test_default_config_invalid_bin_small(self):
         flash_cfg = {
@@ -582,7 +625,7 @@ class CM2350_CLI(unittest.TestCase):
             'shadowBOffset': 0,
             'backup': 'backup.flash'
         }
-        self.do_config_test(flash_cfg, binary=INVALID_BINARY_SMALL)
+        self.do_config_test(flash_cfg, binary=INVALID_BINARY_SMALL, mode=TEST_MODE.INIT_FLASH)
 
     def test_default_config_invalid_bin_large(self):
         flash_cfg = {
@@ -594,23 +637,23 @@ class CM2350_CLI(unittest.TestCase):
             'shadowBOffset': 0,
             'backup': 'backup.flash'
         }
-        self.do_config_test(flash_cfg, binary=INVALID_BINARY_LARGE)
+        self.do_config_test(flash_cfg, binary=INVALID_BINARY_LARGE, mode=TEST_MODE.INIT_FLASH)
 
     def test_default_config_new_bin_full_init(self):
         flash_cfg = {
-            'fwFilename': os.path.join(DEFAULT_CONFIG, FLASH_FILENAME),
+            'fwFilename': NEW_BINARY_FULL,
             'baseaddr': 0,
-            'shadowAFilename': os.path.join(DEFAULT_CONFIG, FLASH_FILENAME),
+            'shadowAFilename': NEW_BINARY_FULL,
             'shadowAOffset': 0x404000,
-            'shadowBFilename': os.path.join(DEFAULT_CONFIG, FLASH_FILENAME),
+            'shadowBFilename': NEW_BINARY_FULL,
             'shadowBOffset': 0x400000,
             'backup': 'backup.flash'
         }
-        self.do_config_test(flash_cfg, binary=NEW_BINARY_FULL, init_flash=True)
+        self.do_config_test(flash_cfg, binary=NEW_BINARY_FULL, mode=TEST_MODE.INIT_FLASH)
 
     def test_default_config_new_bin_init(self):
         flash_cfg = {
-            'fwFilename': os.path.join(DEFAULT_CONFIG, FLASH_FILENAME),
+            'fwFilename': NEW_BINARY,
             'baseaddr': 0,
             'shadowAFilename': None,
             'shadowAOffset': 0,
@@ -618,7 +661,7 @@ class CM2350_CLI(unittest.TestCase):
             'shadowBOffset': 0,
             'backup': 'backup.flash'
         }
-        self.do_config_test(flash_cfg, binary=NEW_BINARY, init_flash=True)
+        self.do_config_test(flash_cfg, binary=NEW_BINARY, mode=TEST_MODE.INIT_FLASH)
 
     def test_default_config_invalid_bin_small_init(self):
         flash_cfg = {
@@ -630,7 +673,7 @@ class CM2350_CLI(unittest.TestCase):
             'shadowBOffset': 0,
             'backup': 'backup.flash'
         }
-        self.do_config_test(flash_cfg, binary=INVALID_BINARY_SMALL, init_flash=True)
+        self.do_config_test(flash_cfg, binary=INVALID_BINARY_SMALL, mode=TEST_MODE.INIT_FLASH)
 
     def test_default_config_invalid_bin_large_init(self):
         flash_cfg = {
@@ -642,28 +685,16 @@ class CM2350_CLI(unittest.TestCase):
             'shadowBOffset': 0,
             'backup': 'backup.flash'
         }
-        self.do_config_test(flash_cfg, binary=INVALID_BINARY_LARGE, init_flash=True)
-
-    def test_default_config_init_no_file (self):
-        flash_cfg = {
-            'fwFilename': None,
-            'baseaddr': 0,
-            'shadowAFilename': None,
-            'shadowAOffset': 0,
-            'shadowBFilename': None,
-            'shadowBOffset': 0,
-            'backup': 'backup.flash'
-        }
-        self.do_config_test(flash_cfg, init_flash=True)
+        self.do_config_test(flash_cfg, binary=INVALID_BINARY_LARGE, mode=TEST_MODE.INIT_FLASH)
 
     ########## EXISTING CONFIG ##########
     def test_existing_config(self):
         flash_cfg = {
-            'fwFilename': os.path.join(EXISTING_CONFIG, FLASH_FILENAME),
+            'fwFilename': FLASH_FILENAME,
             'baseaddr': 0,
-            'shadowAFilename': os.path.join(EXISTING_CONFIG, FLASH_FILENAME),
+            'shadowAFilename': FLASH_FILENAME,
             'shadowAOffset': 0x404000,
-            'shadowBFilename': os.path.join(EXISTING_CONFIG, FLASH_FILENAME),
+            'shadowBFilename': FLASH_FILENAME,
             'shadowBOffset': 0x400000,
             'backup': 'backup.flash'
         }
@@ -679,103 +710,47 @@ class CM2350_CLI(unittest.TestCase):
             'shadowBOffset': 0x400000,
             'backup': 'backup.flash'
         }
-        self.do_config_test(flash_cfg, config=EXISTING_CONFIG, binary=NEW_BINARY_FULL)
+        self.do_config_test(flash_cfg, config=EXISTING_CONFIG, binary=NEW_BINARY_FULL, mode=TEST_MODE.INIT_FLASH)
 
     def test_existing_config_new_bin(self):
         flash_cfg = {
             'fwFilename': NEW_BINARY,
             'baseaddr': 0,
-            'shadowAFilename': os.path.join(EXISTING_CONFIG, FLASH_FILENAME),
+            'shadowAFilename': FLASH_FILENAME,
             'shadowAOffset': 0x404000,
-            'shadowBFilename': os.path.join(EXISTING_CONFIG, FLASH_FILENAME),
+            'shadowBFilename': FLASH_FILENAME,
             'shadowBOffset': 0x400000,
             'backup': 'backup.flash'
         }
-        self.do_config_test(flash_cfg, config=EXISTING_CONFIG, binary=NEW_BINARY)
+        self.do_config_test(flash_cfg, config=EXISTING_CONFIG, binary=NEW_BINARY, mode=TEST_MODE.INIT_FLASH)
 
     def test_existing_config_invalid_bin_small(self):
+        # config will be left unmodified from the original existing config 
+        # because initialization will fail
         flash_cfg = {
-            'fwFilename': os.path.join(EXISTING_CONFIG, FLASH_FILENAME),
+            'fwFilename': FLASH_FILENAME,
             'baseaddr': 0,
-            'shadowAFilename': os.path.join(EXISTING_CONFIG, FLASH_FILENAME),
+            'shadowAFilename': FLASH_FILENAME,
             'shadowAOffset': 0x404000,
-            'shadowBFilename': os.path.join(EXISTING_CONFIG, FLASH_FILENAME),
+            'shadowBFilename': FLASH_FILENAME,
             'shadowBOffset': 0x400000,
             'backup': 'backup.flash'
         }
-        self.do_config_test(flash_cfg, config=EXISTING_CONFIG, binary=INVALID_BINARY_SMALL)
+        self.do_config_test(flash_cfg, config=EXISTING_CONFIG, binary=INVALID_BINARY_SMALL, mode=TEST_MODE.INIT_FLASH)
 
     def test_existing_config_invalid_bin_large(self):
+        # config will be left unmodified from the original existing config 
+        # because initialization will fail
         flash_cfg = {
-            'fwFilename': os.path.join(EXISTING_CONFIG, FLASH_FILENAME),
+            'fwFilename': FLASH_FILENAME,
             'baseaddr': 0,
-            'shadowAFilename': os.path.join(EXISTING_CONFIG, FLASH_FILENAME),
+            'shadowAFilename': FLASH_FILENAME,
             'shadowAOffset': 0x404000,
-            'shadowBFilename': os.path.join(EXISTING_CONFIG, FLASH_FILENAME),
+            'shadowBFilename': FLASH_FILENAME,
             'shadowBOffset': 0x400000,
             'backup': 'backup.flash'
         }
-        self.do_config_test(flash_cfg, config=EXISTING_CONFIG, binary=INVALID_BINARY_LARGE)
-
-    def test_existing_config_new_bin_full_init(self):
-        flash_cfg = {
-            'fwFilename': os.path.join(EXISTING_CONFIG, FLASH_FILENAME),
-            'baseaddr': 0,
-            'shadowAFilename': os.path.join(EXISTING_CONFIG, FLASH_FILENAME),
-            'shadowAOffset': 0x404000,
-            'shadowBFilename': os.path.join(EXISTING_CONFIG, FLASH_FILENAME),
-            'shadowBOffset': 0x400000,
-            'backup': 'backup.flash'
-        }
-        self.do_config_test(flash_cfg, config=EXISTING_CONFIG, binary=NEW_BINARY_FULL, init_flash=True)
-
-    def test_existing_config_new_bin_init(self):
-        flash_cfg = {
-            'fwFilename': os.path.join(EXISTING_CONFIG, FLASH_FILENAME),
-            'baseaddr': 0,
-            'shadowAFilename': None,
-            'shadowAOffset': 0,
-            'shadowBFilename': None,
-            'shadowBOffset': 0,
-            'backup': 'backup.flash'
-        }
-        self.do_config_test(flash_cfg, config=EXISTING_CONFIG, binary=NEW_BINARY, init_flash=True)
-
-    def test_existing_config_invalid_bin_small_init(self):
-        flash_cfg = {
-            'fwFilename': None,
-            'baseaddr': 0,
-            'shadowAFilename': None,
-            'shadowAOffset': 0,
-            'shadowBFilename': None,
-            'shadowBOffset': 0,
-            'backup': 'backup.flash'
-        }
-        self.do_config_test(flash_cfg, config=EXISTING_CONFIG, binary=INVALID_BINARY_SMALL, init_flash=True)
-
-    def test_existing_config_invalid_bin_large_init(self):
-        flash_cfg = {
-            'fwFilename': None,
-            'baseaddr': 0,
-            'shadowAFilename': None,
-            'shadowAOffset': 0,
-            'shadowBFilename': None,
-            'shadowBOffset': 0,
-            'backup': 'backup.flash'
-        }
-        self.do_config_test(flash_cfg, config=EXISTING_CONFIG, binary=INVALID_BINARY_LARGE, init_flash=True)
-
-    def test_existing_config_init_no_file(self):
-        flash_cfg = {
-            'fwFilename': None,
-            'baseaddr': 0,
-            'shadowAFilename': None,
-            'shadowAOffset': 0,
-            'shadowBFilename': None,
-            'shadowBOffset': 0,
-            'backup': 'backup.flash'
-        }
-        self.do_config_test(flash_cfg, config=EXISTING_CONFIG, init_flash=True)
+        self.do_config_test(flash_cfg, config=EXISTING_CONFIG, binary=INVALID_BINARY_LARGE, mode=TEST_MODE.INIT_FLASH)
 
     ########## NEW CONFIG ##########
 
@@ -801,7 +776,7 @@ class CM2350_CLI(unittest.TestCase):
             'shadowBOffset': 0x400000,
             'backup': 'backup.flash'
         }
-        self.do_config_test(flash_cfg, config=NEW_CONFIG, binary=NEW_BINARY_FULL)
+        self.do_config_test(flash_cfg, config=NEW_CONFIG, binary=NEW_BINARY_FULL, mode=TEST_MODE.INIT_FLASH)
 
     def test_new_config_new_bin(self):
         flash_cfg = {
@@ -813,7 +788,7 @@ class CM2350_CLI(unittest.TestCase):
             'shadowBOffset': 0,
             'backup': 'backup.flash'
         }
-        self.do_config_test(flash_cfg, config=NEW_CONFIG, binary=NEW_BINARY)
+        self.do_config_test(flash_cfg, config=NEW_CONFIG, binary=NEW_BINARY, mode=TEST_MODE.INIT_FLASH)
 
     def test_new_config_invalid_bin_small(self):
         flash_cfg = {
@@ -825,7 +800,7 @@ class CM2350_CLI(unittest.TestCase):
             'shadowBOffset': 0,
             'backup': 'backup.flash'
         }
-        self.do_config_test(flash_cfg, config=NEW_CONFIG, binary=INVALID_BINARY_SMALL)
+        self.do_config_test(flash_cfg, config=NEW_CONFIG, binary=INVALID_BINARY_SMALL, mode=TEST_MODE.INIT_FLASH)
 
     def test_new_config_invalid_bin_large(self):
         flash_cfg = {
@@ -837,23 +812,23 @@ class CM2350_CLI(unittest.TestCase):
             'shadowBOffset': 0,
             'backup': 'backup.flash'
         }
-        self.do_config_test(flash_cfg, config=NEW_CONFIG, binary=INVALID_BINARY_LARGE)
+        self.do_config_test(flash_cfg, config=NEW_CONFIG, binary=INVALID_BINARY_LARGE, mode=TEST_MODE.INIT_FLASH)
 
     def test_new_config_new_bin_full_init(self):
         flash_cfg = {
-            'fwFilename': os.path.join(NEW_CONFIG, FLASH_FILENAME),
+            'fwFilename': NEW_BINARY_FULL,
             'baseaddr': 0,
-            'shadowAFilename': os.path.join(NEW_CONFIG, FLASH_FILENAME),
+            'shadowAFilename': NEW_BINARY_FULL,
             'shadowAOffset': 0x404000,
-            'shadowBFilename': os.path.join(NEW_CONFIG, FLASH_FILENAME),
+            'shadowBFilename': NEW_BINARY_FULL,
             'shadowBOffset': 0x400000,
             'backup': 'backup.flash'
         }
-        self.do_config_test(flash_cfg, config=NEW_CONFIG, binary=NEW_BINARY_FULL, init_flash=True)
+        self.do_config_test(flash_cfg, config=NEW_CONFIG, binary=NEW_BINARY_FULL, mode=TEST_MODE.INIT_FLASH)
 
     def test_new_config_new_bin_init(self):
         flash_cfg = {
-            'fwFilename': os.path.join(NEW_CONFIG, FLASH_FILENAME),
+            'fwFilename': NEW_BINARY,
             'baseaddr': 0,
             'shadowAFilename': None,
             'shadowAOffset': 0,
@@ -861,7 +836,7 @@ class CM2350_CLI(unittest.TestCase):
             'shadowBOffset': 0,
             'backup': 'backup.flash'
         }
-        self.do_config_test(flash_cfg, config=NEW_CONFIG, binary=NEW_BINARY, init_flash=True)
+        self.do_config_test(flash_cfg, config=NEW_CONFIG, binary=NEW_BINARY, mode=TEST_MODE.INIT_FLASH)
 
     def test_new_config_invalid_bin_small_init(self):
         flash_cfg = {
@@ -873,7 +848,7 @@ class CM2350_CLI(unittest.TestCase):
             'shadowBOffset': 0,
             'backup': 'backup.flash'
         }
-        self.do_config_test(flash_cfg, config=NEW_CONFIG, binary=INVALID_BINARY_SMALL, init_flash=True)
+        self.do_config_test(flash_cfg, config=NEW_CONFIG, binary=INVALID_BINARY_SMALL, mode=TEST_MODE.INIT_FLASH)
 
     def test_new_config_invalid_bin_large_init(self):
         flash_cfg = {
@@ -885,16 +860,4 @@ class CM2350_CLI(unittest.TestCase):
             'shadowBOffset': 0,
             'backup': 'backup.flash'
         }
-        self.do_config_test(flash_cfg, config=NEW_CONFIG, binary=INVALID_BINARY_LARGE, init_flash=True)
-
-    def test_new_config_init_no_file(self):
-        flash_cfg = {
-            'fwFilename': None,
-            'baseaddr': 0,
-            'shadowAFilename': None,
-            'shadowAOffset': 0,
-            'shadowBFilename': None,
-            'shadowBOffset': 0,
-            'backup': 'backup.flash'
-        }
-        self.do_config_test(flash_cfg, config=NEW_CONFIG, init_flash=True)
+        self.do_config_test(flash_cfg, config=NEW_CONFIG, binary=INVALID_BINARY_LARGE, mode=TEST_MODE.INIT_FLASH)

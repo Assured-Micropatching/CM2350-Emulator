@@ -41,8 +41,11 @@ class BAM(MMIOPeripheral):
     boot location and context.
     One-Time-Use
     '''
-    def __init__(self, emu, mmio_addr):
+    def __init__(self, emu, mmio_addr, bootaddrs):
         super().__init__(emu, 'BAM', mmio_addr, 0x4000)
+
+        # Valid internal boot addresses
+        self.bootaddrs = bootaddrs
 
         # Values that are populated after the boot target has been found
         self.rchw = RCHW()
@@ -62,30 +65,11 @@ class BAM(MMIOPeripheral):
         raise intc_exc.MceWriteBusError(written=offset)
 
     def analyze(self):
-        '''
-        Adapted from the vivisect.analysis.ppc.bootstrap module because the
-        vivisect workspace doesn't call ComplexMemoryMap read and write
-        methods.
-        '''
-        # Possible locations of the RCHW value from
-        #   "Table 3-4. RCHW Location" (MPC5674FRM.pdf page 147)
-        #
-        #   Boot Mode |   Address
-        #   ----------+-------------
-        #    External | 0x0000_0000
-        #   ----------+-------------
-        #    Internal | 0x0000_0000
-        #             | 0x0000_4000
-        #             | 0x0001_0000
-        #             | 0x0001_C000
-        #             | 0x0002_0000
-        #             | 0x0003_0000
-        #
         # TODO: Theoretically this should support both external and internal
         # boot targets.
         if self.emu.siu.bootcfg == 0b00:
             # BOOTCFG == 0b00 means internal boot
-            for offset in (0x0000, 0x4000, 0x10000, 0x1C000, 0x20000, 0x30000):
+            for offset in self.bootaddrs:
                 # BAM needs to set the initial MMU/TLB config so until that
                 # happens the normal MMIO APIs will be unable to successfully
                 # use that API, instead directly read from the flash peripheral

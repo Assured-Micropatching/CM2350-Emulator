@@ -2,10 +2,12 @@
 
 import enum
 
+import envi.bits as e_bits
+import envi.archs.ppc.regs as ppc_regs
 import vivisect.cli as v_cli
-import envi.archs.ppc.emu as eape
 
 from .mpc5674 import MPC5674_Emulator
+from . import e200z7
 from . import project
 from . import ppc_peripherals
 
@@ -153,20 +155,15 @@ class CM2350:
             'platform': 'CM2350',
             'arch': 'ppc32-embedded',
             'bigend': True,
-            'format': 'blob',
             'CM2350': {
                 'p89': 1,
-                'p90': 0,
-                'p91': 1,
+                'p90': 1,
+                'p91': 0,
                 'p92': 0,
             },
             'MPC5674': {
                 'FMPLL': {
                     'extal': 40000000,
-                },
-                'SRAM': {
-                    # MPC5674F RAM size and address:
-                    'size': 256 * 1024,
                 },
             }
         },
@@ -187,11 +184,20 @@ class CM2350:
         # Create the MPC5674 emulator with the default configuration values
         self.emu = MPC5674_Emulator(defconfig=self.defconfig, docconfig=self.docconfig, args=args)
 
+        if self.emu.custom_entrypoint is not None:
+            # If a custom entry point was set, there are a few emulator settings 
+            # that need to be updated to ensure that the application can operate 
+            # correctly., the MSR must be updated to enable machine check 
+            # exceptions, and the PPC timebase should be enabled.
+            self.emu.writeRegValue(ppc_regs.REG_MSR, ppc_regs.EFLAGS_MSR_ME)
+            self.emu.writeRegValue(ppc_regs.REG_HID0, e200z7.EFLAGS_HID0_TBEN)
+
         # start off with the external pins
-        self.emu.gpio(89, self.emu.vw.config.project.CM2350.p89)
-        self.emu.gpio(90, self.emu.vw.config.project.CM2350.p90)
-        self.emu.gpio(91, self.emu.vw.config.project.CM2350.p91)
-        self.emu.gpio(92, self.emu.vw.config.project.CM2350.p92)
+        cm2350_config = self.emu.get_project_config('project.CM2350')
+        self.emu.gpio(89, cm2350_config.p89)
+        self.emu.gpio(90, cm2350_config.p90)
+        self.emu.gpio(91, cm2350_config.p91)
+        self.emu.gpio(92, cm2350_config.p92)
 
         # Register the ASIC as a SPI peripheral and fill the rest of the SPI 
         # buses and chip select options with placeholder devices, not all of 

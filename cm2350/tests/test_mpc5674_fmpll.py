@@ -197,7 +197,7 @@ class MPC5674_FMPLL_Test(MPC5674_Test):
         self.assertEqual(self.emu.fmpll.f_pll(), float(self.EXTAL))
 
     def test_fmpll_default_freq(self):
-        self.assertEqual(self.emu.vw.config.project.MPC5674.FMPLL.extal, self.EXTAL)
+        self.assertEqual(self.emu.config.project.MPC5674.FMPLL.extal, self.EXTAL)
         self.assertEqual(self.emu.fmpll.f_pll(), self.PLL)
 
     def test_fmpll_change_freq(self):
@@ -214,7 +214,7 @@ class MPC5674_FMPLL_Test(MPC5674_Test):
         #   f_pll = (40000000*(32+16)) / ((3+1)*(7+1))
         #   f_pll = (40000000*48) / 32
         #   f_pll = 60000000
-        self.assertEqual(self.emu.vw.config.project.MPC5674.FMPLL.extal, self.EXTAL)
+        self.assertEqual(self.emu.config.project.MPC5674.FMPLL.extal, self.EXTAL)
         self.assertEqual(self.emu.fmpll.f_pll(), self.PLL)
 
         # Change slowly from the default values to:

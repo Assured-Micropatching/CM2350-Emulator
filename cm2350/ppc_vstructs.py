@@ -44,6 +44,10 @@ __all__ = [
     'WriteOnlyRegister',
     'PeripheralRegisterSet',
     'BitFieldSPR',
+
+    # Not a VStruct but behaves like BitFieldSPR without requiring a full 
+    # VBitField object behind it.
+    'PpcSprCallbackWrapper',
 ]
 
 
@@ -1557,8 +1561,6 @@ class PeripheralRegisterSet(VStruct):
         return ret
 
 
-
-
 class BitFieldSPR(PeriphRegister):
     """
     A PeriphRegister object specifically for attaching SPR read/write handlers
@@ -1586,18 +1588,11 @@ class BitFieldSPR(PeriphRegister):
         # determine the pack/unpack format now
         self._fmt = e_bits.getFormat(self._vs_size, emu.getEndian())
 
-    def init(self, emu):
-        """
-        Emulator initializer function, all registered module init() functions
-        are called when the emulator processor core's init() function is called.
-        """
         emu.addSprReadHandler(self._reg, self.read)
         emu.addSprWriteHandler(self._reg, self.write)
 
         # Register the SPR object
-        emu.sprs[self._reg] = self
-
-        super().init(emu)
+        emu.installSPR(self._reg, self)
 
     def read(self, emu, op=None):
         """
@@ -1630,3 +1625,64 @@ class BitFieldSPR(PeriphRegister):
 
         # vsEmit() returns bytes, convert to an integer value
         return struct.unpack(self._fmt, self.vsEmit())[0]
+
+
+class PpcSprCallbackWrapper:
+    """
+    An object used to track SPR write/read hooks but also to attach some
+    read/write routines to that allow for more unified access to PPC SPR
+    values for testing purposes, or through other means like the GDB stub.
+    """
+    def __init__(self, reg, emu, read_handler=None, write_handler=None):
+        self._reg = reg
+        self._read = read_handler
+        self._write = write_handler
+
+        if self._read:
+            emu.addSprReadHandler(self._reg, self._read_handler_wrapper)
+
+        if self._write:
+            emu.addSprWriteHandler(self._reg, self._write_handler_wrapper)
+
+        # Register the SPR object
+        emu.installSPR(self._reg, self)
+
+    def _read_handler_wrapper(self, emu, op=None):
+        """
+        Return the value from the SPR read handler
+        """
+        return self._read()
+
+    def _write_handler_wrapper(self, emu, op):
+        """
+        extract the value to be written and send it to the SPR write handler
+        """
+        # If the "op" parameter is an integer, just convert it directly, 
+        # otherwise get the value from the first operand (which is always the 
+        # destination in PowerPC).
+        if isinstance(op, int):
+            value = op
+        else:
+            value = emu.getOperValue(op, 1)
+        return self._write(value)
+
+    def read(self, emu, op=None):
+        """
+        BitFieldSPR.read() compatible function, the op parameter is ignored.
+        If a value is read through this interface it is written to the SPR for
+        this object.
+        """
+        if self._read:
+            value = self._read()
+            emu.setRegister(self._reg, value)
+        else:
+            value = emu.getRegister(self._reg)
+        return value
+
+    def write(self, emu, value):
+        """
+        BitFieldSPR.write() compatible function.
+        """
+        if self._write:
+            value = self._write(value)
+        emu.setRegister(self._reg, value)

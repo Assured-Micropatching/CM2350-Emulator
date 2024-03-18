@@ -694,7 +694,7 @@ class MPC5674_WDT_Test(MPC5674_Test):
         self.emu.halt_time()
         self.emu.systime(-self.emu.systime())
 
-        default_extal = self.emu.vw.config.project.MPC5674.FMPLL.extal
+        default_extal = self.emu.config.project.MPC5674.FMPLL.extal
 
         # Enable the watchdog
         self.emu.writeMemValue(SWT_MCR, SWT_MCR_ENABLE_WDOG, 4)
@@ -743,7 +743,7 @@ class MPC5674_WDT_Test(MPC5674_Test):
         self.assertEqual(self.emu.swt.registers.mcr.wen, 1)
         self.assertEqual(self.emu.swt.watchdog.running(), True)
 
-        default_extal = self.emu.vw.config.project.MPC5674.FMPLL.extal
+        default_extal = self.emu.config.project.MPC5674.FMPLL.extal
         wdt_time = SWT_TO_DEFAULT / default_extal
 
         start = self.emu.systime()
@@ -815,7 +815,7 @@ class MPC5674_WDT_Test(MPC5674_Test):
         self.assertEqual(self.emu.swt.registers.mcr.wen, 1)
         self.assertEqual(self.emu.swt.watchdog.running(), True)
 
-        default_extal = self.emu.vw.config.project.MPC5674.FMPLL.extal
+        default_extal = self.emu.config.project.MPC5674.FMPLL.extal
         wdt_time = SWT_TO_DEFAULT / default_extal
 
         # Get the start emulated time

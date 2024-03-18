@@ -3,7 +3,7 @@ import random
 import struct
 import unittest
 
-from cm2350 import intc_exc
+from cm2350 import intc_exc, mmio
 import envi.bits as e_bits
 
 from .helpers import MPC5674_Test
@@ -897,7 +897,8 @@ class MPC5674_eDMA_Test(MPC5674_Test):
             # current PC
             pc = self.emu.getProgramCounter()
             instrs = b'\x60\x00\x00\x00' * cycles
-            self.emu.flash.data[pc:pc+len(instrs)] = instrs
+            with mmio.supervisorMode(self.emu):
+                self.emu.writeMemory(pc, instrs)
 
             # Confirm the two designations have not been written to yet by the
             # DMA transfer

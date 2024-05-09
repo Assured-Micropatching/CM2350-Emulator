@@ -996,6 +996,10 @@ class FLASH(ppc_peripherals.Module, mmio.MMIO_DEVICE):
     def __init__(self, emu, filename=None):
         ppc_peripherals.Module.__init__(self, emu, 'FLASH')
 
+        # We do need to save the emulator here rather than the normal "during 
+        # init" time.
+        self.emu = emu
+
         # Empty flash for the moment
         self.data = None
 

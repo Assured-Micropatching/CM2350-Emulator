@@ -86,7 +86,13 @@ class e200INTC(Module):
         # Default priority level
         self.curlvl = INTC_LEVEL_NONE
 
-    def msrUpdated(self, emu, op):
+    def msrUpdated(self, value=None):
+        # the exception handling routines expect the MSR register to be updated 
+        # with the new register value already, if the updated value is provided 
+        # by parameter update the register now
+        if value is not None:
+            self.emu.setRegister(ppcregs.REG_MSR, value)
+
         updated = False
 
         # Re-evaluate any saved exceptions to see if they can be processed now

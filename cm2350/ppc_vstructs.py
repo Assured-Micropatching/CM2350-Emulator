@@ -1681,8 +1681,14 @@ class PpcSprCallbackWrapper:
 
     def write(self, emu, value):
         """
-        BitFieldSPR.write() compatible function.
+        BitFieldSPR.write() compatible function
         """
+        # Some handlers may accept the new value as a parameter, some may expect 
+        # it to be in the register already
         if self._write:
-            value = self._write(value)
+            new_value = self._write(value)
+
+            # Update with the modified value if one was returned
+            if new_value is not None:
+                value = new_value
         emu.setRegister(self._reg, value)

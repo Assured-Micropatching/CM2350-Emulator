@@ -840,13 +840,12 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
         """
         self.processIO()
 
-        pc = self.getProgramCounter()
-
         try:
             # See if there are any exceptions that need to start being handled
             self.mcu_intc.checkException()
 
             # do normal opcode parsing and execution
+            pc = self.getProgramCounter()
             op = self.parseOpcode(pc)
 
             # TODO: check MSR for FP (MSR_FP_MASK) and SPE (MSR_SPE_MASK)
@@ -888,6 +887,7 @@ class PPC_e200z7(mmio.ComplexMemoryMap, vimp_emu.WorkspaceEmulator,
             self.gdbstub.handleInterrupts(exc)
 
         except (envi.UnsupportedInstruction, envi.InvalidInstruction) as exc:
+            pc = self.getProgramCounter()
             logger.exception('Unsupported Instruction 0x%x', pc)
 
             # Translate the standard envi exception into the PPC-specific

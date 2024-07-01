@@ -86,7 +86,9 @@ class e200INTC(Module):
         # Default priority level
         self.curlvl = INTC_LEVEL_NONE
 
-    def msrUpdated(self, emu, op):
+    def msrUpdated(self, value):
+        self.emu.setRegister(ppcregs.REG_IVPR, value)
+
         updated = False
 
         # Re-evaluate any saved exceptions to see if they can be processed now
@@ -101,7 +103,7 @@ class e200INTC(Module):
             self.pending.sort(key=operator.attrgetter('prio'))
             self.hasInterrupt = self.curlvl > self.pending[0].prio
 
-        return None
+        return value
 
     def queueException(self, exception):
         '''
